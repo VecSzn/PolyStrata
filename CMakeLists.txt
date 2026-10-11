@@ -1689,6 +1689,13 @@ if((STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND STRATA_NATIVE_EXPERTS AND NOT S
   target_link_libraries(poly_expert_parity PRIVATE strata_poly_mmq strata_kernels ggml-cpu ggml-base
                                                   ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
                                                   Threads::Threads)
+  # INT8 KV cache attention parity test vs FP16 ground truth
+  add_executable(poly_attn_parity src/poly/attn_int8_test.cpp src/poly/kernels.cu)
+  target_include_directories(poly_attn_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                      ${_strata_gpu_include_directories})
+  target_link_libraries(poly_attn_parity PRIVATE strata_kernels
+                                                ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
+                                                Threads::Threads)
   # the pool of the CPU experts, without a model
   add_executable(poly_workers_test src/poly/workers_test.cpp src/poly/cpu_experts.cpp)
   target_include_directories(poly_workers_test PRIVATE ${_strata_gg}/include)

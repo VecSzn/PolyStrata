@@ -56,6 +56,10 @@ private:
         Dev wq, wk, wv, q_norm, k_norm;
         uint16_t* keys = nullptr;   ///< max_context * n_kv * head_dim, fp16
         uint16_t* vals = nullptr;
+        int8_t* keys_q8 = nullptr;  ///< max_context * n_kv * head_dim, int8
+        int8_t* vals_q8 = nullptr;
+        uint16_t* keys_scale = nullptr; ///< max_context * n_kv * (head_dim / 64), fp16
+        uint16_t* vals_scale = nullptr;
         Dev sh_gate_inp;   ///< the shared expert's gate
     };
 
@@ -83,6 +87,7 @@ private:
     float *qg_ = nullptr, *q_ = nullptr, *kraw_ = nullptr, *k_ = nullptr, *v_ = nullptr, *att_ = nullptr,
           *score_ = nullptr, *sg_ = nullptr;
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
+    uint16_t *kdequant_ = nullptr, *vdequant_ = nullptr; ///< prompt batch int8 dequantization scratch
 
 };
 
