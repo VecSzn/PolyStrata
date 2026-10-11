@@ -1,4 +1,4 @@
-﻿# Strata Engine - top-level build (P1.S1).
+# Strata Engine - top-level build (P1.S1).
 #
 # Targets (phase-1 Ă‚Â§P1.S1): `strata_artifact` (no CUDA dependency), `tests`.  `strata_plan` and the C++
 # `strata-pack` are added when their sources exist - a target with no sources would make the build graph
@@ -1630,7 +1630,18 @@ endif()
 #
 # A second engine beside `strata`.  It shares the quantized matvec kernels and the GGUF reader, and takes the
 # CPU experts' dot products from ggml-cpu.
-if(STRATA_ENABLE_CUDA AND STRATA_NATIVE_EXPERTS AND NOT STRATA_ENABLE_HIP AND NOT STRATA_HIP_GFX906)
+if((STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND STRATA_NATIVE_EXPERTS AND NOT STRATA_HIP_GFX906)
+  if(NOT _strata_gg)
+    if(STRATA_GGML_DIR)
+      set(_strata_gg "${STRATA_GGML_DIR}/ggml")
+    else()
+      set(_strata_gg "${strata_llamacpp_SOURCE_DIR}/ggml")
+    endif()
+  endif()
+  if(NOT _strata_mmq)
+    set(_strata_mmq "${_strata_gg}/src/ggml-cuda")
+  endif()
+
   # The prompt path's quantized products: llama.cpp's MMQ kernels (ggml-cuda, MIT) for the types the model's
   # GGUFs keep their matrices in (the list in src/poly/mmq.cu), from the checkout strata_mmq is compiled from and
   # with the same host symbols.  A library of its own, so that what `strata` multiplies with MMQ stays as it is.
@@ -1639,15 +1650,26 @@ if(STRATA_ENABLE_CUDA AND STRATA_NATIVE_EXPERTS AND NOT STRATA_ENABLE_HIP AND NO
              iq4_xs)
     list(APPEND _strata_poly_mmq_instances ${_strata_mmq}/template-instances/mmq-instance-${_t}.cu)
   endforeach()
+  if(STRATA_ENABLE_HIP)
+    set_source_files_properties(${_strata_mmq}/quantize.cu ${_strata_poly_mmq_instances}
+                                PROPERTIES LANGUAGE HIP)
+  endif()
   add_library(strata_poly_mmq STATIC src/poly/mmq.cu src/prefill/ggml_cuda_host.cu ${_strata_mmq}/quantize.cu
               ${_strata_poly_mmq_instances})
   target_include_directories(strata_poly_mmq PRIVATE ${_strata_gg}/include ${_strata_gg}/src ${_strata_mmq}
                                                     ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  if(STRATA_ENABLE_HIP)
+    target_compile_definitions(strata_poly_mmq PRIVATE GGML_USE_HIP=1)
+  endif()
   target_compile_options(strata_poly_mmq PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda -use_fast_math>)
   if(MSVC)
     target_compile_options(strata_poly_mmq PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/bigobj>)
   endif()
-  target_link_libraries(strata_poly_mmq PUBLIC ggml-base ${_strata_gpu_runtime_target})
+  if(STRATA_ENABLE_HIP)
+    target_link_libraries(strata_poly_mmq PUBLIC ggml-base hip::host roc::hipblas)
+  else()
+    target_link_libraries(strata_poly_mmq PUBLIC ggml-base ${_strata_gpu_runtime_target})
+  endif()
 
   add_executable(strata-poly src/poly/main.cpp src/poly/engine.cpp src/poly/glm5next.cpp src/poly/qwen35.cpp
                             src/poly/gemma4.cpp src/poly/cpu_experts.cpp src/poly/kernels.cu
@@ -1655,8 +1677,11 @@ if(STRATA_ENABLE_CUDA AND STRATA_NATIVE_EXPERTS AND NOT STRATA_ENABLE_HIP AND NO
   target_include_directories(strata-poly PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
   # the driver's virtual memory calls: the attention caches grow with the conversation
   target_link_libraries(strata-poly PRIVATE strata_poly_mmq strata_kernels strata_spec ggml-cpu ggml-base
-                                           ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target} CUDA::cuda_driver
+                                           ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
                                            Threads::Threads)
+  if(TARGET CUDA::cuda_driver)
+    target_link_libraries(strata-poly PRIVATE CUDA::cuda_driver)
+  endif()
   # needs the model file, so it is run by hand: poly_expert_parity MODEL.gguf
   add_executable(poly_expert_parity src/poly/expert_parity.cpp src/poly/cpu_experts.cpp src/poly/kernels.cu)
   target_include_directories(poly_expert_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include

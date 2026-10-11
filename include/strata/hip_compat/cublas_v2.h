@@ -43,6 +43,7 @@ inline rocblas_status cublasGemmEx(rocblas_handle h, rocblas_operation trans_a,
 #define CUBLAS_COMPUTE_32F HIPBLAS_COMPUTE_32F
 #define CUBLAS_DEFAULT_MATH HIPBLAS_DEFAULT_MATH
 #define CUBLAS_GEMM_DEFAULT HIPBLAS_GEMM_DEFAULT
+#define CUBLAS_GEMM_DEFAULT_TENSOR_OP HIPBLAS_GEMM_DEFAULT
 #define CUBLAS_OP_N HIPBLAS_OP_N
 #define CUBLAS_OP_T HIPBLAS_OP_T
 #define CUBLAS_STATUS_SUCCESS HIPBLAS_STATUS_SUCCESS
@@ -52,9 +53,12 @@ inline rocblas_status cublasGemmEx(rocblas_handle h, rocblas_operation trans_a,
 #define cublasCreate hipblasCreate
 #define cublasDestroy hipblasDestroy
 #define cublasGemmEx hipblasGemmEx
+#define cublasGemmStridedBatchedEx hipblasGemmStridedBatchedEx
 #define cublasHandle_t hipblasHandle_t
 #define cublasSetMathMode hipblasSetMathMode
 #define cublasSetStream hipblasSetStream
 #define cublasSetWorkspace hipblasSetWorkspace
+#define cublasSgemm hipblasSgemm
+#define cublasSgemmStridedBatched hipblasSgemmStridedBatched
 #define cublasStatus_t hipblasStatus_t
 #endif
