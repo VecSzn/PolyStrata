@@ -729,6 +729,7 @@ void usage() {
     std::fprintf(stderr,
                  "usage: strata-poly --model FILE.gguf (--serve | --tokens ID,ID,... [--max-new N])\n"
                  "  --max-context N        tokens the attention caches hold (default 8192)\n"
+                 "  --kv f16|int8          KV cache data type (default: f16; int8 saves ~50%% KV VRAM)\n"
                  "  --threads N            CPU threads for the experts that are not in VRAM (default: all usable)\n"
                  "  --vram-reserve-mib N   VRAM left free beside the expert cache (default: a sixteenth of the\n"
                  "                         card, 512 to 1024)\n"
@@ -821,6 +822,13 @@ int main(int argc, char** argv) {
         if (a == "--model") o.model = val();
         else if (a == "--serve") want_serve = true;
         else if (a == "--max-context") o.max_context = std::atoi(val());
+        else if (a == "--kv") {
+            o.kv = val();
+            if (o.kv != "f16" && o.kv != "int8") {
+                std::fprintf(stderr, "strata-poly: --kv must be f16 or int8\n");
+                return 2;
+            }
+        }
         else if (a == "--threads") o.threads = std::atoi(val());
         else if (a == "--vram-reserve-mib") o.vram_reserve_mib = std::atoi(val());
         else if (a == "--expert-profile") o.profile = val();

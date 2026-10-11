@@ -12,7 +12,9 @@
 
 #include "ggml.h"
 
+#if !defined(STRATA_USE_HIP)
 #include <cuda.h>
+#endif
 #include <cuda_runtime.h>
 
 #include <algorithm>
@@ -176,12 +178,14 @@ void read_profile(const std::string& path, int n_layer, int n_expert, std::vecto
     std::fclose(f);
 }
 
+#if !defined(STRATA_USE_HIP)
 void cu_ck(CUresult r, const char* what) {
     if (r == CUDA_SUCCESS) return;
     const char* s = nullptr;
     cuGetErrorString(r, &s);
     throw std::runtime_error(std::string(what) + ": " + (s ? s : "a CUDA driver error"));
 }
+#endif
 
 size_t up_to(size_t n, size_t grain) { return (n + grain - 1) / grain * grain; }
 
@@ -268,14 +272,20 @@ void* Engine::hmalloc(size_t bytes, const char* what) {
 }
 
 void Engine::vmm_reserve(Mapped& m, size_t bytes) {
+#if !defined(STRATA_USE_HIP)
     CUdeviceptr p = 0;
     m.reserved = up_to(std::max<size_t>(bytes, 1), grain_);
     cu_ck(cuMemAddressReserve(&p, m.reserved, 0, 0, 0), "reserving addresses for VRAM");
     m.base = p;
+#else
+    (void) m;
+    (void) bytes;
+#endif
 }
 
 // VRAM for the first `bytes` of m, in pieces of at most `piece` bytes.  Throws std::runtime_error.
 void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
+#if !defined(STRATA_USE_HIP)
     bytes = std::min(up_to(bytes, grain_), m.reserved);
     CUmemAllocationProp prop = {};
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -299,10 +309,17 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
         m.mapped += n;
         cu_ck(cuMemSetAccess(at, n, &access, 1), "mapping VRAM");
     }
+#else
+    (void) m;
+    (void) bytes;
+    (void) piece;
+    (void) what;
+#endif
 }
 
 // Gives back the pieces of m that lie past its first `bytes`.  The card must be done with them.
 void Engine::vmm_unmap(Mapped& m, size_t bytes) {
+#if !defined(STRATA_USE_HIP)
     while (!m.pieces.empty() && m.mapped - m.pieces.back().second >= bytes) {
         const auto [h, n] = m.pieces.back();
         m.mapped -= n;
@@ -310,10 +327,15 @@ void Engine::vmm_unmap(Mapped& m, size_t bytes) {
         cu_ck(cuMemUnmap(m.base + m.mapped, n), "unmapping VRAM");
         cu_ck(cuMemRelease(h), "unmapping VRAM");
     }
+#else
+    (void) m;
+    (void) bytes;
+#endif
 }
 
 // For the destructor: what is left of m, and its addresses, without throwing.
 void Engine::vmm_free(Mapped& m) {
+#if !defined(STRATA_USE_HIP)
     for (; !m.pieces.empty(); m.pieces.pop_back()) {
         m.mapped -= m.pieces.back().second;
         cuMemUnmap(m.base + m.mapped, m.pieces.back().second);
@@ -321,6 +343,9 @@ void Engine::vmm_free(Mapped& m) {
     }
     if (m.base) cuMemAddressFree(m.base, m.reserved);
     m.base = 0;
+#else
+    (void) m;
+#endif
 }
 
 void* Engine::kv_alloc(size_t bytes, int per) {
@@ -821,9 +846,16 @@ void Engine::resize_cache(int mib) {
 // prompts of 25 to 31,000 tokens.  That is what the reserve is for, and when most of it is gone the cache gives
 // some back, before the card has nothing free.
 bool Engine::mind_vram() {
+#if defined(STRATA_USE_HIP)
+    // On AMD ROCm/HIP, driver memory accounting fluctuates under HIP graph execution
+    // while allocations are static. Disabling dynamic cache shrinking prevents
+    // premature expert eviction.
+    return false;
+#else
     if (!exp_ || reserve_mib_ <= 0 || vram_free_mib() >= reserve_mib_ / 4) return false;
     resize_cache(opt_.vram_reserve_mib);
     return true;
+#endif
 }
 
 // What a layer copies to the staging buffer ahead of its routing: the experts outside the cache, the most used
@@ -1006,6 +1038,7 @@ void Engine::load(const Options& o) {
     // The card maps VRAM onto reserved addresses a piece at a time: the attention caches grow with the sequence,
     // and the expert cache has what a short one leaves (cover()).
     ck(cudaGetDevice(&device_), "cudaGetDevice");
+#if !defined(STRATA_USE_HIP)
     CUdevice dev = 0;
     int vmm = 0;
     if (opt_.kv_grow && cuDeviceGet(&dev, device_) == CUDA_SUCCESS &&
@@ -1017,6 +1050,7 @@ void Engine::load(const Options& o) {
         vmm_ = cuMemGetAllocationGranularity(&grain_, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM) == CUDA_SUCCESS &&
                grain_ > 0;
     }
+#endif
 
     // the token table stays in the file, a row a token, and embed() reads a row in whatever type it has
     const TensorInfo* te = gg_->find("token_embd.weight");

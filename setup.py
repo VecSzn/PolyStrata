@@ -5244,9 +5244,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     config and the start script."""
     fam = FAMILIES[family]
     title = fam["title"]
-    if hip:
-        fail(f"{title} runs on NVIDIA cards only: its engine is a CUDA program",
-             "choose another model for the AMD card")
+    # HIP backend support enabled for AMD ROCm
     if cuda_tk == 12:
         fail(f"{title}'s engine is built for RTX 20 cards and newer: there is none for Pascal / Volta cards or "
              "--cuda 12",

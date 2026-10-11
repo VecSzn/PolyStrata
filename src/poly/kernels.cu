@@ -1,6 +1,7 @@
 // src/poly/kernels.cu - see the header.  The reference for every formula is llama.cpp's graph of the model and the
 // ggml ops it builds.  Where a kernel takes several tokens, blockIdx.y is the token unless it says otherwise.
 #include "strata/poly/kernels.hpp"
+#include "strata/kernels/f16_bits.hpp"
 
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
@@ -14,6 +15,9 @@
 
 namespace strata::poly {
 namespace {
+
+using strata::kernels::f16_from_f32;
+using strata::kernels::f32_from_f16;
 
 constexpr int WARP = 32;
 constexpr int HC = 4;   // hyper-connection streams; the model's hc_mult, checked at load
@@ -423,6 +427,83 @@ __global__ void store_f16_at_kernel(const float* __restrict__ x, half* __restric
     if (i >= n * rows) return;
     const long long row = ring > 0 ? (*at + i / n) % ring : *at + i / n;
     cache[size_t(row) * n + i % n] = __float2half(x[i]);
+}
+
+__global__ void store_int8_kernel(const float* __restrict__ x, int8_t* __restrict__ cache_q,
+                                  uint16_t* __restrict__ cache_scale, int kv_heads, int head_dim,
+                                  long long pos, size_t n_groups) {
+    const size_t grp = blockIdx.x;
+    if (grp >= n_groups) return;
+    const int G = head_dim / 64;
+    const size_t r = grp / (size_t(kv_heads) * G);
+    const int rem = int(grp % (size_t(kv_heads) * G));
+    const int h = rem / G, g = rem % G;
+    const int t = threadIdx.x;
+
+    const size_t in_idx = ((r * size_t(kv_heads) + h) * head_dim) + g * 64 + t;
+    const float val = x[in_idx];
+
+    float a = fabsf(val);
+    for (int o = 16; o > 0; o >>= 1) a = fmaxf(a, __shfl_xor_sync(0xffffffffu, a, o));
+    __shared__ float s_max[2];
+    if ((t & 31) == 0) s_max[t >> 5] = a;
+    __syncthreads();
+    const float amax = fmaxf(s_max[0], s_max[1]);
+    const uint16_t sbits = f16_from_f32(amax / 127.0f);
+    const float sf = f32_from_f16(sbits);
+
+    int q = 0;
+    if (sf > 0.0f) {
+        q = __float2int_rn(val / sf);
+        q = q < -127 ? -127 : (q > 127 ? 127 : q);
+    }
+
+    const long long row = pos + r;
+    const size_t q_idx = ((size_t(row) * kv_heads + h) * head_dim) + g * 64 + t;
+    cache_q[q_idx] = (int8_t) q;
+    if (t == 0) {
+        const size_t scale_idx = ((size_t(row) * kv_heads + h) * G) + g;
+        cache_scale[scale_idx] = sbits;
+    }
+}
+
+__global__ void store_int8_at_kernel(const float* __restrict__ x, int8_t* __restrict__ cache_q,
+                                     uint16_t* __restrict__ cache_scale, int kv_heads, int head_dim,
+                                     const long long* __restrict__ at, int ring, size_t n_groups) {
+    const size_t grp = blockIdx.x;
+    if (grp >= n_groups) return;
+    const int G = head_dim / 64;
+    const size_t r = grp / (size_t(kv_heads) * G);
+    const int rem = int(grp % (size_t(kv_heads) * G));
+    const int h = rem / G, g = rem % G;
+    const int t = threadIdx.x;
+
+    const size_t in_idx = ((r * size_t(kv_heads) + h) * head_dim) + g * 64 + t;
+    const float val = x[in_idx];
+
+    float a = fabsf(val);
+    for (int o = 16; o > 0; o >>= 1) a = fmaxf(a, __shfl_xor_sync(0xffffffffu, a, o));
+    __shared__ float s_max[2];
+    if ((t & 31) == 0) s_max[t >> 5] = a;
+    __syncthreads();
+    const float amax = fmaxf(s_max[0], s_max[1]);
+    const uint16_t sbits = f16_from_f32(amax / 127.0f);
+    const float sf = f32_from_f16(sbits);
+
+    int q = 0;
+    if (sf > 0.0f) {
+        q = __float2int_rn(val / sf);
+        q = q < -127 ? -127 : (q > 127 ? 127 : q);
+    }
+
+    const long long cur_pos = *at;
+    const long long row = ring > 0 ? (cur_pos + r) % ring : (cur_pos + r);
+    const size_t q_idx = ((size_t(row) * kv_heads + h) * head_dim) + g * 64 + t;
+    cache_q[q_idx] = (int8_t) q;
+    if (t == 0) {
+        const size_t scale_idx = ((size_t(row) * kv_heads + h) * G) + g;
+        cache_scale[scale_idx] = sbits;
+    }
 }
 
 // How many cache rows token `tok` of a call from position pos attends to: every row up to its own while it is
@@ -1144,6 +1225,175 @@ attn_value_t_kernel(const float* __restrict__ wt, const half* __restrict__ vcach
     }
 }
 
+template <int N>
+__device__ __forceinline__ void attn_scores_int8(const float* __restrict__ q,
+                                                 const int8_t* __restrict__ k_code,
+                                                 const uint16_t* __restrict__ k_scale,
+                                                 float* __restrict__ score, int n_keys, int dim, float scale) {
+    static_assert(SCORE_VALUES == 4, "a step is four int8 codes of the key and a float4 of a query");
+    const int lane = threadIdx.x % WARP;
+    const float* qi[N];
+    float acc[N];
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+        qi[i] = q + size_t(i) * dim;
+        acc[i] = 0.0f;
+    }
+    for (int d = SCORE_VALUES * lane; d < dim; d += SCORE_VALUES * WARP) {
+        const char4 c = *reinterpret_cast<const char4*>(k_code + d);
+        const float sf = f32_from_f16(k_scale[d / 64]);
+        const float x0 = (float) c.x * sf;
+        const float x1 = (float) c.y * sf;
+        const float x2 = (float) c.z * sf;
+        const float x3 = (float) c.w * sf;
+#pragma unroll
+        for (int i = 0; i < N; ++i) {
+            const float4 y = *reinterpret_cast<const float4*>(qi[i] + d);
+            acc[i] += y.x * x0 + y.y * x1 + y.z * x2 + y.w * x3;
+        }
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+        for (int off = WARP / 2; off > 0; off >>= 1) acc[i] += __shfl_down_sync(0xffffffffu, acc[i], off);
+        if (lane == 0) score[size_t(i) * n_keys] = acc[i] * scale;
+    }
+}
+
+template <int N>
+__device__ __forceinline__ void attn_scores_int8_by(int n, const float* __restrict__ q,
+                                                    const int8_t* __restrict__ k_code,
+                                                    const uint16_t* __restrict__ k_scale,
+                                                    float* __restrict__ score, int n_keys, int dim, float scale) {
+    for (; n >= N; n -= N, q += size_t(N) * dim, score += size_t(N) * n_keys)
+        attn_scores_int8<N>(q, k_code, k_scale, score, n_keys, dim, scale);
+    if constexpr (N > 1) attn_scores_int8_by<N / 2>(n, q, k_code, k_scale, score, n_keys, dim, scale);
+}
+
+__global__ void attn_score_int8_kernel(const float* __restrict__ q, const int8_t* __restrict__ kcache_q,
+                                       const uint16_t* __restrict__ kcache_scale,
+                                       float* __restrict__ score, int n_keys, int dim, int n_head, int kv_heads,
+                                       long long pos, int first, int tokens, float scale, int window, int ring,
+                                       long long last, const long long* __restrict__ at) {
+    const int unit = blockIdx.x * (blockDim.x / WARP) + threadIdx.x / WARP;
+    const int key = unit / kv_heads, g = unit % kv_heads, per = n_head / kv_heads;
+    long long lo;
+    if (key >= attn_span((at ? *at : pos) + first, tokens, window, last, &lo)) return;
+    const long long row = ring > 0 ? (lo + key) % ring : lo + key;
+    const int8_t* k_code = kcache_q + (size_t(row) * kv_heads + g) * dim;
+    const uint16_t* k_scale = kcache_scale + (size_t(row) * kv_heads + g) * (dim / 64);
+    q += (size_t(first) * n_head + g * per) * dim;
+    score += size_t(g) * per * n_keys + key;
+    for (int t = 0; t < tokens; ++t, q += size_t(n_head) * dim, score += size_t(n_head) * n_keys)
+        attn_scores_int8_by<SCORE_QUERIES>(per, q, k_code, k_scale, score, n_keys, dim, scale);
+}
+
+template <int N>
+__device__ __forceinline__ void attn_values_int8(const float* __restrict__ w, const int8_t* __restrict__ v_code,
+                                                 const uint16_t* __restrict__ v_scale, size_t width_q,
+                                                 size_t width_s, long long row, int ring, int span, float* sums) {
+    float acc[N];
+#pragma unroll
+    for (int i = 0; i < N; ++i) acc[i] = 0.0f;
+    v_code += size_t(row) * width_q;
+    v_scale += size_t(row) * width_s;
+    for (int j = threadIdx.x / VALUE_DIMS; j < span; j += VALUE_SHARES) {
+        const float sf = f32_from_f16(*v_scale);
+        const float x = (float)(*v_code) * sf, weight = w[j];
+#pragma unroll
+        for (int i = 0; i < N; ++i) acc[i] += __shfl_sync(0xffffffffu, weight, i) * x;
+        v_code += VALUE_SHARES * width_q;
+        v_scale += VALUE_SHARES * width_s;
+        row += VALUE_SHARES;
+        if (ring > 0 && row >= ring) {
+            row -= ring;
+            v_code -= size_t(ring) * width_q;
+            v_scale -= size_t(ring) * width_s;
+        }
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) sums[i] = acc[i];
+}
+
+template <int N>
+__device__ __forceinline__ void attn_values_int8_for(int n, const float* __restrict__ w,
+                                                     const int8_t* __restrict__ v_code,
+                                                     const uint16_t* __restrict__ v_scale,
+                                                     size_t width_q, size_t width_s,
+                                                     long long row, int ring, int span, float* sums) {
+    if constexpr (N > 1)
+        if (n <= N / 2) return attn_values_int8_for<N / 2>(n, w, v_code, v_scale, width_q, width_s, row, ring, span, sums);
+    attn_values_int8<N>(w, v_code, v_scale, width_q, width_s, row, ring, span, sums);
+}
+
+__global__ void attn_value_int8_kernel(const float* __restrict__ score, const int8_t* __restrict__ vcache_q,
+                                       const uint16_t* __restrict__ vcache_scale,
+                                       float* __restrict__ out, int n_keys, int dim, int n_head, int kv_heads,
+                                       long long pos, int first, int tokens, int window, int ring, long long last,
+                                       const long long* __restrict__ at) {
+    static_assert(VALUE_DIMS == WARP && VALUE_QUERIES <= WARP, "a warp is a share and reads a query's weight a lane");
+    __shared__ float share[VALUE_QUERIES][VALUE_SHARES][VALUE_DIMS];
+    const int per = n_head / kv_heads, dims = (dim + VALUE_DIMS - 1) / VALUE_DIMS;
+    const int g = blockIdx.x / dims, q0 = blockIdx.y * VALUE_QUERIES;
+    const int live = min(VALUE_QUERIES, tokens * per - q0);
+    const int lane = threadIdx.x % VALUE_DIMS, s = threadIdx.x / VALUE_DIMS;
+    const int d = (blockIdx.x % dims) * VALUE_DIMS + lane;
+    const long long p = (at ? *at : pos) + first;
+    long long lo;
+    const int span = attn_span(p, tokens, window, last, &lo);
+    const int mine = q0 + min(lane % VALUE_QUERIES, live - 1);
+    float sums[VALUE_QUERIES];
+    const size_t width_q = size_t(kv_heads) * dim;
+    const size_t width_s = size_t(kv_heads) * (dim / 64);
+    const int d_clamped = min(d, dim - 1);
+    const int g_group = d_clamped / 64;
+    attn_values_int8_for<VALUE_QUERIES>(live, score + (size_t(mine / per) * n_head + g * per + mine % per) * n_keys,
+                                        vcache_q + size_t(g) * dim + d_clamped,
+                                        vcache_scale + size_t(g) * (dim / 64) + g_group,
+                                        width_q, width_s,
+                                        ring > 0 ? (lo + s) % ring : lo + s, ring, span, sums);
+    for (int i = 0; i < live; ++i) {
+        long long own;
+        attn_rows(p + (q0 + i) / per, window, last, &own);
+        share[i][(s + VALUE_SHARES - int((own - lo) % VALUE_SHARES)) % VALUE_SHARES][lane] = sums[i];
+    }
+    __syncthreads();
+    if (s != 0 || d >= dim) return;
+    for (int i = 0; i < live; ++i) {
+        float sum = share[i][0][lane];
+        for (int k = 1; k < VALUE_SHARES; ++k) sum += share[i][k][lane];
+        const int query = q0 + i;
+        out[((size_t(first) + query / per) * n_head + g * per + query % per) * dim + d] = sum;
+    }
+}
+
+__global__ void dequant_q8_to_f16_kernel(const int8_t* __restrict__ src_q,
+                                         const uint16_t* __restrict__ src_scale,
+                                         half* __restrict__ dst,
+                                         int m, int kv_heads, int head_dim,
+                                         long long row0, int ring) {
+    const int per = head_dim / 4;
+    const int total = m * kv_heads * per;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= total) return;
+    const int r = i / (kv_heads * per);
+    const int rem = i % (kv_heads * per);
+    const int h = rem / per;
+    const int q4 = rem % per;
+    const int d = q4 * 4;
+    const int G = head_dim / 64;
+    const long long row = ring > 0 ? (row0 + r) % ring : row0 + r;
+    const size_t q_idx = (size_t(row) * kv_heads + h) * head_dim + d;
+    const size_t scale_idx = (size_t(row) * kv_heads + h) * G + d / 64;
+    const float sf = f32_from_f16(src_scale[scale_idx]);
+    const char4 c = *reinterpret_cast<const char4*>(src_q + q_idx);
+    ushort4 out;
+    out.x = f16_from_f32((float) c.x * sf);
+    out.y = f16_from_f32((float) c.y * sf);
+    out.z = f16_from_f32((float) c.z * sf);
+    out.w = f16_from_f32((float) c.w * sf);
+    const size_t dst_idx = (size_t(r) * kv_heads + h) * head_dim + d;
+    *reinterpret_cast<ushort4*>(dst + dst_idx) = out;
+}
 // A chunk's queries and its results lie in two orders: the engine's (token, head) and the one a product per
 // group of heads takes (group, token, head of the group).  This is where the engine's `row` lies in the second.
 __device__ __forceinline__ size_t attn_by_group(int row, int n_head, int kv_heads, int tokens) {
@@ -1538,6 +1788,24 @@ void store_f16_at(const float* x, uint16_t* cache, int n, const long long* at, i
     store_f16_at_kernel<<<grid(size_t(n) * rows, 256), 256, 0, cs(stream)>>>(x, (half*) cache, n, rows, at, ring);
 }
 
+void store_int8(const float* x, int8_t* cache_q, uint16_t* cache_scale, int kv_heads, int head_dim, int64_t pos,
+                int rows, void* stream) {
+    if (head_dim % 64 != 0) throw std::invalid_argument("store_int8: head_dim must be multiple of 64");
+    const int G = head_dim / 64;
+    const size_t n_groups = (size_t) rows * kv_heads * G;
+    if (n_groups == 0) return;
+    store_int8_kernel<<<n_groups, 64, 0, cs(stream)>>>(x, cache_q, cache_scale, kv_heads, head_dim, pos, n_groups);
+}
+
+void store_int8_at(const float* x, int8_t* cache_q, uint16_t* cache_scale, int kv_heads, int head_dim,
+                   const long long* at, int rows, int ring, void* stream) {
+    if (head_dim % 64 != 0) throw std::invalid_argument("store_int8_at: head_dim must be multiple of 64");
+    const int G = head_dim / 64;
+    const size_t n_groups = (size_t) rows * kv_heads * G;
+    if (n_groups == 0) return;
+    store_int8_at_kernel<<<n_groups, 64, 0, cs(stream)>>>(x, cache_q, cache_scale, kv_heads, head_dim, at, ring, n_groups);
+}
+
 void dsa_attend(void* blas, const float* q, const uint16_t* cache, const int32_t* sel, int sel_stride, int top_rows,
                 int kpool, int64_t pos, int rows, int dense_rows, float* keys, float* score, int chunk, float* out,
                 int rank, int n_head, float scale, void* stream) {
@@ -1767,6 +2035,91 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
                 attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, shrink, dim, false);
             blas_ck(cublasGemmStridedBatchedEx(h, CUBLAS_OP_N, CUBLAS_OP_N, dim, (int) cols, m, &one,
                                                (const half*) vcache + size_t(row) * width, CUDA_R_16F, width, dim,
+                                               weight, CUDA_R_16F, m, cols * m, k0 > 0 ? &one : &zero, og, CUDA_R_32F,
+                                               dim, cols * dim, kv_heads, CUBLAS_COMPUTE_32F,
+                                               CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                    "attention values");
+        }
+        attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, sum, dim, true);
+        attn_ungroup_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(
+            og, out + size_t(first) * n_head * dim, dim, n_head, kv_heads, c);
+    }
+}
+
+void attend_int8(const float* q, const int8_t* kcache_q, const uint16_t* kcache_scale,
+                 const int8_t* vcache_q, const uint16_t* vcache_scale, int64_t pos, int rows, float* score,
+                 int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window,
+                 int ring, bool whole, const long long* at, int room) {
+    if (at && (whole || room < 1)) throw std::invalid_argument("attend_int8: a position on the card needs its room");
+    if (dim % SCORE_VALUES || uintptr_t(q) % (SCORE_VALUES * sizeof(float)) || uintptr_t(kcache_q) % 4)
+        throw std::invalid_argument("attend_int8: queries and keys are read four values at a time");
+    const long long last = whole ? pos + rows - 1 : -1;
+    const int per = n_head / kv_heads;
+    for (int first = 0; first < rows; first += chunk) {
+        const int c = std::min(chunk, rows - first);
+        const long long p = pos + first, lo = window > 0 && p >= window ? p - window + 1 : 0;
+        const int keys = at ? room : int((whole ? last : p + c - 1) - lo) + 1;
+        attn_score_int8_kernel<<<grid(size_t(keys) * kv_heads, SCORE_WARPS), SCORE_WARPS * WARP, 0, cs(stream)>>>(
+            q, kcache_q, kcache_scale, score, keys, dim, n_head, kv_heads, (long long) pos, first, c, scale, window,
+            ring, last, at);
+        attn_softmax_kernel<<<dim3(n_head, c), 256, 0, cs(stream)>>>(score, keys, (long long) pos, first, c, window,
+                                                                    last, at, nullptr, per);
+        attn_value_int8_kernel<<<dim3(kv_heads * grid(dim, VALUE_DIMS), grid(c * per, VALUE_QUERIES)),
+                                 VALUE_DIMS * VALUE_SHARES, 0, cs(stream)>>>(
+            score, vcache_q, vcache_scale, out, keys, dim, n_head, kv_heads, (long long) pos, first, c, window, ring,
+            last, at);
+    }
+}
+
+void attend_batch_int8(void* blas, const float* q, const int8_t* kcache_q, const uint16_t* kcache_scale,
+                       const int8_t* vcache_q, const uint16_t* vcache_scale, int64_t pos, int rows,
+                       float* score, size_t score_floats, float* work, uint16_t* kdequant, uint16_t* vdequant,
+                       float* out, int dim, int n_head, int kv_heads,
+                       float scale, void* stream, int window, int ring, bool whole) {
+    const cublasHandle_t h = (cublasHandle_t) blas;
+    const float one = 1.0f, zero = 0.0f;
+    const int per = n_head / kv_heads, width = kv_heads * dim;
+    const long long last = whole ? pos + rows - 1 : -1;
+    const size_t cells = score_floats / 3 * 2;
+    half* weight = (half*) (score + cells);
+    half* k_blk = (half*) kdequant;
+    half* v_blk = (half*) vdequant;
+    for (int first = 0, c = 0; first < rows; first += c) {
+        c = (int) std::min({size_t(rows - first), size_t(65535 / n_head), cells / n_head});
+        const long long p0 = pos + first;
+        const long long lo0 = window > 0 && p0 >= window ? p0 - window + 1 : 0;
+        const int n_keys = int((whole ? last : p0 + c - 1) - lo0) + 1;
+        const size_t heads = size_t(c) * n_head;
+        half* qg = (half*) work;
+        float* og = work + (heads * dim + 1) / 2;
+        float* top = og + heads * dim;
+        float* sum = top + heads;
+        float* shrink = sum + heads;
+        attn_group_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(q + size_t(first) * n_head * dim,
+                                                                                   qg, dim, n_head, kv_heads, c);
+        const long long cols = (long long) c * per;
+        const int fit = (int) (cells / heads);
+        const int block = std::min(fit > 16 ? fit & ~15 : fit, 2048);
+        for (int k0 = 0, m = 0; k0 < n_keys; k0 += m) {
+            const long long row = ring > 0 ? (lo0 + k0) % ring : lo0 + k0;
+            m = (int) std::min<long long>(std::min(block, n_keys - k0), ring > 0 ? ring - row : n_keys);
+            const int total_items = m * kv_heads * (dim / 4);
+            dequant_q8_to_f16_kernel<<<grid(total_items, 256), 256, 0, cs(stream)>>>(
+                kcache_q, kcache_scale, k_blk, m, kv_heads, dim, row, ring);
+            blas_ck(cublasGemmStridedBatchedEx(h, CUBLAS_OP_T, CUBLAS_OP_N, m, (int) cols, dim, &scale,
+                                               k_blk, CUDA_R_16F, width, dim, qg,
+                                               CUDA_R_16F, dim, cols * dim, &zero, score, CUDA_R_32F, m, cols * m,
+                                               kv_heads, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                    "attention scores");
+            attn_softmax_block_kernel<<<c * n_head, 128, 0, cs(stream)>>>(score, weight, m, lo0 + k0, (long long) pos,
+                                                                         first, window, c, per, last, top, sum,
+                                                                         shrink, k0 == 0);
+            if (k0 > 0)
+                attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, shrink, dim, false);
+            dequant_q8_to_f16_kernel<<<grid(total_items, 256), 256, 0, cs(stream)>>>(
+                vcache_q, vcache_scale, v_blk, m, kv_heads, dim, row, ring);
+            blas_ck(cublasGemmStridedBatchedEx(h, CUBLAS_OP_N, CUBLAS_OP_N, dim, (int) cols, m, &one,
+                                               v_blk, CUDA_R_16F, width, dim,
                                                weight, CUDA_R_16F, m, cols * m, k0 > 0 ? &one : &zero, og, CUDA_R_32F,
                                                dim, cols * dim, kv_heads, CUBLAS_COMPUTE_32F,
                                                CUBLAS_GEMM_DEFAULT_TENSOR_OP),

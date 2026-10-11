@@ -62,6 +62,12 @@ void kda_step(float* qkv, float* g1, const float* a, const float* beta, float* s
 void store_f16(const float* x, uint16_t* cache, int n, int64_t pos, int rows, void* stream);
 /// The same from the row the card holds at `at` when the launch runs; with `ring`, a row is its number % ring.
 void store_f16_at(const float* x, uint16_t* cache, int n, const long long* at, int rows, int ring, void* stream);
+/// Stores the tokens' keys or values as int8 codes with fp16 group scales (KV_Q8_GROUP = 64) from row `pos`.
+void store_int8(const float* x, int8_t* cache_q, uint16_t* cache_scale, int kv_heads, int head_dim, int64_t pos,
+                int rows, void* stream);
+/// The same from the row the card holds at `at` when the launch runs; with `ring`, a row is its number % ring.
+void store_int8_at(const float* x, int8_t* cache_q, uint16_t* cache_scale, int kv_heads, int head_dim,
+                   const long long* at, int rows, int ring, void* stream);
 /// Attention over cached latents for the tokens from position `pos`.  q: n_head * rank absorbed queries a token.
 /// The first dense_rows tokens attend to every cache row up to their own.  The others each have a list in sel
 /// (sel_stride apart): top_rows cache rows, then the rows of the pool their own position is still filling.
@@ -173,6 +179,17 @@ void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int6
 void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows,
                   float* score, size_t score_floats, float* work, float* out, int dim, int n_head, int kv_heads,
                   float scale, void* stream, int window = 0, int ring = 0, bool whole = false);
+/// attend() with int8 KV cache and group scales (KV_Q8_GROUP = 64).
+void attend_int8(const float* q, const int8_t* kcache_q, const uint16_t* kcache_scale,
+                 const int8_t* vcache_q, const uint16_t* vcache_scale, int64_t pos, int rows, float* score,
+                 int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window = 0,
+                 int ring = 0, bool whole = false, const long long* at = nullptr, int room = 0);
+/// attend_batch() with int8 KV cache and group scales.
+void attend_batch_int8(void* blas, const float* q, const int8_t* kcache_q, const uint16_t* kcache_scale,
+                       const int8_t* vcache_q, const uint16_t* vcache_scale, int64_t pos, int rows,
+                       float* score, size_t score_floats, float* work, uint16_t* kdequant, uint16_t* vdequant,
+                       float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window = 0,
+                       int ring = 0, bool whole = false);
 /// x = cap * tanh(x / cap).
 void softcap(float* x, size_t n, float cap, void* stream);
 /// The first of the largest of n logits and the softmax's probability of it, summed without the logits more than
