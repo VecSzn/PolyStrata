@@ -846,9 +846,16 @@ void Engine::resize_cache(int mib) {
 // prompts of 25 to 31,000 tokens.  That is what the reserve is for, and when most of it is gone the cache gives
 // some back, before the card has nothing free.
 bool Engine::mind_vram() {
+#if defined(STRATA_USE_HIP)
+    // On AMD ROCm/HIP, driver memory accounting fluctuates under HIP graph execution
+    // while allocations are static. Disabling dynamic cache shrinking prevents
+    // premature expert eviction.
+    return false;
+#else
     if (!exp_ || reserve_mib_ <= 0 || vram_free_mib() >= reserve_mib_ / 4) return false;
     resize_cache(opt_.vram_reserve_mib);
     return true;
+#endif
 }
 
 // What a layer copies to the staging buffer ahead of its routing: the experts outside the cache, the most used
