@@ -19,6 +19,6 @@ DECL_MMQ_CASE(GGML_TYPE_NVFP4);
 
 namespace strata::prefill::mmq {
 void run_nvfp4_w4a8(ggml_backend_cuda_context& ctx, const mmq_args& a, cudaStream_t s) {
-    strata_w4a8_mul_mat_q_case<GGML_TYPE_NVFP4>(ctx, a, s);
+    strata_w4a8_mul_mat_q_case<GGML_TYPE_NVFP4, GGML_PREC_Q8>(ctx, a, s);
 }
 }  // namespace strata::prefill::mmq

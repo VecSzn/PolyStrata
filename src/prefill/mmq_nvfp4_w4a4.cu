@@ -17,7 +17,7 @@
 #include "mmq.cuh"
 #include "quantize.cu"
 
-DECL_MMQ_CASE(GGML_TYPE_NVFP4);
+DECL_MMQ_CASE_W4A4(GGML_TYPE_NVFP4);  // the pinned mmq.cuh's FP4 variant: src1 at FP4, not Q8_1
 
 namespace {
 // 1 when this unit's device code has the FP4 MMA (built for the running card's 12xa); a card without an image
@@ -43,7 +43,7 @@ bool w4a4_available() {
     return ran && h == 1;
 }
 void run_nvfp4_w4a4(ggml_backend_cuda_context& ctx, const mmq_args& a, cudaStream_t s) {
-    strata_w4a4_mul_mat_q_case<GGML_TYPE_NVFP4>(ctx, a, s);
+    strata_w4a4_mul_mat_q_case<GGML_TYPE_NVFP4, GGML_PREC_Q4>(ctx, a, s);
 }
 void quantize_nvfp4_w4a4(const float* x, const int32_t* ids, void* xq, float* yscale, bool aligned, int64_t cols,
                          int64_t ld, int64_t rows, int64_t padded, cudaStream_t s) {

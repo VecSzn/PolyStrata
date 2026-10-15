@@ -6,6 +6,7 @@
 #include "mmq.cuh"
 #include "quantize.cuh"
 
+#include <climits>
 #include <stdexcept>
 #include <string>
 
@@ -50,7 +51,7 @@ bool Mmq::fits(int type, int64_t w_rows, int64_t w_cols) {
     const bool fallback = w_rows % 128 != 0;
     const auto& dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
     for (int J = 8; J <= 128; J += 8) {
-        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config(t, J, fallback, dev.cc);
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config(t, J, fallback, dev.cc, GGML_PREC_Q8);
         if (c.type != GGML_TYPE_COUNT && mmq_get_nbytes_shared(c, dev.cc) <= dev.smpbo) return true;
     }
     return false;
@@ -94,12 +95,26 @@ void Mmq::mul(const void* w, int type, int64_t w_rows, int64_t w_cols, size_t st
     a.nsamples_x = 1;
     a.nsamples_y = 1;
     a.ncols_max = max_rows;
-    a.ncols_opt = max_rows;
+    // The tile width the kernel launches with, chosen the way ggml-cuda does: the config with the fewest tiles
+    // over the widest expert's rows whose shared memory fits this card.
+    const auto& dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
+    const bool fallback = ggml_cuda_mmq_needs_fallback(w_rows);
+    int ntiles_best = INT_MAX;
+    for (int J = 8; J <= 128 && ntiles_best > 1; J += 8) {
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config(t, J, fallback, dev.cc, GGML_PREC_Q8);
+        if (c.type == GGML_TYPE_COUNT || mmq_get_nbytes_shared(c, dev.cc) > dev.smpbo) continue;
+        const int ntiles = (int) ((max_rows + c.J - 1) / c.J);
+        if (ntiles < ntiles_best) {
+            a.J_best = J;
+            ntiles_best = ntiles;
+        }
+    }
+    if (a.J_best == 0) throw std::runtime_error("mmq: no tile configuration fits this GPU");
 
     auto& ctx = *(ggml_backend_cuda_context*) ctx_;
     const cudaStream_t s = (cudaStream_t) stream;
     switch (t) {
-#define X(T) case GGML_TYPE_##T: mul_mat_q_case<GGML_TYPE_##T>(ctx, a, s); break;
+#define X(T) case GGML_TYPE_##T: mul_mat_q_case<GGML_TYPE_##T, GGML_PREC_Q8>(ctx, a, s); break;
         STRATA_POLY_MMQ_TYPES(X)
 #undef X
         default: throw std::runtime_error("mmq: tensor type " + std::to_string(type) + " is not built");
