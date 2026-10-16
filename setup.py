@@ -181,7 +181,7 @@ def ms_meta(repo: str, path: str):
 
 
 HF = hf("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF")
-LLAMA_CPP_COMMIT = "3cf03257f219afbe7334045ff7c6a06ac68c627d"
+LLAMA_CPP_COMMIT = "69f201a2051ea9b9e9b50c3cc56afd9e2ae64414"   # 2026-10-10, mtmd: MiniCPM-V 4.7 (#29416)
 LLAMA_CPP_ZIP = f"https://github.com/ggml-org/llama.cpp/archive/{LLAMA_CPP_COMMIT}.zip"
 # The image encoder's own llama.cpp: MiniCPM-V 4.7's mtmd is newer than the engines' pin, and the engines stay on
 # the Strata project's pin until it moves; only strata-vision builds from this one (a second checkout, like #14 suggests).
