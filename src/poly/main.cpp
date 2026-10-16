@@ -51,7 +51,6 @@ using strata::poly::CacheOptions;
 using strata::poly::Conversations;
 using strata::poly::Engine;
 using strata::poly::Guesses;
-using strata::poly::KvFmt;
 using strata::poly::Options;
 using Clock = std::chrono::steady_clock;
 
@@ -765,8 +764,6 @@ void usage() {
                  "                         as a CUDA graph and replayed)\n"
                  "  --kv-whole             give the attention caches VRAM for the whole context at load (default: as\n"
                  "                         the conversation grows, the expert cache having the rest until then)\n"
-                 "  --kv fmt               the K and V attention caches' format: fp16 (default, unchanged) or q8_0\n"
-                 "                         (ggml Q8_0 blocks: half the KV VRAM, slightly different answers); opt-in\n"
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
                  "                         into VRAM, in place of cached ones it uses less (default 64, 0 = the cache\n"
                  "                         stays as it was loaded)\n"
@@ -845,22 +842,6 @@ int main(int argc, char** argv) {
         else if (a == "--any-node") o.stay_near = false;
         else if (a == "--no-graphs") o.graphs = false;
         else if (a == "--kv-whole") o.kv_grow = false;
-        else if (a == "--kv") {
-            const std::string fmt = val();
-            if (fmt == "fp16") o.kv_format = KvFmt::kFp16;
-            else if (fmt == "q8_0") {
-#ifdef STRATA_USE_HIP
-                std::fprintf(stderr, "strata-poly: --kv q8_0 is not supported on this backend (CUDA only)\n");
-                std::exit(2);
-#else
-                o.kv_format = KvFmt::kQ8_0;
-#endif
-            }
-            else {
-                std::fprintf(stderr, "strata-poly: --kv %s: unknown format (use fp16 or q8_0)\n", fmt.c_str());
-                std::exit(2);
-            }
-        }
         else if (a == "--window") o.window = std::atoi(val());
         else if (a == "--lookup") lookup = std::atoi(val());
         else if (a == "--no-draft") o.draft = false;

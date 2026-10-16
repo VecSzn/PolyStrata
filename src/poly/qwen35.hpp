@@ -57,12 +57,6 @@ private:
         Dev wq, wk, wv, q_norm, k_norm;
         uint16_t* keys = nullptr;   ///< max_context * n_kv * head_dim, fp16
         uint16_t* vals = nullptr;
-        // q8_0 cache (opt-in): codes are n_kv*head_dim int8 a row; scales are one fp16 per 32-value block
-        // (n_kv*(head_dim/32) a row).  Used instead of keys/vals when Options::kv_format == kQ8_0.
-        int8_t*   k_codes  = nullptr;
-        uint16_t* k_scales = nullptr;
-        int8_t*   v_codes  = nullptr;
-        uint16_t* v_scales = nullptr;
         Dev sh_gate_inp;   ///< the shared expert's gate
     };
 
@@ -90,8 +84,6 @@ private:
     float *qg_ = nullptr, *q_ = nullptr, *kraw_ = nullptr, *k_ = nullptr, *v_ = nullptr, *att_ = nullptr,
           *score_ = nullptr, *sg_ = nullptr;
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
-    float* q8w_ = nullptr;             ///< a q8 prompt batch's K and V blocks, dequantized to fp16 (kwork | vwork)
-    size_t work_halves_ = 0;           ///< the halves of each of q8w_'s two halves (kQ8WorkRows rows at most)
 
 };
 

@@ -36,9 +36,6 @@ namespace strata::poly {
 class Shards;
 struct Likeliest;
 
-/// The attention caches' storing format: fp16 (default) or ggml Q8_0; opt-in via --kv.
-enum class KvFmt { kFp16 = 0, kQ8_0 = 1 };
-
 struct Options {
     std::string model;
     int max_context = 8192;
@@ -67,7 +64,6 @@ struct Options {
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
                                   ///< so; false: for the whole context at load, as the expert cache gets the rest
-    KvFmt kv_format = KvFmt::kFp16;   ///< the K and V caches' format; fp16 by default (byte-identical path)
     int window = 0;               ///< the most tokens window() takes: the known one and guesses after it; 1: none;
                                   ///< 0: 8, or 4 where every guess keeps a copy of the recurrent state
     bool draft = true;            ///< run the block that guesses ahead, when there is one and window is above 1
