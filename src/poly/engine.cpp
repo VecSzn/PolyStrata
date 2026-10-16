@@ -2486,7 +2486,15 @@ void Engine::run(const int32_t* tokens, int n) {
 
     // h_r_ and h_cpu_ may still be the source of the previous call's copies
     ck(cudaStreamSynchronize(cs(st_)), "eval");
-    if (n_swap_ > 0) follow(n < kStageRows ? n : 0);
+    // Greedy answers have to be a function of the request alone: which experts take the GPU path and which the
+    // CPU one decides a layer's sums to the last bit (the two paths add in different orders), so the cache's
+    // state at the first layer may not depend on whether an upload happened to have finished.  Every expert on
+    // its way arrives here, and the followers' arrivals are claimed, before the first token reads the cache.
+    // The cost is the upload a window still waits for, a millisecond or so of a token: under 5% of one.
+    if (n_swap_ > 0) {
+        settle_swaps();
+        follow(n < kStageRows ? n : 0);
+    }
     tok_ = tokens;
     const size_t e_row = (size_t) n_embd_, r_row = (size_t) streams() * e_row;
     const float scale = embed_scale();
