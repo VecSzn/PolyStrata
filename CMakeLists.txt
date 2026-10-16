@@ -1901,13 +1901,20 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
 
   # run-to-run bitwise stability of the decode kernels (the greedy-divergence probe)
   if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
-    add_executable(poly_determinism_probe src/poly/determinism_probe.cpp)
+    add_executable(poly_determinism_probe src/poly/determinism_probe.cpp src/poly/cpu_experts.cpp)
     target_include_directories(poly_determinism_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                              ${CMAKE_CURRENT_SOURCE_DIR}/src
                                                               ${_strata_gpu_include_directories} ${_strata_gg}/include)
     target_link_libraries(poly_determinism_probe PRIVATE strata_kernels ${_strata_gpu_blas_target}
                                                          ${_strata_gpu_runtime_target}
                                                          ggml-cpu ggml-base Threads::Threads)
   endif()
+
+  # cpu_experts() bitwise reproducibility (the greedy-divergence probe, CPU arm)
+  add_executable(cpu_rep_probe src/poly/cpu_rep_probe.cpp src/poly/cpu_experts.cpp)
+  target_include_directories(cpu_rep_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                   ${CMAKE_CURRENT_SOURCE_DIR}/src ${_strata_gg}/include)
+  target_link_libraries(cpu_rep_probe PRIVATE strata_core strata_kernels ggml-cpu ggml-base Threads::Threads)
 endif()
 
 if(STRATA_BUILD_TESTS)

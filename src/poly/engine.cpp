@@ -1467,6 +1467,10 @@ void Engine::load(const Options& o) {
     if (block_ != dg_.get()) dg_.reset();
     hi_ = end_ < 0 ? n_layer_ : end_;
 
+    snap_on_ = std::getenv("STRATA_SNAP") != nullptr;
+    if (const char* sp = std::getenv("STRATA_SNAP_POS")) snap_pos_ = std::atoll(sp);
+    if (const char* si = std::getenv("STRATA_SNAP_IL")) snap_il_ = std::atoi(si);
+    if (snap_on_) ck(cudaMallocHost(&snap_dev_, (size_t) n_embd_ * sizeof(float) + 256), "snap buffer");
     cudaStream_t st = nullptr;
     ck(cudaStreamCreateWithFlags(&st, cudaStreamNonBlocking), "cudaStreamCreate");
     st_ = st;
@@ -1613,6 +1617,7 @@ void Engine::shared_scratch() {
     const size_t ff = n * std::max({n_ff_, n_ff_shexp_, 2 * n_ff_exp_});
     // the draft block works in it too (draft_input()); read() keeps two calls' rows in it
     r_ = fbuf(std::max(streams(), draft_ ? 3 : 1) * (size_t) (read_rows_ > rows_ ? 2 : 1) * rows_ * n_embd_);
+    snap_r0_ = r_;
     cur_ = fbuf(e);
     xn_ = fbuf(e);
     ao_ = fbuf(e);
@@ -1933,6 +1938,18 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
     const float limit = clamp_exp_[(size_t) il];
     const size_t xq_row = kernels::native_q8_1_bytes(n_embd_);
     bool any_host = false;
+    if (snap_on_ && n == 1 && pos_ == snap_pos_ && il == snap_il_) {
+        ck(cudaMemcpyAsync(snap_dev_, h_x_, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+           "snap");
+        ck(cudaStreamSynchronize(cs(st_)), "snap");
+        uint64_t hv = 1469598103934665603ull;
+        const unsigned char* pb = (const unsigned char*) snap_dev_;
+        for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+            hv ^= pb[i];
+            hv *= 1099511628211ull;
+        }
+        std::fprintf(stderr, "XSNAP il=%d x=%016llx\n", il, hv);
+    }
     // A window's tokens together: the CPU reads an expert that several of them chose once.
     for (int at = 0; at < n; at += kCpuRows) {
         const int m = std::min(kCpuRows, n - at);
@@ -1962,6 +1979,11 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 host[n_host++] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.gu_stride,
                                   L.exp_down + e * L.d_bytes, w[k], t};
             }
+        }
+        if (snap_on_ && n == 1 && pos_ == snap_pos_ && il == snap_il_ && at == 0) {
+            std::fprintf(stderr, "PART il=%d cached=%d host=%d:", il, n_cached, n_host);
+            for (int i = 0; i < n_host; ++i) std::fprintf(stderr, " %d", host_e[i]);
+            std::fprintf(stderr, "\n");
         }
         // Strata's STRATA_ROUTE_TAIL_SKIP: an expert outside VRAM that every token here ranks at tail_skip or later
         // adds little to any of them, so it is not computed.  The others keep the weights the router gave them.
@@ -2027,7 +2049,20 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
         // The next layer's router wait is what makes h_cpu_ free to write again.
         float* cpu = h_cpu_ + (size_t) at * e_row;
         if (n_host == 0) {
+            const bool dsn = snap_on_ && n == 1 && pos_ == snap_pos_ && il == snap_il_ && at == 0;
+            if (dsn) ck(cudaMemcpyAsync(snap_dev_, d_, (size_t) n_used_ * e_row * sizeof(float),
+                                        cudaMemcpyDeviceToHost, cs(st_)), "snap");
             launch();
+            if (dsn) {
+                ck(cudaStreamSynchronize(cs(st_)), "snap");
+                uint64_t hv = 1469598103934665603ull;
+                const unsigned char* pb = (const unsigned char*) snap_dev_;
+                for (size_t i = 0; i < (size_t) n_used_ * e_row * sizeof(float); ++i) {
+                    hv ^= pb[i];
+                    hv *= 1099511628211ull;
+                }
+                std::fprintf(stderr, "DSNAP il=%d d=%016llx\n", il, hv);
+            }
             std::fill(cpu, cpu + (size_t) m * e_row, 0.f);
             continue;
         }
@@ -2630,13 +2665,59 @@ void Engine::run(const int32_t* tokens, int n) {
         for (int il = lo_; il < hi_; ++il) stats_.gpu_experts += layers_[(size_t) il].moe ? n * n_used_ : 0;
         return;
     }
+    const auto layer_snap = [&](const char* tag, int il) {
+        if (!snap_on_ || n != 1 || pos_ != snap_pos_) return;
+        const float* which = std::strstr(tag, "-fo") ? fo_ : r_;
+        ck(cudaMemcpyAsync(snap_dev_, which, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+           "snap");
+        ck(cudaStreamSynchronize(cs(st_)), "snap");
+        uint64_t hv = 1469598103934665603ull;
+        const unsigned char* pb = (const unsigned char*) snap_dev_;
+        for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+            hv ^= pb[i];
+            hv *= 1099511628211ull;
+        }
+        std::fprintf(stderr, "PSNAP %s il=%d r=%016llx\n", tag, il, hv);
+    };
     for (int il = lo_; il < hi_; ++il) {
         Layer& L = layers_[(size_t) il];
+        layer_snap("pre", il);
         up(il, n, (size_t) n - 1);
         if (!L.moe) continue;
+        layer_snap("head", il);
+        layer_snap("head-fo", il);
         if (batched(L, n)) moe_rows(L, il, n);
-        else if (!on_card(il, n, (size_t) n - 1) && moe(L, il, n)) moe_add(n);
+        else if (!on_card(il, n, (size_t) n - 1) && moe(L, il, n)) {
+            if (snap_on_ && n == 1 && pos_ == snap_pos_ && il == snap_il_) {
+                ck(cudaMemcpyAsync(snap_dev_, h_cpu_, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost,
+                                   cs(st_)), "snap");
+                ck(cudaStreamSynchronize(cs(st_)), "snap");
+                uint64_t hv = 1469598103934665603ull;
+                const unsigned char* pb = (const unsigned char*) snap_dev_;
+                for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+                    hv ^= pb[i];
+                    hv *= 1099511628211ull;
+                }
+                std::fprintf(stderr, "CSNAP il=%d cpu=%016llx\n", il, hv);
+            }
+            moe_add(n);
+        }
+        layer_snap("moe", il);
+        layer_snap("moe-fo", il);
         tail(il, n, (size_t) n - 1);
+        layer_snap("tail", il);
+        if (snap_on_ && n == 1 && pos_ == snap_pos_) {
+            ck(cudaMemcpyAsync(snap_dev_, r_, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+               "snap");
+            ck(cudaStreamSynchronize(cs(st_)), "snap");
+            uint64_t hv = 1469598103934665603ull;
+            const unsigned char* pb = (const unsigned char*) snap_dev_;
+            for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+                hv ^= pb[i];
+                hv *= 1099511628211ull;
+            }
+            std::fprintf(stderr, "LSNAP il=%d r=%016llx\n", il, hv);
+        }
     }
 }
 
@@ -2715,6 +2796,18 @@ void Engine::eval(const int32_t* tokens, int n, bool want_logits) {
     if (draft_) draft_rows(tokens, ahead_pos_ == pos_ && tokens[0] == ahead_tok_ ? 1 : 0, n);
     pos_ += n;
     stats_.tokens += n;
+    if (snap_on_ && want_logits) {
+        ck(cudaMemcpyAsync(snap_dev_, r_, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+           "snap");
+        ck(cudaStreamSynchronize(cs(st_)), "snap");
+        uint64_t hv = 1469598103934665603ull;
+        const unsigned char* pb = (const unsigned char*) snap_dev_;
+        for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+            hv ^= pb[i];
+            hv *= 1099511628211ull;
+        }
+        std::fprintf(stderr, "SNAP pos=%lld tok=%d r=%016llx\n", (long long) (pos_ - 1), tok_ ? (int) tok_[0] : -1, hv);
+    }
 }
 
 // A layer for n tokens, as run() hands it to the card when nothing is replayed or printed.
@@ -2730,6 +2823,18 @@ void Engine::layer(int il, int n) {
         if (moe(L, il, n)) moe_add(n);
     }
     layer_tail(L, il, n);
+    if (snap_on_ && n == 1 && pos_ + 1 == snap_pos_ && !opt_.dump) {
+        ck(cudaMemcpyAsync(snap_dev_, r_, (size_t) n_embd_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+           "snap");
+        ck(cudaStreamSynchronize(cs(st_)), "snap");
+        uint64_t hv = 1469598103934665603ull;
+        const unsigned char* pb = (const unsigned char*) snap_dev_;
+        for (size_t i = 0; i < (size_t) n_embd_ * sizeof(float); ++i) {
+            hv ^= pb[i];
+            hv *= 1099511628211ull;
+        }
+        std::fprintf(stderr, "LSNAP il=%d r=%016llx\n", il, hv);
+    }
 }
 
 // A prompt's tokens in the calls eval() would get, max_rows() at a time.  With experts outside the cache, each

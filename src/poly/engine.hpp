@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <string>
 #include <utility>
 #include <vector>
@@ -495,6 +496,11 @@ protected:
     std::thread mapper_;                  ///< reads the experts' pages once after load, so they are mapped
     std::atomic<bool> map_quit_{false};
     void* st_ = nullptr;   ///< the stream everything but the staging ahead runs on
+    bool snap_on_ = false;                   ///< STRATA_SNAP: the residual's last row, hashed per token
+    int64_t snap_pos_ = -1;                  ///< the position the per-layer LSNAP digs into (-1: none)
+    int snap_il_ = 0;                        ///< the layer DSNAP digs into
+    float* snap_dev_ = nullptr;
+    float* snap_r0_ = nullptr;               ///< r_ at the end of load, to report where the snap row lies
     void* blas_ = nullptr; ///< cuBLAS on st_
     void* ev_ = nullptr;   ///< marks the router's copy to the host: ev_row_'s first, or a window's row's own
     void* ev_row_[8] = {}; ///< one for each token a window can have

@@ -24,6 +24,9 @@
 
 #include "strata/kernels/iq_kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
+#include "poly/cpu_experts.hpp"
+
+using namespace strata::poly;
 
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -36,6 +39,7 @@
 #include <cstdio>
 #include <cstring>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -88,6 +92,7 @@ void check(Run& r, const std::vector<float>& out) {
 }  // namespace
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     cudaStream_t s = nullptr;
     if (!ck(cudaStreamCreate(&s), "stream")) return 1;
 
@@ -95,6 +100,55 @@ int main() {
     std::normal_distribution<float> nd(0.f, 1.f);
     constexpr int N_IN = 2048, N_OUT = 4096;   // Ornith's n_embd x a fat FFN-ish output
     constexpr int REPS = 33;
+
+    // ---- 5) cpu_experts, same inputs, repeated: the decode path's CPU expert products ----
+    {
+        std::printf("\n== cpu_experts same-input repeat ==\n");
+        constexpr int EMBD = 2048, FF = 1024, NEXP = 8, ROWS = 1;
+        for (int nthr : {1, 16}) {
+            Workers workers(nthr);
+            std::vector<float> xin((size_t) EMBD);
+            for (float& v : xin) v = nd(rng);
+            std::vector<float> gsrc((size_t) NEXP * EMBD), usrc((size_t) NEXP * EMBD), dsrc((size_t) NEXP * FF);
+            for (float& v : gsrc) v = nd(rng);
+            for (float& v : usrc) v = nd(rng);
+            for (float& v : dsrc) v = nd(rng);
+            const size_t g_bytes = ggml_quantize_chunk(GGML_TYPE_Q6_K, gsrc.data(), nullptr, 0, NEXP, EMBD, nullptr);
+            const size_t d_bytes = ggml_quantize_chunk(GGML_TYPE_Q6_K, dsrc.data(), nullptr, 0, NEXP, FF, nullptr);
+            std::vector<uint8_t> gate(g_bytes), up(g_bytes), down(d_bytes);
+            ggml_quantize_chunk(GGML_TYPE_Q6_K, gsrc.data(), gate.data(), 0, NEXP, EMBD, nullptr);
+            ggml_quantize_chunk(GGML_TYPE_Q6_K, usrc.data(), up.data(), 0, NEXP, EMBD, nullptr);
+            ggml_quantize_chunk(GGML_TYPE_Q6_K, dsrc.data(), down.data(), 0, NEXP, FF, nullptr);
+            std::vector<CpuExpert> experts(NEXP);
+            for (int e = 0; e < NEXP; ++e) {
+                experts[e].gate = gate.data() + (size_t) e * (g_bytes / NEXP);
+                experts[e].up = up.data() + (size_t) e * (g_bytes / NEXP);
+                experts[e].down = down.data() + (size_t) e * (d_bytes / NEXP);
+                experts[e].weight = 0.1f + 0.02f * e;
+                experts[e].row = 0;
+            }
+            std::vector<float> out((size_t) ROWS * EMBD);
+            std::vector<size_t> hashes;
+            for (int r = 0; r < 33; ++r) {
+                std::fill(out.begin(), out.end(), 0.f);
+                cpu_experts(workers, experts.data(), NEXP, ROWS, GGML_TYPE_Q6_K, GGML_TYPE_Q6_K, EMBD, FF,
+                            xin.data(), 30.f, false, out.data(), nullptr);
+                size_t h = 1469598103934665603ull;
+                const unsigned char* pb = (const unsigned char*) out.data();
+                for (size_t i = 0; i < out.size() * sizeof(float); ++i) {
+                    h ^= pb[i];
+                    h *= 1099511628211ull;
+                }
+                hashes.push_back(h);
+            }
+            const int distinct = (int) std::set<size_t>(hashes.begin(), hashes.end()).size();
+            std::printf("threads=%d  distinct=%d/33  %s\n", nthr, distinct,
+                         distinct == 1 ? "stable" : "!!! NON-DETERMINISTIC !!!");
+            for (size_t h : std::set<size_t>(hashes.begin(), hashes.end()))
+                std::printf("  %016zx\n", h);
+            fails += distinct - 1;
+        }
+    }
 
     // ---- 1) native_mmvq, Q6_K weights, one token ----
     {
@@ -255,6 +309,7 @@ int main() {
     }
 
     std::printf("\n%s (%d unstable path%s)\n", fails ? "UNSTABLE" : "ALL STABLE", fails, fails == 1 ? "" : "s");
+
     sink = 0;
     return fails ? 1 : 0;
 }
