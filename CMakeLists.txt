@@ -1889,6 +1889,15 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
   target_include_directories(poly_mxfp4_test PRIVATE ${_strata_gg}/include)
   target_link_libraries(poly_mxfp4_test PRIVATE ggml-cpu ggml-base Threads::Threads)
   add_test(NAME poly_mxfp4_test COMMAND poly_mxfp4_test)
+  # --kv int8's kernels: store_q8 against ggml's own quantizer, and the q8 readers against attend()/attend_batch()
+  if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
+    add_executable(poly_kv_q8_test src/poly/kv_q8_poly_test.cpp src/poly/kernels.cu)
+    target_include_directories(poly_kv_q8_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                       ${_strata_gpu_include_directories} ${_strata_gg}/include)
+    target_link_libraries(poly_kv_q8_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
+                                                  ggml-cpu ggml-base Threads::Threads)
+    add_test(NAME poly_kv_q8_test COMMAND poly_kv_q8_test)
+  endif()
 endif()
 
 if(STRATA_BUILD_TESTS)

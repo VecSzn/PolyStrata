@@ -544,6 +544,23 @@ bool parse_gen(const std::string& line, long long& max_new, Sampling& s, int32_t
 
 int serve(Session& ss) {
     Engine& engine = ss.engine;
+    // the model file's own sampling defaults (llama.cpp's general.sampling.* keys), for the parameters it
+    // carries: a thinking model's repeat penalty is the difference between a thought-out answer and a
+    // recitation loop.  A GEN line still wins for every key it names.
+    Sampling base;
+    base.penalty_last_n = 64;   // llama.cpp's window for the penalties; 0 would mean they never apply
+    {
+        float f = 0;
+        int64_t k = 0;
+        if (engine.meta_f("general.sampling.temp", f)) base.temperature = f;
+        if (engine.meta_i("general.sampling.top_k", k)) base.top_k = (int) k;
+        if (engine.meta_f("general.sampling.top_p", f)) base.top_p = f;
+        if (engine.meta_f("general.sampling.penalty_repeat", f)) base.penalty_repeat = f;
+        if (base.penalty_repeat != 1.f)
+            std::printf("INFO the model's own sampling defaults: temperature=%.2f top_k=%d top_p=%.2f "
+                        "penalty_repeat=%.2f last_n=%d\n",
+                        base.temperature, base.top_k, base.top_p, base.penalty_repeat, base.penalty_last_n);
+    }
     std::printf("INFO context=%d expert_slots=%d expert_cache_mib=%lld pool_workers=%d conversation_cache_mib=%lld "
                 "conversation_cache_slots=%d conversation_cache_min_free_mib=%lld vram_free_mib=%lld vram_elastic=1 "
                 "engine=" STRATA_VERSION "\n",
@@ -563,7 +580,7 @@ int serve(Session& ss) {
         if (line.empty()) continue;
         lines.stop.store(false);   // a STOP that came between requests is stale
         long long max_new = 0;
-        Sampling s;
+        Sampling s = base;
         std::vector<int32_t> ids;
         int32_t pad = -1;
         int64_t turn_at = -1;
@@ -762,6 +779,11 @@ void usage() {
                  "                         131072 for Qwen3.6, Ornith and Tiel, all of it for the others; 0 = all)\n"
                  "  --no-graphs            launch a token's kernels one by one (default: a layer's are recorded once\n"
                  "                         as a CUDA graph and replayed)\n"
+                 "  --kv fp16|int8|int8k   what the attention caches keep K and V as: fp16 (default), or llama.cpp's\n"
+                 "                         Q8_0 blocks, which about halve the VRAM a token takes; every reader\n"
+                 "                         dequantizes a block in the kernel.  int8k keeps the keys' side in Q8_0\n"
+                 "                         and the values' in fp16: a quarter of the fp16 cache saved, less of a\n"
+                 "                         loss.  Independent of --kv-whole\n"
                  "  --kv-whole             give the attention caches VRAM for the whole context at load (default: as\n"
                  "                         the conversation grows, the expert cache having the rest until then)\n"
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
@@ -842,6 +864,16 @@ int main(int argc, char** argv) {
         else if (a == "--any-node") o.stay_near = false;
         else if (a == "--no-graphs") o.graphs = false;
         else if (a == "--kv-whole") o.kv_grow = false;
+        else if (a == "--kv") {
+            const std::string v = val();
+            if (v == "fp16") o.kv_int8 = false;
+            else if (v == "int8" || v == "q8_0") o.kv_int8 = true;
+            else if (v == "int8k") { o.kv_int8 = true; o.kv_int8_k = true; }
+            else {
+                std::fprintf(stderr, "strata-poly: --kv takes fp16, int8 or int8k, not %s\n", v.c_str());
+                return 2;
+            }
+        }
         else if (a == "--window") o.window = std::atoi(val());
         else if (a == "--lookup") lookup = std::atoi(val());
         else if (a == "--no-draft") o.draft = false;
@@ -924,6 +956,13 @@ int main(int argc, char** argv) {
                 const int64_t id = engine.meta_u(key, -1);
                 if (id >= 0 && std::find(eos.begin(), eos.end(), (int32_t) id) == eos.end()) eos.push_back((int32_t) id);
             }
+        // the file's eos can point away from the template's end of a reply (fine-tunes move it to <eos> while
+        // the template closes turns with another token): take the usual end-of-reply tokens from the
+        // vocabulary itself as well, as llama.cpp's EOG heuristic does
+        for (const char* text : {"<end_of_turn>", "<turn|>", "<|im_end|>", "<|endoftext|>"}) {
+            const int32_t id = engine.token_id(text);
+            if (id >= 0 && std::find(eos.begin(), eos.end(), id) == eos.end()) eos.push_back(id);
+        }
         Session ss(engine, eos, cache, lookup);
         int rc = 0;
         if (want_serve) {

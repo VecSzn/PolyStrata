@@ -273,6 +273,10 @@ public:
         pos_ += (size_t)n;
         return s;
     }
+    void skip(size_t n) {
+        need(n);
+        pos_ += n;
+    }
     size_t pos() const { return pos_; }
 
 private:
@@ -389,9 +393,58 @@ public:
         auto it = meta_.find(key);
         return it == meta_.end() ? nullptr : &it->second;
     }
+    /// The index of `text` in the string array `key`, or -1.  The metadata keeps only an array's first
+    /// 64 items (a 262k-token vocabulary would be tens of MiB of strings nobody reads), so a lookup past
+    /// the sample walks the header again over the map, touching nothing but the compared bytes.
+    int64_t find_in_array(const char* key, const char* text) const {
+        Cursor c(base_, data_start_);
+        if (c.read<uint32_t>() != 0x46554747u || c.read<uint32_t>() != 3) return -1;
+        c.read<uint64_t>();   // tensor count
+        const uint64_t n_kv = c.read<uint64_t>();
+        const size_t tlen = std::strlen(text);
+        for (uint64_t i = 0; i < n_kv; ++i) {
+            const std::string k = c.str();
+            const auto t = (MetaType) c.read<uint32_t>();
+            if (t == MetaType::ARRAY) {
+                const auto et = (MetaType) c.read<uint32_t>();
+                const uint64_t count = c.read<uint64_t>();
+                if (k == key && et == MetaType::STRING) {
+                    for (uint64_t j = 0; j < count; ++j) {
+                        const uint64_t n = c.read<uint64_t>();
+                        c.need((size_t) n);
+                        const bool hit = tlen == n && std::memcmp(base_ + c.pos(), text, n) == 0;
+                        c.skip((size_t) n);
+                        if (hit) return (int64_t) j;
+                    }
+                    return -1;
+                }
+                if (et == MetaType::STRING)
+                    for (uint64_t j = 0; j < count; ++j) c.skip((size_t) c.read<uint64_t>());
+                else
+                    c.skip(scalar_size(et) * count);
+                continue;
+            }
+            if (t == MetaType::STRING) {
+                c.skip((size_t) c.read<uint64_t>());
+                continue;
+            }
+            c.skip(scalar_size(t));
+        }
+        return -1;
+    }
     const uint8_t* tensor_data(const TensorInfo& t) const { return base_ + data_start_ + t.offset; }
 
 private:
+    static size_t scalar_size(MetaType t) {
+        switch (t) {
+        case MetaType::U8: case MetaType::I8: case MetaType::BOOL: return 1;
+        case MetaType::U16: case MetaType::I16: return 2;
+        case MetaType::U32: case MetaType::I32: case MetaType::F32: return 4;
+        case MetaType::U64: case MetaType::I64: case MetaType::F64: return 8;
+        default: return 0;   // STRING and ARRAY are handled by their callers
+        }
+    }
+
     void open() {
 #ifdef _WIN32
         HANDLE h = CreateFileA(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,

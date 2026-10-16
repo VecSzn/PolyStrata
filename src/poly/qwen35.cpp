@@ -16,6 +16,13 @@ namespace {
 constexpr int kConv = 4;   // what conv4_silu is written for; checked at load
 constexpr float kMinWeightSum = 6.103515625e-5f;   // the floor ggml's MoE graph puts under the gate sum
 constexpr size_t kScoreFloats = size_t(16) << 20;  // the attention's scores of the tokens it takes at a time
+// The int8 cache's fp16 copies (Block::k_f16, Qwen35::sh_k_f16_) are one pair for the whole model and not a pair
+// a layer.  A pair is 2 KB a row (67 MiB at 32k, 268 MiB at 128k); eleven of them would have been 737 MiB and
+// 2.95 GiB -- more VRAM than the int8 cache saves, and at 128k more than an 8 GB card has to give, which is where
+// a long-context prompt used to die in the MoE kernel.  What sharing costs is a re-conversion: a layer that is not
+// the one that left the pair fills it from row 0, so a request converts O(rows^2 / chunk) over its chunks where a
+// pair a layer converted O(rows).  At 32k that is 42 ms of a 26 s prompt, and the alternative -- llama.cpp's own
+// cap on the convert buffer with the KV chunked under it (PR #29827) -- trades the GEMM's size for it.
 
 }  // namespace
 
@@ -31,6 +38,7 @@ void Qwen35::check_draft_block() {
 }
 
 void Qwen35::load_geometry() {
+    if (opt_.kv_int8_k) throw std::runtime_error("--kv int8k is the gemma4 backend's alone for now");
     load_shape();
     auto find = [&](const char* key) { return meta_in(*gg_, key); };
     auto need = [](bool ok, const char* what) {
@@ -129,6 +137,24 @@ void Qwen35::alloc_caches() {
             st += past_n;
             B.s = st;
             st += s_n;
+        } else if (opt_.kv_int8) {
+            // codes and deltas in two arrays, so that a reader's four codes are one aligned load (store_q8)
+            B.k_code = (int8_t*) kv_alloc((size_t) n_kv_ * head_dim_, 1);
+            B.k_delta = (uint16_t*) kv_alloc((size_t) n_kv_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t), 1);
+            B.v_code = (int8_t*) kv_alloc((size_t) n_kv_ * head_dim_, 1);
+            B.v_delta = (uint16_t*) kv_alloc((size_t) n_kv_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t), 1);
+            // the halves a prompt batch reads, filled from the cache as the cache grows (see attn).  One pair for
+            // the whole model: the layers run one at a time, so each finds the pair as the one before it left it,
+            // and a pair a layer would cost as much as the fp16 cache the quantization replaced.
+            const size_t f16_row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t);
+            if (!sh_k_f16_) {
+                sh_k_f16_ = (uint16_t*) kv_alloc(f16_row, 1);
+                sh_v_f16_ = (uint16_t*) kv_alloc(f16_row, 1);
+            }
+            B.k_f16 = sh_k_f16_;
+            B.v_f16 = sh_v_f16_;
+            f16_owner_ = nullptr;   // nothing has been converted into them yet
+            f16_rows_ = 0;
         } else {
             B.keys = (uint16_t*) kv_alloc(row, 1);
             B.vals = (uint16_t*) kv_alloc(row, 1);
@@ -157,6 +183,13 @@ void Qwen35::assign_scratch() {
     att_ = fbuf(heads);
     score_ = fbuf((size_t) chunk_ * n_head_ * opt_.max_context);
     sg_ = fbuf(n);
+    // assign_scratch() runs twice (the first pass only counts), so this is guarded: without it the counting
+    // pass's pair is allocated and dropped.
+    if (opt_.kv_int8 && !q8c_) {   // this call's queries in the cache's own form, for attend_q8's dp4a
+        q8c_ = (int8_t*) dmalloc((size_t) rows_ * n_head_ * head_dim_, "the queries as codes");
+        q8d_ = (uint16_t*) dmalloc((size_t) rows_ * n_head_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t),
+                                   "the queries' deltas");
+    }
     if (rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
 }
 
@@ -170,15 +203,40 @@ void Qwen35::save_layer(int il, int64_t, uint8_t* dst) {
        "save state");
 }
 
-size_t Qwen35::card_row_bytes() const { return (size_t) n_attn_ * 2 * n_kv_ * head_dim_ * sizeof(uint16_t); }
+// One row of a layer's attention cache: a value a code (or a half), plus - in the int8 form - a delta every
+// kQ8_0Values of them.  Both halves of a pair share it.
+size_t Qwen35::cache_row_bytes() const {
+    const size_t codes = (size_t) n_kv_ * head_dim_ * (opt_.kv_int8 ? 1 : sizeof(uint16_t));
+    return codes + (opt_.kv_int8 ? (size_t) n_kv_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t) : 0);
+}
+
+size_t Qwen35::card_row_bytes() const { return (size_t) n_attn_ * 2 * cache_row_bytes(); }
 
 void Qwen35::save_card_rows(int64_t first, int64_t n, uint8_t* dst) {
     if (first < 0 || n < 0 || first + n > opt_.max_context)
         throw std::logic_error("save_rows: the rows are outside the context");
     ck(cudaStreamSynchronize(cs(st_)), "save rows");
-    const size_t row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t), at = (size_t) first * row, bytes = (size_t) n * row;
+    if (opt_.kv_int8) {
+        // four arrays with two widths: the codes n_kv * head_dim a row, the deltas n_kv * head_dim / 32 halves
+        const size_t rc = (size_t) n_kv_ * head_dim_, atc = (size_t) first * rc, bc = (size_t) n * rc;
+        const size_t rd = (size_t) n_kv_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t);
+        const size_t atd = (size_t) first * rd, bd = (size_t) n * rd;
+        for (const Block& B : blocks_) {
+            if (!B.cached() || bc == 0) continue;
+            for (const int8_t* c : {B.k_code, B.v_code}) {
+                ck(cudaMemcpy(dst, c + atc, bc, cudaMemcpyDeviceToHost), "save rows");
+                dst += bc;
+            }
+            for (const uint16_t* d : {B.k_delta, B.v_delta}) {
+                ck(cudaMemcpy(dst, (const uint8_t*) d + atd, bd, cudaMemcpyDeviceToHost), "save rows");
+                dst += bd;
+            }
+        }
+        return;
+    }
+    const size_t row = cache_row_bytes(), at = (size_t) first * row, bytes = (size_t) n * row;
     for (const Block& B : blocks_) {
-        if (!B.keys || bytes == 0) continue;
+        if (!B.cached() || bytes == 0) continue;
         for (const uint16_t* cache : {B.keys, B.vals}) {
             ck(cudaMemcpy(dst, (const uint8_t*) cache + at, bytes, cudaMemcpyDeviceToHost), "save rows");
             dst += bytes;
@@ -191,10 +249,29 @@ void Qwen35::load_card_rows(const uint8_t* src, int64_t from, int64_t count, int
         throw std::logic_error("load_rows: the rows are outside what was saved");
     cover(first + n);
     ck(cudaStreamSynchronize(cs(st_)), "load rows");
-    const size_t row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t), at = (size_t) first * row, bytes = (size_t) n * row;
+    if (opt_.kv_int8) {
+        const size_t rc = (size_t) n_kv_ * head_dim_, atc = (size_t) first * rc, bc = (size_t) n * rc;
+        const size_t skc = (size_t) (first - from) * rc, allc = (size_t) count * rc;
+        const size_t rd = (size_t) n_kv_ * (head_dim_ / kQ8_0Values) * sizeof(uint16_t);
+        const size_t atd = (size_t) first * rd, bd = (size_t) n * rd;
+        const size_t skd = (size_t) (first - from) * rd, alld = (size_t) count * rd;
+        for (const Block& B : blocks_) {
+            if (!B.cached() || bc == 0) continue;
+            for (int8_t* c : {B.k_code, B.v_code}) {
+                ck(cudaMemcpy(c + atc, src + skc, bc, cudaMemcpyHostToDevice), "load rows");
+                src += allc;
+            }
+            for (uint16_t* d : {B.k_delta, B.v_delta}) {
+                ck(cudaMemcpy((uint8_t*) d + atd, src + skd, bd, cudaMemcpyHostToDevice), "load rows");
+                src += alld;
+            }
+        }
+        return;
+    }
+    const size_t row = cache_row_bytes(), at = (size_t) first * row, bytes = (size_t) n * row;
     const size_t skip = (size_t) (first - from) * row, all = (size_t) count * row;
     for (const Block& B : blocks_) {
-        if (!B.keys || bytes == 0) continue;
+        if (!B.cached() || bytes == 0) continue;
         for (uint16_t* cache : {B.keys, B.vals}) {
             ck(cudaMemcpy((uint8_t*) cache + at, src + skip, bytes, cudaMemcpyHostToDevice), "load rows");
             src += all;
@@ -269,7 +346,15 @@ void Qwen35::attn_store(Block& B, int64_t pos, int n) {
     head_norm_rope(kraw_, head_dim_, fp(B.k_norm), k_, head_dim_, n_kv_, n_rot_, theta_scale_, first, n, rms_eps_, st_,
                    nullptr, axes, sections_, at ? at + 1 : nullptr);
     lin(B.wv, xn_, v_, n, xq_);
-    if (at) {
+    if (opt_.kv_int8) {
+        if (at) {
+            store_q8_at(k_, B.k_code, B.k_delta, n_kv_, head_dim_, n, at, 0, st_);
+            store_q8_at(v_, B.v_code, B.v_delta, n_kv_, head_dim_, n, at, 0, st_);
+        } else {
+            store_q8(k_, B.k_code, B.k_delta, n_kv_, head_dim_, pos, n, st_);
+            store_q8(v_, B.v_code, B.v_delta, n_kv_, head_dim_, pos, n, st_);
+        }
+    } else if (at) {
         store_f16_at(k_, B.keys, n_kv_ * head_dim_, at, n, 0, st_);
         store_f16_at(v_, B.vals, n_kv_ * head_dim_, at, n, 0, st_);
     } else {
@@ -297,7 +382,41 @@ void Qwen35::attn(Block& B, int64_t pos, int n) {
     attn_store(B, pos, n);
     const float scale = 1.f / std::sqrt((float) head_dim_);
     // a prompt batch through cuBLAS; a few tokens with the kernels that give a token the same bits in any company
-    if (n >= kStageRows)
+    // a Q8_0 cache has no tensor-core path (a block's own delta is not a cuBLAS scale), so every call goes through
+    // the kernels that give a token the same bits in any company: a prompt costs speed, and buys one order of
+    // products and sums for the whole request
+    if (opt_.kv_int8) {
+        // A prompt batch goes back onto the fp16 path: the halves are brought up to date (once per token, not once
+        // per chunk) and cuBLAS takes it from there.  The fp16 kernels are several times faster than anything over
+        // the quantized cache - measured 1.7x at 16k and 2.4x at 32k - and the conversion is O(rows) against an
+        // attention that is O(rows^2).  Decode stays on the q8 kernels: one query is memory-bound and the
+        // quantized cache is half the bytes.  With `at` (a recorded launch) the caches are replayed as they were,
+        // so there is nothing new to convert.
+        if (n >= kStageRows && !at) {
+            const int64_t want = pos + n;
+            // The pair is the model's, not this layer's, so a layer that is not the one that left it starts from
+            // row 0; the layer that is picks up where it left off.  Its rows are this layer's cache either way.
+            int64_t from = f16_owner_ == &B && f16_rows_ < want ? f16_rows_ : 0;
+            f16_owner_ = &B;
+            if (want > from) {
+                const int per_row = n_kv_ * (head_dim_ / kQ8_0Values);
+                const size_t row_c = (size_t) n_kv_ * head_dim_;
+                const int64_t rows = want - from, blocks = rows * per_row;
+                dequant_q8_to_f16(B.k_code + from * row_c, B.k_delta + from * per_row, B.k_f16 + from * row_c, blocks,
+                                  st_);
+                dequant_q8_to_f16(B.v_code + from * row_c, B.v_delta + from * per_row, B.v_f16 + from * row_c, blocks,
+                                  st_);
+            }
+            f16_rows_ = want;
+            attend_batch(blas_, q_, B.k_f16, B.v_f16, pos, n, score_,
+                         (size_t) chunk_ * n_head_ * opt_.max_context, awork_, att_, head_dim_, n_head_, n_kv_,
+                         scale, st_);
+        } else {
+            attend_q8(q_, Q8Cache{q8c_, q8d_}, Q8Cache{B.k_code, B.k_delta}, Q8Cache{B.v_code, B.v_delta}, pos, n,
+                      score_, chunk_, att_, head_dim_, n_head_, n_kv_, scale, st_, 0, 0, false, at,
+                      at ? room(n) : 0);
+        }
+    } else if (n >= kStageRows)
         attend_batch(blas_, q_, B.keys, B.vals, pos, n, score_, (size_t) chunk_ * n_head_ * opt_.max_context, awork_,
                      att_, head_dim_, n_head_, n_kv_, scale, st_);
     else

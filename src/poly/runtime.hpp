@@ -147,6 +147,11 @@ public:
     }
 
     const MetaValue* get(const std::string& key) const { return files_[0]->get(key); }
+    /// A vocabulary-sized string array is kept by the reader only as its first 64 items; a lookup past
+    /// the sample walks the file's header again (see GgufFile::find_in_array).
+    int64_t find_in_array(const char* key, const char* text) const {
+        return files_[0]->find_in_array(key, text);
+    }
     const std::vector<std::string>& paths() const { return paths_; }
     const TensorInfo* find(const std::string& name) const {
         const auto it = where_.find(name);

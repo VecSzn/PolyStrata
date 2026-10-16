@@ -423,6 +423,25 @@ void* Engine::hmalloc(size_t bytes, const char* what) {
     return p;
 }
 
+// A write into VRAM and a run of zeros in it, both on st_.
+//
+// They used to be plain cudaMemcpy()/cudaMemset(), which run on the implicit (legacy) stream.  That stream is
+// NOT ordered against this engine's - every one of them is created with cudaStreamNonBlocking - so none of the
+// cudaStreamSynchronize(cs(st_)) that guard VRAM waits for those copies.  The load fills the expert cache with
+// them, and the first request whose prompt is longer than kKvGrow reaches cover() with rows to map: cover()
+// asks shrink_cache() for the VRAM, and shrink_cache() gives pieces back (vmm_unmap, "the card must be done
+// with them") while the load's last copies are still writing them.  The card then says
+// "rms_norm: an illegal memory access" at the first token of the prompt - for any prompt over kKvGrow tokens, on
+// any architecture (LFM2.5 and Qwen3.6 alike), and never for a shorter one, whose cover() has nothing to map
+// and so never gives VRAM back.  On st_ the same copies are behind the syncs that were already there.
+void Engine::h2d(void* dst, const void* src, size_t bytes) {
+    ck(cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, cs(st_)), "a copy into VRAM");
+}
+
+void Engine::zero_vram(void* dst, size_t bytes) {
+    ck(cudaMemsetAsync(dst, 0, bytes, cs(st_)), "zeroing VRAM");
+}
+
 // A container whose memory is not much more than the model's files.  The file cache cannot hold them beside
 // the engine, so an answer reads experts from the disk: on a pod with 80 GiB and two RTX 3080s, GLM REAP50's
 // 79 GB file wrote at 6 tokens/s where 20.  And the pod ended the engine with SIGKILL in half of its long reads,
@@ -651,7 +670,7 @@ void Engine::shrink_cache(size_t bytes) {
     }
     ck(cudaStreamSynchronize(cs(st_)), "the expert cache");
     vmm_unmap(arena_, cut);
-    if (cut > kTail) ck(cudaMemset(exp_ + end, 0, kTail), "the expert cache");
+    if (cut > kTail) zero_vram(exp_ + end, kTail);
     exp_at_ = std::min(exp_at_, end);
     staged_il_ = -1;
 }
@@ -667,6 +686,30 @@ int64_t Engine::meta_u(const char* key, int64_t fallback) const {
     return v && v->is_num() ? (int64_t) v->u : fallback;
 }
 
+bool Engine::meta_f(const char* key, float& out) const {
+    const MetaValue* v = gg_ ? gg_->get(key) : nullptr;
+    if (!v || !v->is_num()) return false;
+    out = v->f;
+    return true;
+}
+
+bool Engine::meta_i(const char* key, int64_t& out) const {
+    const MetaValue* v = gg_ ? gg_->get(key) : nullptr;
+    if (!v || !v->is_num()) return false;
+    out = (int64_t) v->u;
+    return true;
+}
+
+int32_t Engine::token_id(const char* text) const {
+    const MetaValue* tokens = gg_ ? gg_->get("tokenizer.ggml.tokens") : nullptr;
+    if (tokens && tokens->type == MetaType::ARRAY)
+        for (size_t i = 0; i < tokens->items.size(); ++i)
+            if (tokens->items[i].s == text) return (int32_t) i;
+    if (!gg_) return -1;
+    const int64_t id = gg_->find_in_array("tokenizer.ggml.tokens", text);
+    return id >= 0 ? (int32_t) id : -1;
+}
+
 // A layer's tensor, under any of its names.  The draft block's are in the file it comes from.
 const TensorInfo* Engine::tensor(int il, const char* name) const {
     const Shards& g = block_ && il >= n_layer_ ? *block_ : *gg_;
@@ -674,6 +717,16 @@ const TensorInfo* Engine::tensor(int il, const char* name) const {
     if (const Names* n = tensor_alias(name))
         for (const char* other : n->other)
             if (const TensorInfo* t = other ? g.find(blk(il, other)) : nullptr) return t;
+    return nullptr;
+}
+
+// A tensor that stands outside the layers, under any of its names.  tensor(il, ...) is the layers': a file that
+// calls the output norm something else (lfm2moe: `token_embd_norm.weight`) says so in the same alias table.
+const TensorInfo* Engine::tensor(const char* name) const {
+    if (const TensorInfo* t = gg_->find(name)) return t;
+    if (const Names* n = tensor_alias(name))
+        for (const char* other : n->other)
+            if (const TensorInfo* t = other ? gg_->find(other) : nullptr) return t;
     return nullptr;
 }
 
@@ -949,7 +1002,7 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
                                     (int64_t) (b - a), n_in, nullptr);
             });
         }
-        ck(cudaMemcpy(d.p, q.data(), out, cudaMemcpyHostToDevice), "weight upload");
+        h2d(d.p, q.data(), out);
         return d;
     }
     const bool as_is = !fix && (t->type == kTypeF32 || (want != kF32 && t->type == kTypeBF16) ||
@@ -962,7 +1015,7 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
     if (!dense_) return d;
     if (dense_at_ > dense_bytes_) throw std::logic_error("the dense arena is too small for " + t->name);
     if (as_is) {
-        ck(cudaMemcpy(d.p, home(*t).data(*t), bytes, cudaMemcpyHostToDevice), "weight upload");
+        h2d(d.p, home(*t).data(*t), bytes);
         return d;
     }
 
@@ -974,12 +1027,12 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
     if (fix)
         for (float& v : f) v = fix(v);
     if (type == kTypeF32) {
-        ck(cudaMemcpy(d.p, f.data(), out, cudaMemcpyHostToDevice), "weight upload");
+        h2d(d.p, f.data(), out);
         return d;
     }
     std::vector<ggml_bf16_t> h(count);
     ggml_fp32_to_bf16_row(f.data(), h.data(), (int64_t) count);
-    ck(cudaMemcpy(d.p, h.data(), out, cudaMemcpyHostToDevice), "weight upload");
+    h2d(d.p, h.data(), out);
     return d;
 }
 
@@ -1065,7 +1118,7 @@ void Engine::fill_expert_cache() {
     } else {
         exp_ = (uint8_t*) dmalloc(arena + 256, "the expert cache");
     }
-    ck(cudaMemset(exp_, 0, arena + 256), "the expert cache");   // the slots' tails stay zero (kTail)
+    zero_vram(exp_, arena + 256);   // the slots' tails stay zero (kTail)
     // Which experts is by value; where they go is by layer, a layer's side by side in the experts' order.
     std::vector<Cand> taken;
     size_t room = arena;
@@ -1081,11 +1134,9 @@ void Engine::fill_expert_cache() {
         uint8_t* s = exp_ + exp_at_;
         exp_at_ += c.bytes;
         const size_t e = (size_t) c.e;
-        ck(cudaMemcpy(s, L.exp_gate + e * L.gu_stride, L.gu_bytes, cudaMemcpyHostToDevice), "expert upload");
-        ck(cudaMemcpy(s + L.gu_bytes, L.exp_up + e * L.gu_stride, L.gu_bytes, cudaMemcpyHostToDevice),
-           "expert upload");
-        ck(cudaMemcpy(s + 2 * L.gu_bytes, L.exp_down + e * L.d_bytes, L.d_bytes, cudaMemcpyHostToDevice),
-           "expert upload");
+        h2d(s, L.exp_gate + e * L.gu_stride, L.gu_bytes);
+        h2d(s + L.gu_bytes, L.exp_up + e * L.gu_stride, L.gu_bytes);
+        h2d(s + 2 * L.gu_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
         L.slot[e] = s;
         ++cached_;
     }
@@ -1218,7 +1269,7 @@ int Engine::grow_cache(size_t bytes) {
     } catch (const std::runtime_error&) {
     }
     if (arena_.mapped < exp_at_ + kTail) return 0;
-    ck(cudaMemset(exp_ + exp_at_, 0, arena_.mapped - exp_at_), "the expert cache");   // the new slots' tails
+    zero_vram(exp_ + exp_at_, arena_.mapped - exp_at_);   // the new slots' tails
     std::stable_sort(cands.begin(), cands.end(),
                      [](const Cand& a, const Cand& b) { return a.value != b.value ? a.value > b.value : a.e < b.e; });
     std::vector<Cand> taken;
@@ -1236,11 +1287,9 @@ int Engine::grow_cache(size_t bytes) {
         uint8_t* s = exp_ + exp_at_;
         exp_at_ += L.slot_bytes;
         const size_t e = (size_t) c.e;
-        ck(cudaMemcpy(s, L.exp_gate + e * L.gu_stride, L.gu_bytes, cudaMemcpyHostToDevice), "expert upload");
-        ck(cudaMemcpy(s + L.gu_bytes, L.exp_up + e * L.gu_stride, L.gu_bytes, cudaMemcpyHostToDevice),
-           "expert upload");
-        ck(cudaMemcpy(s + 2 * L.gu_bytes, L.exp_down + e * L.d_bytes, L.d_bytes, cudaMemcpyHostToDevice),
-           "expert upload");
+        h2d(s, L.exp_gate + e * L.gu_stride, L.gu_bytes);
+        h2d(s + L.gu_bytes, L.exp_up + e * L.gu_stride, L.gu_bytes);
+        h2d(s + 2 * L.gu_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
         L.slot[e] = s;
         ++cached_;
     }
@@ -1479,7 +1528,7 @@ void Engine::load(const Options& o) {
         if (pass == 0) {
             dense_bytes_ = dense_at_;
             dense_ = (uint8_t*) dmalloc(dense_bytes_ + 256, "the dense weights");
-            ck(cudaMemset(dense_, 0, dense_bytes_ + 256), "the dense weights");   // between the tensors: kTail
+            zero_vram(dense_, dense_bytes_ + 256);   // between the tensors: kTail
         }
     }
 
@@ -1493,6 +1542,10 @@ void Engine::load(const Options& o) {
     alloc();
     if (!opt_.profile.empty()) read_profile(opt_.profile, (int) layers_.size(), n_expert_, prior_);
     fill_expert_cache();
+    // The weights and the expert cache are written on st_ now (h2d(), zero_vram()): the load is not over until
+    // those are done, so that everything after it - a read of what the cache holds, the first request's cover()
+    // mapping the attention caches - finds what it expects.
+    ck(cudaStreamSynchronize(cs(st_)), "the load");
     // A card of a split that has less free beside its layers than the reserve it keeps by default runs out of VRAM
     // in a later request, where one card alone can do nothing else.  It may be that another program held VRAM when
     // the split was made.  A larger reserve asked for (--vram-reserve-mib) only leaves the card without experts.
@@ -1651,7 +1704,7 @@ void Engine::alloc() {
         iota_ = (int32_t*) dmalloc(rr * sizeof(int32_t), "scratch");
         std::vector<int32_t> ramp(rr);
         std::iota(ramp.begin(), ramp.end(), 0);
-        ck(cudaMemcpy(iota_, ramp.data(), rr * sizeof(int32_t), cudaMemcpyHostToDevice), "scratch");
+        h2d(iota_, ramp.data(), rr * sizeof(int32_t));
 
         // One layer's experts pass through it at a time, so it never holds more than a layer has.  A model of
         // small experts has a few hundred MiB a layer, and the rest of the default would be VRAM that the
@@ -1737,7 +1790,7 @@ void Engine::load_state(const uint8_t* src, int64_t pos) {
     if (pos < 0 || pos > opt_.max_context) throw std::logic_error("load_state: the position is outside the context");
     OnCard here(device_, split_);
     ck(cudaStreamSynchronize(cs(st_)), "load state");
-    ck(cudaMemcpy(state_, src, state_n_ * sizeof(float), cudaMemcpyHostToDevice), "load state");
+    h2d(state_, src, state_n_ * sizeof(float));
     load_extra(src + state_n_ * sizeof(float), pos);
     pos_ = pos;
     ahead_pos_ = -1;
