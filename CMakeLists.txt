@@ -1898,6 +1898,16 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
                                                   ggml-cpu ggml-base Threads::Threads)
     add_test(NAME poly_kv_q8_test COMMAND poly_kv_q8_test)
   endif()
+
+  # run-to-run bitwise stability of the decode kernels (the greedy-divergence probe)
+  if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
+    add_executable(poly_determinism_probe src/poly/determinism_probe.cpp)
+    target_include_directories(poly_determinism_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                              ${_strata_gpu_include_directories} ${_strata_gg}/include)
+    target_link_libraries(poly_determinism_probe PRIVATE strata_kernels ${_strata_gpu_blas_target}
+                                                         ${_strata_gpu_runtime_target}
+                                                         ggml-cpu ggml-base Threads::Threads)
+  endif()
 endif()
 
 if(STRATA_BUILD_TESTS)
