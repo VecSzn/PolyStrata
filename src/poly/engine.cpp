@@ -1704,7 +1704,7 @@ void Engine::alloc() {
         iota_ = (int32_t*) dmalloc(rr * sizeof(int32_t), "scratch");
         std::vector<int32_t> ramp(rr);
         std::iota(ramp.begin(), ramp.end(), 0);
-        h2d(iota_, ramp.data(), rr * sizeof(int32_t));
+        ck(cudaMemcpy(iota_, ramp.data(), rr * sizeof(int32_t), cudaMemcpyHostToDevice), "scratch");
 
         // One layer's experts pass through it at a time, so it never holds more than a layer has.  A model of
         // small experts has a few hundred MiB a layer, and the rest of the default would be VRAM that the
@@ -1790,7 +1790,7 @@ void Engine::load_state(const uint8_t* src, int64_t pos) {
     if (pos < 0 || pos > opt_.max_context) throw std::logic_error("load_state: the position is outside the context");
     OnCard here(device_, split_);
     ck(cudaStreamSynchronize(cs(st_)), "load state");
-    h2d(state_, src, state_n_ * sizeof(float));
+    ck(cudaMemcpy(state_, src, state_n_ * sizeof(float), cudaMemcpyHostToDevice), "load state");
     load_extra(src + state_n_ * sizeof(float), pos);
     pos_ = pos;
     ahead_pos_ = -1;
