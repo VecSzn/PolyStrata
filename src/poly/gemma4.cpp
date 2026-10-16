@@ -431,8 +431,15 @@ size_t Gemma4::card_row_bytes() const {
     size_t b = 0;
     for (const Block& B : blocks_) {
         if (B.swa) continue;
-        const size_t codes = opt_.kv_int8 ? (size_t) B.n_kv * B.dim : (size_t) B.n_kv * B.dim * sizeof(uint16_t);
-        b += 2 * (codes + (opt_.kv_int8 ? (size_t) B.n_kv * (B.dim / kQ8_0Values) * sizeof(uint16_t) : 0));
+        const size_t row = (size_t) B.n_kv * B.dim;
+        if (!opt_.kv_int8) {
+            b += 2 * row * sizeof(uint16_t);
+            continue;
+        }
+        const size_t delta = (size_t) B.n_kv * (B.dim / kQ8_0Values) * sizeof(uint16_t);
+        // int8: both sides codes + a delta a block.  int8k: the keys' side only - the values stay fp16, which
+        // is why the second side is row * sizeof(uint16_t) and not row.  save_card_rows() writes the same runs.
+        b += row + delta + (opt_.kv_int8_k ? row * sizeof(uint16_t) : row + delta);
     }
     return b;
 }
