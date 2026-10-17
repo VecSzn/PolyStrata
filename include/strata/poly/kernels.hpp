@@ -68,12 +68,43 @@ void kda_step(float* qkv, float* g1, const float* a, const float* beta, float* s
 void store_f16(const float* x, uint16_t* cache, int n, int64_t pos, int rows, void* stream);
 /// The same from the row the card holds at `at` when the launch runs; with `ring`, a row is its number % ring.
 void store_f16_at(const float* x, uint16_t* cache, int n, const long long* at, int rows, int ring, void* stream);
-/// Stores the tokens' rows as ggml Q8_0 (one fp16 scale a 32-value block of int8 codes) from row `pos`.
-/// codes: n int8 a row; scales: n/32 fp16 a row.  n must be a multiple of 32 (QK8_0).
-void store_q8(const float* x, int8_t* codes, uint16_t* scales, int n, int64_t pos, int rows, void* stream);
-/// The same from the row the card holds at `at` when the launch runs; with `ring`, a row is its number % ring.
-void store_q8_at(const float* x, int8_t* codes, uint16_t* scales, int n, const long long* at, int rows, int ring,
-                 void* stream);
+
+/// One side of an attention cache in --kv int8's form (store_q8, attend_q8).
+struct Q8Cache {
+    const int8_t* code = nullptr;     ///< n_kv * head_dim codes a row, kQ8_0Values of them a block, back to back
+    const uint16_t* delta = nullptr;  ///< n_kv * head_dim / kQ8_0Values halves a row, one a block
+};
+
+/// Turns a Q8_0 cache back into halves, one kQ8_0Values-block a thread (out is the same shapes as the caches:
+/// rows * n_kv * head_dim halves).  The fp16 kernels can then run over it - which is how a quantized cache is
+/// used at its best, and what llama.cpp does on CUDA: its tensor-core flash attention converts a quantized
+/// cache's K and V to f16 first ("other kernels convert these to f16"), and its Metal backend gained a dedicated
+/// pass for the same thing.  It costs one O(rows) pass to get the attention back onto the fast path.
+void dequant_q8_to_f16(const int8_t* code, const uint16_t* delta, uint16_t* out, int64_t n_blocks, void* stream);
+
+/// A runtime capability probe for the int8 tensor-core path: it runs one m16n8k32 on this card and checks the
+/// result against the same product computed on the host, so a kernel can be dispatched on the answer rather than
+/// on an assumed architecture.  True on sm_75 and up; a backend whose int8 mma is not there (HIP without
+/// mfma_i32_16x16x32_i8, older CUDA) answers false and the caller keeps dp4a.
+bool probe_mma_layout();
+
+/// A study, not part of the engine: the same 16x8x256 product through the tensor cores and through dp4a, in ms.
+void probe_mma_speed(double* mma_ms, double* dp4a_ms);
+
+/// --kv int8 keeps an attention cache's K and V as 8-bit codes with a delta a block of kQ8_0Values values: that is
+/// llama.cpp's Q8_0 rule (delta = the block's largest magnitude / 127, code = roundf(x / delta)) but NOT its block
+/// layout.  ggml's block_q8_0 is 34 bytes - a delta then 32 codes - so half its blocks put the codes at an address
+/// that is 2 mod 4 and a lane's four codes can only be read conservatively (memcpy into an int).  With the codes of
+/// a row back to back they are 4-aligned throughout and a step is one load, and a row of a layer is n_kv heads of
+/// head_dim codes, head_dim being a multiple of kQ8_0Values.  A reader carries two pointers instead of one.
+inline constexpr int kQ8_0Values = 32;
+
+/// Stores the tokens' latents (n_kv * head_dim values a row, every kQ8_0Values of them a block) as codes and their
+/// deltas from row `pos` of the layer's cache; `at` and `ring` as in store_f16_at.  Half the bytes a token takes.
+void store_q8(const float* x, int8_t* code, uint16_t* delta, int n_kv, int head_dim, int64_t pos, int rows,
+              void* stream);
+void store_q8_at(const float* x, int8_t* code, uint16_t* delta, int n_kv, int head_dim, int rows,
+                 const long long* at, int ring, void* stream);
 /// Attention over cached latents for the tokens from position `pos`.  q: n_head * rank absorbed queries a token.
 /// The first dense_rows tokens attend to every cache row up to their own.  The others each have a list in sel
 /// (sel_stride apart): top_rows cache rows, then the rows of the pool their own position is still filling.
@@ -166,15 +197,6 @@ void add_bias(const float* b, float* acc, int n, int rows, void* stream);
 void head_norm_rope(const float* x, int x_stride, const float* w, float* y, int dim, int heads, int n_rot,
                     float theta_scale, int64_t pos, int rows, float eps, void* stream, const float* freq = nullptr,
                     const int32_t* axes = nullptr, int sections = 1, const long long* at = nullptr);
-/// An attention cache stored as ggml Q8_0: a row is `n` int8 codes and `n / 32` fp16 scales with
-/// `n = kv_heads * dim`, row-major (`codes[row * n + blk * 32 + j]`, `scales[row * (n / 32) + blk]`).
-/// A q8 read is active wherever `codes` is not null.  The value a block holds is
-/// `(float)codes[..] * __half2float(scales[..])` with one scale a 32-value block.
-struct Kvq8 {
-    const int8_t* codes = nullptr;
-    const uint16_t* scales = nullptr;
-};
-
 /// Causal attention for the tokens from position `pos`: token t attends the rows 0 to pos + t, or with `window`
 /// only the last `window` of them.  q: n_head * dim a token.  kcache and vcache: fp16, kv_heads * dim a row; the
 /// heads read a row's keys and values in turn, n_head / kv_heads heads each.  With `ring`, the sequence's row p
@@ -191,13 +213,10 @@ struct Kvq8 {
 /// whole conversation then take a launch block each block of rows, where score has room for those blocks' sums
 /// of chunk tokens at the longest the call can attend (attend_split_floats()); the results differ from the other
 /// kernels' in the last bits.
-/// With `kq8` or `vq8` (codes not null) that cache is read as Q8_0 rather than fp16: its codes/scale pointers
-/// follow the same row and head index the fp16 cache would, and a block of 32 values dequantizes as
-/// `(float)codes[..] * __half2float(scales[..])`.  The fp16 path is unchanged where they are left null.
 void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows, float* score,
             int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window = 0,
-            int ring = 0, bool whole = false, const long long* at = nullptr, int room = 0, size_t score_floats = 0,
-            Kvq8 kq8 = {}, Kvq8 vq8 = {});
+            int ring = 0, bool whole = false, const long long* at = nullptr, int room = 0,
+            size_t score_floats = 0);
 /// The floats of score that attend()'s blocks of rows take for calls of up to chunk tokens attending up to max_rows
 /// rows (score_floats): with that much a model's every call takes them.
 size_t attend_split_floats(int chunk, int n_head, int max_rows, int dim);
@@ -211,15 +230,25 @@ size_t attend_split_floats(int chunk, int n_head, int max_rows, int dim);
 /// std::runtime_error.
 /// Heads of 64 values in groups of 4 over the whole conversation take one kernel instead, which keeps the scores in
 /// registers, on NVIDIA cards from Turing on; it uses neither blas, score nor work.
-/// With `kq8` or `vq8` (codes not null) that cache is read as Q8_0 like attend(): before each block of `m` keys
-/// the product reads, its rows are dequantized into the fp16 workspace `kwork` / `vwork`, and the products then
-/// read that exactly as they read an fp16 cache, so the results match attend()'s q8 read.  Each workspace holds
-/// work_halves halves, `work_halves / (kv_heads * dim)` rows at most: a block of keys larger than that is split,
-/// taking more products.  The fp16 path (both null) is unchanged and reads the caches where they lie.
 void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows,
                   float* score, size_t score_floats, float* work, float* out, int dim, int n_head, int kv_heads,
-                  float scale, void* stream, int window = 0, int ring = 0, bool whole = false, Kvq8 kq8 = {},
-                  Kvq8 vq8 = {}, uint16_t* kwork = nullptr, uint16_t* vwork = nullptr, size_t work_halves = 0);
+                  float scale, void* stream, int window = 0, int ring = 0, bool whole = false);
+/// attend() over Q8_0 caches (store_q8): the same attention, the same order of products and sums.  `q8` is scratch
+/// in the same form for this call's queries (rows * n_head * dim / kQ8_0Values blocks of codes, and as many
+/// deltas).  A score is a dp4a of a lane's own run of codes - the query's against the key's, both 4-aligned - and
+/// the block's two deltas scale the integer sum once: llama.cpp's vec_dot_q8_0_q8_1, whose whole point is that
+/// neither side is ever turned into floats.  No transposed-value path (a decode-time call has few tokens and reads
+/// the weights from the scores' buffer).  `at` (a recorded launch) and `room` as in attend().
+void attend_q8(const float* q, Q8Cache q8, Q8Cache k, Q8Cache v, int64_t pos, int rows, float* score, int chunk,
+               float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window = 0, int ring = 0,
+               bool whole = false, const long long* at = nullptr, int room = 0);
+/// attend_q8 with the values' side left in fp16 (--kv int8k): the scores are the q8 ones against the keys'
+/// codes, the weighted sums read the fp16 cache the usual way.  `v_h` is the values' cache, `n_kv * dim`
+/// halves a row, the ring's included.
+void attend_q8_mixed(const float* q, Q8Cache q8, Q8Cache k, const uint16_t* v_h, int64_t pos, int rows,
+                     float* score, int chunk, float* out, int dim, int n_head, int kv_heads, float scale,
+                     void* stream, int window = 0, int ring = 0, bool whole = false,
+                     const long long* at = nullptr, int room = 0);
 /// x = cap * tanh(x / cap).
 void softcap(float* x, size_t n, float cap, void* stream);
 /// The first of the largest of n logits and the softmax's probability of it, summed without the logits more than
@@ -238,6 +267,12 @@ void mul_sigmoid(float* acc, const float* g, int n, int rows, int g_stride, bool
 /// tokens to go back to (gdn_step too): `snaps` has a bit for each token that leaves it, and the states lie in
 /// the tokens' order, `stride` floats apart.
 void conv4_silu(const float* x, float* state, const float* w, float* out, int channels, int rows, void* stream,
+                float* snap = nullptr, size_t stride = 0, unsigned snaps = 0);
+/// The LFM2 shortconv: a depthwise causal convolution of three taps over `channels` channels, whose input is the
+/// product of the first and the third of the three chunks `proj` holds a token (`channels` values each), and
+/// whose output is multiplied by the second.  state: 2 past inputs a channel, oldest first, advanced here by
+/// `rows` tokens.  w: (3, channels).  snap and snaps as in conv4_silu.
+void shortconv3(const float* proj, float* state, const float* w, float* out, int channels, int rows, void* stream,
                 float* snap = nullptr, size_t stride = 0, unsigned snaps = 0);
 /// LFM2's gated short convolution (llama.cpp's shortconv block between its two projections).  bcx: B, C and x of a
 /// token, `channels` values each, as the in_proj writes them.  out = C * conv3(B * x), `channels` values a token,

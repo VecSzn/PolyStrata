@@ -981,8 +981,6 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
     const Shards file(o.model);
     const MetaValue* arch = file.get("general.architecture");
     const std::string name = arch ? arch->s : std::string();
-    if (o.kv_format == KvFmt::kQ8_0 && name != "qwen35moe")
-        throw std::runtime_error("--kv q8_0 is only supported for qwen35moe models in v1; this is a '" + name + "' model");
     const auto make = [&]() -> std::unique_ptr<Engine> {
         if (name == "glm5-next" || name == "glm5next") return std::make_unique<Glm5Next>();   // Unsloth: no hyphen
         if (name == "qwen35moe") return std::make_unique<Qwen35>();

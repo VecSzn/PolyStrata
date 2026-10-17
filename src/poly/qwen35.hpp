@@ -58,12 +58,21 @@ private:
         Dev wq, wk, wv, q_norm, k_norm;
         uint16_t* keys = nullptr;   ///< max_context * n_kv * head_dim, fp16
         uint16_t* vals = nullptr;
-        // q8_0 cache (opt-in): codes are n_kv*head_dim int8 a row; scales are one fp16 per 32-value block
-        // (n_kv*(head_dim/32) a row).  Used instead of keys/vals when Options::kv_format == kQ8_0.
-        int8_t*   k_codes  = nullptr;
-        uint16_t* k_scales = nullptr;
-        int8_t*   v_codes  = nullptr;
-        uint16_t* v_scales = nullptr;
+        int8_t* k_code = nullptr;     ///< --kv int8: a head's codes, n_kv * head_dim of them a row, back to back
+        uint16_t* k_delta = nullptr;  ///< and one delta a block of kQ8_0Values, in an array of its own
+        int8_t* v_code = nullptr;
+        uint16_t* v_delta = nullptr;
+        /// The fp16 copies a prompt batch reads.  The fp16 kernels are the fast path (a GEMM through cuBLAS) and
+        /// getting back onto it costs one O(rows) pass, against an attention that is O(rows^2).  llama.cpp does
+        /// the same on CUDA: its tensor-core flash attention converts a quantized cache's K and V to f16 first.
+        /// One pair serves the whole model (Qwen35::sh_k_f16_): the layers run one at a time, in order, so each
+        /// takes the pair as the one before it left it.  A pair a layer would be as much VRAM as the fp16 cache
+        /// itself -- 22.5 KB a token over the eleven attention layers, against the 11.7 KB int8 keeps -- so the
+        /// conversion would cost more than the quantization saves.
+        uint16_t* k_f16 = nullptr;
+        uint16_t* v_f16 = nullptr;
+        /// the layer has an attention cache, in one form or the other (only one of the pairs above is ever set)
+        bool cached() const { return keys != nullptr || k_code != nullptr; }
         Dev sh_gate_inp;   ///< the shared expert's gate
     };
 
@@ -71,6 +80,9 @@ private:
     void attn(Block& B, int64_t pos, int n);
     void attn_rows(Block& B, int n);
     void attn_store(Block& B, int64_t pos, int n);
+    /// One row of a layer's attention cache, in whichever form --kv chose (defined in qwen35.cpp: the Q8_0 form's
+    /// kQ8_0Values/kQ8_0Bytes live in kernels.hpp).  Both halves of a pair share it.
+    size_t cache_row_bytes() const;
     void turn_of(int64_t row, int32_t* thw) const;
     const int32_t* turns(int64_t pos, int n, int64_t* first);
 
@@ -87,13 +99,22 @@ private:
     int n_gdn_ = 0, n_attn_ = 0;
     int chunk_ = 1;   ///< tokens the attention takes at a time
 
+    /// The one pair of fp16 copies the attention layers take turns over (Block::k_f16).  `f16_owner_` is the layer
+    /// whose rows they hold and `f16_rows_` how far they are filled: a layer brings them up to date from its own
+    /// cache, and a layer that is not the one that left them does it from row 0.  A request re-converts O(rows) a
+    /// layer -- against an attention that is O(rows^2) -- where a pair a layer converted once and never again.
+    uint16_t* sh_k_f16_ = nullptr;
+    uint16_t* sh_v_f16_ = nullptr;
+    const Block* f16_owner_ = nullptr;
+    int64_t f16_rows_ = 0;
+
     // device scratch
     float *proj_ = nullptr, *qkv_ = nullptr, *z_ = nullptr, *alpha_ = nullptr, *beta_ = nullptr, *gated_ = nullptr;
     float *qg_ = nullptr, *q_ = nullptr, *kraw_ = nullptr, *k_ = nullptr, *v_ = nullptr, *att_ = nullptr,
           *score_ = nullptr, *sg_ = nullptr;
+    int8_t* q8c_ = nullptr;      ///< --kv int8: this call's queries as codes and deltas, for attend_q8
+    uint16_t* q8d_ = nullptr;
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
-    float* q8w_ = nullptr;             ///< a q8 prompt batch's K and V blocks, dequantized to fp16 (kwork | vwork)
-    size_t work_halves_ = 0;           ///< the halves of each of q8w_'s two halves (kQ8WorkRows rows at most)
 
 };
 

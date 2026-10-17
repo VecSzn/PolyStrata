@@ -258,7 +258,7 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--draft-model FILE.gguf` | | a file of the same model to take that block from, when `--model` has none; setup passes the one it downloaded |
 | `--draft-vocab N` | 131072 for Qwen3.6, Ornith and Tiel Coder, all of it for the others | the block guesses among the vocabulary's first N tokens; 0 = all |
 | `--kv-whole` | on an AMD card | give the attention caches VRAM for the whole context at load, not as the conversation grows; setup writes it for an AMD card, where ROCm keeps the VRAM the expert cache gives back ([AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta)) |
-| `--kv fmt` | fp16 | the K and V attention caches' format: `fp16` (default, unchanged) or `q8_0` (ggml Q8_0 blocks: one fp16 scale a 32-value block of int8 codes): half the KV VRAM, the same answers on the tested models ([Q8_KV.md](Q8_KV.md)) |
+| `--kv fmt` | fp16 | the K and V attention caches' format: `fp16` (default, unchanged), `int8` (ggml's Q8_0 rule — a fp16 delta a 32-value block of int8 codes — held as codes and deltas in two arrays and read by `__dp4a`/int8-MMA kernels: half the KV VRAM, the same answers on the tested models), or `int8k` (the keys' side int8, the values' fp16). `q8_0` stays as an alias of `int8` ([Q8_KV.md](Q8_KV.md)) |
 | `--prompt-batch N` | 1024 | prompt tokens read at a time, 1 to 4096; about 1.4 MiB of VRAM each |
 | `--stage-mib N` | 2048 | VRAM the experts outside the cache pass through while a prompt is read |
 | `--stage-ahead N` | 1024 | from N tokens, a batch copies those experts before the layer has chosen, as does every batch of a prompt of N tokens or more that is read several at a time; 0 = never |
@@ -274,10 +274,12 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 
 `strata-poly` with no arguments prints the list, with the options for running it without the server.
 
-`--kv q8_0` is new: it stores the attention K and V caches as ggml Q8_0 blocks and is opt-in for the
-`qwen35moe` models. [Q8_KV.md](Q8_KV.md) has the format, the measured VRAM saving (46.88% at 131072), the
-fp16↔q8_0 parity on Tiel, Ornith and Occamy, and what was left alone (the `strata` engine, `glm5next`, Gemma 4,
-the default path).
+`--kv int8` replaces `--kv q8_0` (which stays as an alias): the caches keep the same Q8_0 numbers — a fp16
+delta a 32-value block of int8 codes — but as codes and deltas in two arrays, and the attention reads them
+with `__dp4a` and int8 tensor-core kernels instead of dequantizing element by element; `--kv int8k` mixes
+int8 keys with fp16 values. Gemma 4 takes the whole set (`--kv int8` and `--kv int8k`).
+[Q8_KV.md](Q8_KV.md) has the format, the measured VRAM saving (46.88% at 131072), the layer-dump parity and
+the speed A/B, and what was left alone (the `strata` engine, `glm5next`, the default path).
 
 ## What is missing
 
