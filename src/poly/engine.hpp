@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,9 +36,6 @@ namespace strata::poly {
 
 class Shards;
 struct Likeliest;
-
-/// The attention caches' storing format: fp16 (default) or ggml Q8_0; opt-in via --kv.
-enum class KvFmt { kFp16 = 0, kQ8_0 = 1 };
 
 struct Options {
     std::string model;
@@ -67,7 +65,6 @@ struct Options {
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
                                   ///< so; false: for the whole context at load, as the expert cache gets the rest
-    KvFmt kv_format = KvFmt::kFp16;   ///< the K and V caches' format; fp16 by default (byte-identical path)
     int window = 0;               ///< the most tokens window() takes: the known one and guesses after it; 1: none;
                                   ///< 0: 8, or 4 where every guess keeps a copy of the recurrent state
     bool draft = true;            ///< run the block that guesses ahead, when there is one and window is above 1
@@ -81,6 +78,10 @@ struct Options {
     std::string layer_split;      ///< the layers across the CUDA devices this process sees, in their order: "auto"
                                   ///< (by each card's free VRAM) or the first layer of each later card ("20,30");
                                   ///< empty, or one device: the current card alone
+    bool kv_int8 = false;         ///< the attention caches keep K and V as llama.cpp's Q8_0 blocks (32 values,
+    bool kv_int8_k = false;  ///< --kv int8k: the keys' side is codes, the values' stays fp16 (gemma4)
+                                  ///< 34 B: a fp16 delta and 32 int8 codes) instead of fp16, about halving the VRAM
+                                  ///< a token takes; every reader dequantizes a block in the kernel (--kv int8)
     int batch = 0;                ///< sequences beside the first, each with a state and caches of its own (bind(),
                                   ///< step()); 0: one sequence
 };
@@ -179,6 +180,9 @@ public:
     double numa_share() const { return node_share_; }
     int64_t pos() const { return pos_; }
     int64_t meta_u(const char* key, int64_t fallback) const;
+    bool meta_f(const char* key, float& out) const;   ///< the file's own number for a metadata key, false when absent
+    bool meta_i(const char* key, int64_t& out) const;
+    int32_t token_id(const char* text) const;         ///< the id of the vocabulary token `text`, or -1
 
     /// Forget the sequence.
     void reset();
@@ -420,6 +424,8 @@ protected:
     Dev upload(const TensorInfo* t, const std::string& name, int64_t n_in, int64_t n_out, Want want,
                float (*fix)(float) = nullptr);
     const TensorInfo* tensor(int il, const char* name) const;
+    /// A tensor that stands outside the layers - the output norm and the output matrix - under any of its names.
+    const TensorInfo* tensor(const char* name) const;
     const Shards& home(const TensorInfo& t) const;
     const MetaValue* meta_in(const Shards& g, const char* key) const;
     /// A number of the model's shape, which its file must have.

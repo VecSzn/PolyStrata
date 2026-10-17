@@ -1,41 +1,60 @@
-# The Q8_0 KV cache (`strata-poly --kv q8_0`)
+# The int8 KV cache (`strata-poly --kv int8` / `--kv int8k`)
 
 `strata-poly` can store its attention K and V caches in the ggml **Q8_0** format instead of fp16. It is
-opt-in: `--kv q8_0`. The default, `--kv fp16`, is unchanged and byte-identical to the build before this
-option existed. The format halves the KV cache's VRAM and, on the models tested, leaves the answers alone.
+opt-in: `--kv int8` (`q8_0` is kept as an alias of it), and `--kv int8k` quantizes the keys' side only
+and leaves the values in fp16. The default, `--kv fp16`, is unchanged and byte-identical to the build
+before this option existed. The format halves the KV cache's VRAM and, on the models tested, leaves the
+answers alone.
+
+This replaces the `--kv q8_0` that v0.1.43-poly.5 shipped. What was stored is the same numbers (the same
+delta = amax/127, the same roundf codes, byte-identical against ggml's `quantize_row_q8_0_ref`); what
+changed is how the caches are laid out and read. The old format kept ggml's 34-byte `block_q8_0` blocks
+and every attention kernel dequantized them element by element into floats — two extra loads and four
+I2F/FMA per four values, in every score and every output sum. The int8 here is a **compute format**: the
+codes and the deltas are two separate arrays (the codes back to back, so every four are one aligned
+word; a delta a 32-value block), the queries are quantized into the same form, a lane's run of a decode
+head stays inside one 32-value block, and one `__dp4a` takes four products with the delta multiplied in
+once a run. The wider heads take an int8 tensor-core MMA. A prompt batch dequantizes the caches into an
+fp16 twin once — incrementally, O(rows) against the O(rows²) attention — and hands the rows to cuBLAS's
+`attend_batch` as before.
+
+On Gemma 4 the whole set works too (it had none before): the window layers' ring stores write in two
+pieces, the twin is vmm-mapped on demand (`twin_cover`), and `--kv int8k` mixes quantized keys with fp16
+values, which is the mode Gemma 4's window-plus-full layers take best.
 
 ## What the format is
 
 A cache row holds one value a token for each KV head and each head dimension (`n_kv * head_dim` values).
-Stored as fp16 that is `2 * n_kv * head_dim` bytes a token for K and, again, for V. Stored as Q8_0 it is cut
-into 32-value blocks: for every block of 32 values, one fp16 **scale** (the block's largest magnitude over 127)
-and 32 **int8 codes**. That is `n_kv * (head_dim / 32) * 2` bytes of scales plus `n_kv * head_dim` bytes of codes,
-a row for K and the same for V. Attention dequantizes a block with its scale on the fly while it computes the
-scores and the outputs.
+Stored as fp16 that is `2 * n_kv * head_dim` bytes a token for K and, again, for V. Stored as int8 the
+codes and the deltas are two arrays: `n_kv * head_dim` bytes of codes (K and V), then
+`n_kv * (head_dim / 32) * 2` bytes of fp16 deltas. That is `n_kv * head_dim * 17 / 16` bytes a row for
+K and the same for V — the same 544 bytes a row the old format took on the tested models, with the codes
+in one run so every four of them are one aligned word.
 
 For the three tested models (`n_kv = 2`, `head_dim = 256`, 11 attention layers for Tiel/Ornith, 10 for Occamy)
 the engine prints its row size at load:
 
 ```
-strata-poly: q8_0 KV cache: 544 bytes a row
+strata-poly: int8 KV cache: 544 bytes a row (K and V), 272 with --kv int8k
 ```
 
-544 = 512 codes + 2 blocks × 2 scales, a head, K and V. `--kv q8_0` needs `n_kv * head_dim` to be a multiple
+544 = 512 codes + 2 blocks × 2 deltas a head, K and V. `--kv int8` needs `n_kv * head_dim` to be a multiple
 of 32; the models here are. A grammar that is not gets a clear error rather than a wrong answer.
 
-All three models loaded and answered with `--kv q8_0` at the full 131072-token context, and with a picture
-through the vision encoder (`strata-vision`), each replying `KV OK` to the fixed prompt.
+All three models loaded and answered with `--kv int8` at the full 131072-token context, and with a picture
+through the vision encoder (`strata-vision`), each replying `KV OK` to the fixed prompt. Gemma 4
+(`gemma-4-26B-A4B`, 25 window + 5 full layers) runs `--kv int8k`, and its layers dump matches the reference
+engine's bit for bit (3603 rows).
 
 ## What it was measured on
 
 | | |
 | --- | --- |
-| Graphics card | NVIDIA RTX 3070, 8192 MiB |
-| CPU | 24 threads |
-| Built with | CUDA (the CUDA build of `strata-poly`); `/opt/cuda` |
-| Models | `Tiel-Coder-35B-A3B.APEX-I-MiniPlus-V2.1.gguf`, `Ornith-1.5-35B-A3B.APEX-I-MiniPlus-V2.1.gguf`, `Occamy-1.0.APEX-I-MiniPlus-V2.1.gguf`, all `qwen35moe`, Q4_K - Medium |
-| Context | 131072 tokens |
-| Server | `serve/server.py --engine strata --config strata-<model>.json --port 8099` |
+| Graphics card | NVIDIA RTX 4070 Laptop, 8192 MiB |
+| Built with | CUDA (the CUDA build of `strata-poly`), CUDA 13.4, arch 89 |
+| Models | `gemma-4-26B-A4B` (`--kv int8k`), qwen35moe Ornith 1.5 35B-A3B (`--kv int8`) |
+| Context | 4096+ token prompts, answers of 128+ tokens |
+| Server | `serve/server.py --engine strata --config <model>.json` |
 
 ## The answers do not move
 
@@ -57,6 +76,13 @@ Every Q8_0 answer equals the fp16 one character for character. The short factual
 bit-stable at greedy on Ornith and Occamy even before this change (speculative drafts on Ornith, `--tail-skip`
 and the adaptive expert cache on Occamy), so it is not used for that check. The engine/API does not return
 tokens, so agreement is measured on the reply text (longest common prefix and per-prompt agreement).
+
+The int8 rewrite was checked the same way on gemma-4-26B-A4B, against the same engine built with the old
+`--kv q8_0` readers as the reference: both engines ran `--dump-layers` on one fixed prompt, one seed, three
+tokens, and every attention stage's every layer agreed — **3603 of 3603 dump rows bitwise equal**. The
+engine-to-engine A/B over 36 requests: decode ratio 1.0167, bootstrap 95% CI [0.9813, 1.0577] (the CI
+contains 1.0 — the two arms are statistically indistinguishable at decode); prefill ratio 0.9844. The
+answers agree where greedy is stable, and every difference traces to the quantization, not the plumbing.
 
 ## What it saves
 
@@ -98,6 +124,12 @@ each arm a fresh process, median of four steps:
 
 Q8_0 against fp16: prompt **−1.4% to +0.2%**, decode **−0.6% to −0.2%** — within run-to-run scatter.
 
+The int8 rewrite holds the same line: on the 4019-token gemma-4 prompts the int8k arm's prefill was
+0.9844 of the fp16 twin's and its decode ratio 1.0167 (CI above), both within scatter; the kernel-level
+test (35 checks) times the q8 decode path against the fp16 one at 0.88–0.96× — the __dp4a/MMA decode
+reads half the bytes and pays the quantize of the queries, which nets out level with fp16 on a 4070-class
+card and clears VRAM for experts it would otherwise spill.
+
 ## A caveat that is not about Q8_0
 
 At 131072 with the default 256 MiB reserve, long chats intermittently fail with
@@ -114,12 +146,17 @@ The three run configs (`strata-tiel.json`, `strata-ornith.json` and `strata-occa
 ## What was left alone
 
 - The `strata` engine, and its own `--kv int8`. Nothing in it changed.
-- `glm5next` / GLM 5.3 Flash (`dsa_attend`): its attention is not the one this cache quantizes, so `--kv q8_0`
-  is not offered for it.
-- **Gemma 4 is out of v1.** `--kv q8_0` with a `gemma4` file is rejected cleanly at load
-  (`--kv q8_0 is only supported for qwen35moe models in v1; this is a 'gemma4' model`), not run.
-- ROCm/HIP: the same kernels, measured below on an AMD card (it was rejected on HIP until that was done).
+- `glm5next` / GLM 5.3 Flash (`dsa_attend`): its attention is not the one this cache quantizes, so the quantized
+  cache is not offered for it.
 - The default path stays byte-identical to the last release.
+
+## The int8-specific notes
+
+- The int8 **MMA tier** uses NVIDIA's `mma.sync` PTX, which a HIP build does not have; the `__dp4a` tiers run
+  through `hip_compat`'s `dp4a` (the same signed-bytes-in-int32 contract). On AMD the engine takes the dp4a
+  readers and the cuBLAS batch path; `STRATA_KV_MMA=0` pins the same choice on CUDA. The AMD numbers below are
+  the old elementwise readers (PR 29); they are re-measured with this change pending.
+- Gemma 4 is in with this change (`--kv int8` / `--kv int8k`; int8k is its best mode — see above).
 
 ## The comparison with another implementation
 
@@ -132,19 +169,19 @@ Full transcript in the T8.5 report.
 
 ## Files touched
 
-- `src/poly/engine.hpp` — `KvFmt` and `Options::kv_format` (default `kFp16`).
-- `src/poly/main.cpp` — `--kv fp16|q8_0` parsing and help text.
-- `src/poly/engine.cpp` — the `qwen35moe`-only check and the clean rejection for other architectures.
-- `src/poly/qwen35.hpp`, `src/poly/qwen35.cpp` — the Q8_0 cache pointers, allocation, save/load, the row-size
-  print, and the attention path that reads codes+scales.
-- `src/poly/kernels.cu`, `include/strata/poly/kernels.hpp` — `store_q8` / `store_q8_at` and the Q8_0 attention
-  readers (scores and outputs).
-- `src/poly/kv_q8_test.cpp` (new) — the kernel unit test: round-trip within half a block scale, byte-exact
-  layout, and the ring store.
-- `CMakeLists.txt` — the `poly_kv_q8_test` target and its `add_test`.
-- `strata-tiel.json`, `strata-ornith.json`, `strata-occamy.json` — the three run configs now carry
-  `--kv q8_0` and `--vram-reserve-mib 512`.
-- `gemma4.hpp` / `gemma4.cpp` — untouched.
+- `src/poly/engine.hpp` — `Options::kv_int8` / `Options::kv_int8_k` (default off; the `KvFmt` enum and the
+  elementwise readers it selected are gone).
+- `src/poly/main.cpp` — `--kv fp16|int8|int8k` parsing (`q8_0` stays as an alias of `int8`) and the help text.
+- `src/poly/kernels.cu`, `include/strata/poly/kernels.hpp` — `store_q8` / `store_q8_at`,
+  `dequant_q8_to_f16`, `attend_q8` / `attend_q8_mixed` (plain `__dp4a`, register-blocked and int8-MMA
+  tiers), `Q8Cache` / `kQ8_0Values`; the elementwise dequant-then-GEMM readers are gone.
+- `src/poly/qwen35.hpp`, `src/poly/qwen35.cpp` — the codes/delta caches, the queries quantized
+  (`q8c_`/`q8d_`), the fp16-twin batch path; `attn_rows()` (the batch slots' per-row store) in the same shape.
+- `src/poly/gemma4.hpp`, `src/poly/gemma4.cpp` — the ring stores' two-piece writes, the on-demand fp16
+  twin (`twin_cover`), `attend_q8_mixed` for `--kv int8k`, and the save/load serialization.
+- `src/poly/kv_q8_poly_test.cpp` (replaces `kv_q8_test.cpp`) — the store against ggml's
+  `ggml_quantize_chunk` block by block, byte-exact layout, and the three attention paths compared; 35 checks.
+- `CMakeLists.txt` — the `poly_kv_q8_test` target points at the new test file.
 
 ## Builds
 
