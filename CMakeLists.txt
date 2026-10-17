@@ -1794,6 +1794,25 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
              iq4_xs)
     list(APPEND _strata_poly_mmq_instances ${_strata_mmq}/template-instances/mmq-instance-${_t}.cu)
   endforeach()
+  # MXFP4: on RTX 50 llama.cpp's tiles use the FP4 MMA with block scales, which exists only in the arch-specific
+  # target, so on CUDA its instance alone is built with 12x -> 12xa, as Strata's W4A4 unit is.  A Blackwell other
+  # than 12.0 has no image of it, and Mmq::fits() leaves MXFP4 out there.
+  set(_strata_poly_mxfp4 ${_strata_mmq}/template-instances/mmq-instance-mxfp4.cu)
+  if(STRATA_ENABLE_HIP)
+    list(APPEND _strata_poly_mmq_instances ${_strata_poly_mxfp4})
+  else()
+    set(_strata_poly_fp4_archs ${CMAKE_CUDA_ARCHITECTURES})
+    list(TRANSFORM _strata_poly_fp4_archs REPLACE "^(12[0-9])$" "\\1a")
+    list(TRANSFORM _strata_poly_fp4_archs REPLACE "^(12[0-9])-(real|virtual)$" "\\1a-\\2")
+    add_library(strata_poly_mmq_mxfp4 OBJECT ${_strata_poly_mxfp4})
+    set_target_properties(strata_poly_mmq_mxfp4 PROPERTIES CUDA_ARCHITECTURES "${_strata_poly_fp4_archs}")
+    target_include_directories(strata_poly_mmq_mxfp4 PRIVATE ${_strata_gg}/include ${_strata_gg}/src ${_strata_mmq})
+    target_compile_options(strata_poly_mmq_mxfp4 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda -use_fast_math>)
+    if(MSVC)
+      target_compile_options(strata_poly_mmq_mxfp4 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/bigobj>)
+    endif()
+    list(APPEND _strata_poly_mmq_instances $<TARGET_OBJECTS:strata_poly_mmq_mxfp4>)
+  endif()
   if(STRATA_ENABLE_HIP)
     # CMake does not infer HIP from the .cu suffixes outside src/ (and drops a .cu source it has no language
     # for), and ggml's MMQ sources take its native HIP path (vendors/hip.h) instead of the hip_compat headers,
@@ -1884,11 +1903,11 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
   target_include_directories(poly_workers_test PRIVATE ${_strata_gg}/include)
   target_link_libraries(poly_workers_test PRIVATE ggml-cpu ggml-base Threads::Threads)
   add_test(NAME poly_workers_test COMMAND poly_workers_test)
-  # MXFP4 experts converted to Q5_0 at load, against ggml-cpu's arithmetic on random blocks, without a model
-  add_executable(poly_mxfp4_test src/poly/mxfp4_test.cpp src/poly/cpu_experts.cpp)
-  target_include_directories(poly_mxfp4_test PRIVATE ${_strata_gg}/include)
-  target_link_libraries(poly_mxfp4_test PRIVATE ggml-cpu ggml-base Threads::Threads)
-  add_test(NAME poly_mxfp4_test COMMAND poly_mxfp4_test)
+  # the card's MXFP4 product against ggml's dequantizer on random blocks, without a model; needs a card, run by hand
+  add_executable(poly_mxfp4_test src/poly/mxfp4_test.cu)
+  target_include_directories(poly_mxfp4_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gg}/include
+                                                    ${_strata_gpu_include_directories})
+  target_link_libraries(poly_mxfp4_test PRIVATE strata_kernels ggml-base ${_strata_gpu_runtime_target})
   # --kv int8's kernels: store_q8 against ggml's own quantizer, and the q8 readers against attend()/attend_batch()
   if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
     add_executable(poly_kv_q8_test src/poly/kv_q8_poly_test.cpp src/poly/kernels.cu)

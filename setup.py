@@ -5818,6 +5818,29 @@ def poly_held_gb(d, vram_gb) -> float:
     return min(d["arena_gb"], max(0.0, vram_gb - poly_beside_gb(d)) * 1.073741824)
 
 
+def poly_parallel_note(asked: int | None, d, vram_gb) -> list[str]:
+    """What setup says of "parallel" for a strata-poly size: answers written together pay where the card holds every
+    expert of the size.  Where most of them run on the CPU, different requests route to different experts and the
+    CPU does each one's: on the 8 GB laptop three Qwen3.6 UD-Q3_K_M chats at once wrote 105 tokens/s together and
+    79 one after the other, so there "parallel" gains less than it does on a large card."""
+    whole = poly_held_gb(d, vram_gb) >= d["arena_gb"]
+    turns = ("on this card most experts run on the CPU and do each request's own, so requests at once gain less: on "
+             "an 8 GB laptop three chats at once wrote about a third faster than one after the other (docs/BATCHING.md)")
+    if asked is None or asked <= 1:
+        if whole:
+            return ["Several requests at once (opt-in): --parallel 2 to 4 writes their answers together, each in a "
+                    "slot whose attention rows take VRAM from the expert cache as its conversation grows "
+                    "(docs/BATCHING.md)."]
+        return [f"Several requests at once (opt-in, --parallel N): {turns}."]
+    lines = [f"parallel requests: {asked} at once (each slot's attention rows take VRAM from the expert cache as its "
+             "conversation grows)"]
+    if asked > PARALLEL_MAX:
+        lines.append(f"the engine runs at most {PARALLEL_MAX} at once; it will use {PARALLEL_MAX}")
+    if not whole:
+        lines.append(turns)
+    return lines
+
+
 def poly_batch(fam, d, vram_gb, ctx) -> bool:
     """Whether setup's config reads a prompt 2,048 tokens at a time instead of the engine's 1,024: on a card that holds
     every expert of a size beside the larger batch and the context's rows past 32K, with a GiB to spare, llama.cpp's
@@ -6165,7 +6188,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         ("--vision-tokens", not sees and a.vision_tokens is not None),
         ("--kv", a.kv), ("--kv-streaming", a.kv_streaming != "auto"), ("--rope-scaling", a.rope_scaling),
         ("--rope-scale", a.rope_scale is not None), ("--low-ram", a.low_ram != "auto"),
-        ("--resident-budget-gib", a.resident_budget_gib is not None), ("--parallel", a.parallel is not None),
+        ("--resident-budget-gib", a.resident_budget_gib is not None),
         ("--draft-vocab", a.draft_vocab), ("--layer-split", a.layer_split and not multi), ("--calibrate", a.calibrate),
         ("--experimental-speed-projection",
          (a.experimental_speed_projection or "off").strip().lower() not in ("off", "no", "n", "0"))) if given]
@@ -6429,6 +6452,11 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
                          "max_tokens": vt}
         if vision == "cpu":
             cfg["vision"]["threads"] = max(1, (os.cpu_count() or 8) // 2)
+    # requests at once: written only when given, else an earlier "parallel" is carried over (write_setup_config)
+    if a.parallel is not None:
+        cfg["parallel"] = a.parallel if a.parallel >= 2 else 1
+    for line in poly_parallel_note(a.parallel, d, vram):
+        (ok if a.parallel is not None else say)(line if a.parallel is not None else "  " + line)
     poly_kv_whole(cfg)
     write_setup_config(cfg_path, cfg, earlier)
     script = write_run_script(tag, cfg_path, port, cfg.get("open_browser") is not False)

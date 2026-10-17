@@ -42,6 +42,7 @@ protected:
     void block_attend(int64_t pos, int n) override;
     void block_rows(int64_t pos, int n) override;
     int head_key(int il, int n) const override;
+    bool batch_heads() const override { return true; }
     int64_t turn(int64_t row) const override;
 
 private:
@@ -77,6 +78,7 @@ private:
 
     void gdn(Block& B, int n);
     void attn(Block& B, int64_t pos, int n);
+    void attn_rows(Block& B, int n);
     void attn_store(Block& B, int64_t pos, int n);
     /// One row of a layer's attention cache, in whichever form --kv chose (defined in qwen35.cpp: the Q8_0 form's
     /// kQ8_0Values/kQ8_0Bytes live in kernels.hpp).  Both halves of a pair share it.

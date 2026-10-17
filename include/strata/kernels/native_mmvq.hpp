@@ -160,7 +160,7 @@ bool native_mmvq_ids(int ggml_type, const MmvqIds& ids, int count, int n_in, int
 
 // Storage/dispatch helpers take stable GGML type IDs, avoiding a ggml runtime
 // dependency in the engine: Q4_0=2, Q5_0=6, Q8_0=8, Q2_K=10, Q3_K=11, Q4_K=12, Q5_K=13,
-// Q6_K=14, IQ4_NL=20, IQ4_XS=23, Q2_0=42. Unsupported IDs throw in the byte-count
+// Q6_K=14, IQ4_NL=20, IQ4_XS=23, MXFP4=39, Q2_0=42. Unsupported IDs throw in the byte-count
 // and launch helpers; only the
 // capability query returns false.
 bool native_mmvq_supported(int ggml_type) noexcept;

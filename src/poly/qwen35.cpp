@@ -161,6 +161,7 @@ void Qwen35::alloc_caches() {
         }
     }
     chunk_ = (int) std::clamp<size_t>(kScoreFloats / ((size_t) n_head_ * opt_.max_context), 1, (size_t) rows_);
+    if (axes_) return;   // bind(): a call's scratch is every sequence's
     axes_ = (int32_t*) dmalloc((size_t) rows_ * 3 * sizeof(int32_t), "a call's rotary positions");
     h_axes_.resize((size_t) rows_ * 3);
 }
@@ -286,10 +287,20 @@ void Qwen35::gdn(Block& B, int n) {
     lin(B.wz, xn_, z_, n, xq_);
     lin(B.alpha, xn_, alpha_, n, xq_);
     lin(B.beta, xn_, beta_, n, xq_);
-    conv4_silu(proj_, B.past, fp(B.conv), qkv_, conv_dim_, n, st_,
-               snap_bits_ ? snap_at_ + (B.past - state_) : nullptr, rec_n_, snap_bits_);
-    gdn_step(qkv_, alpha_, beta_, fp(B.dt), fp(B.a), B.s, z_, fp(B.o_norm), gated_, s_dim_, v_heads_, k_heads_, n,
-             rms_eps_, st_, snap_bits_ ? snap_at_ + (B.s - state_) : nullptr, rec_n_, snap_bits_);
+    if (rows_of_) {   // step(): each row with its own sequence's convolution and state
+        for (int i = 0; i < n; ++i) {
+            const int s = rows_of_[i].seq;
+            const size_t c = (size_t) i * conv_dim_, h = (size_t) i * v_heads_, d = (size_t) i * d_inner_;
+            conv4_silu(proj_ + c, seq_state(s, B.past), fp(B.conv), qkv_ + c, conv_dim_, 1, st_);
+            gdn_step(qkv_ + c, alpha_ + h, beta_ + h, fp(B.dt), fp(B.a), seq_state(s, B.s), z_ + d, fp(B.o_norm),
+                     gated_ + d, s_dim_, v_heads_, k_heads_, 1, rms_eps_, st_);
+        }
+    } else {
+        conv4_silu(proj_, B.past, fp(B.conv), qkv_, conv_dim_, n, st_,
+                   snap_bits_ ? snap_at_ + (B.past - state_) : nullptr, rec_n_, snap_bits_);
+        gdn_step(qkv_, alpha_, beta_, fp(B.dt), fp(B.a), B.s, z_, fp(B.o_norm), gated_, s_dim_, v_heads_, k_heads_, n,
+                 rms_eps_, st_, snap_bits_ ? snap_at_ + (B.s - state_) : nullptr, rec_n_, snap_bits_);
+    }
     lin(B.wo, gated_, ao_, n);
 }
 
@@ -373,6 +384,7 @@ int64_t Qwen35::turn(int64_t row) const {
 }
 
 void Qwen35::attn(Block& B, int64_t pos, int n) {
+    if (rows_of_) return attn_rows(B, n);
     int64_t first;
     const int32_t* axes = turns(pos, n, &first);
     const long long* at = recording_ ? at_ : nullptr;
@@ -422,6 +434,61 @@ void Qwen35::attn(Block& B, int64_t pos, int n) {
     else
         attend(q_, B.keys, B.vals, pos, n, score_, chunk_, att_, head_dim_, n_head_, n_kv_, scale, st_, 0, 0, false,
                at, at ? room(n) : 0);
+    mul_sigmoid(att_, qg_ + head_dim_, head_dim_, n * n_head_, 2 * head_dim_, false, st_);
+    lin(B.wo, att_, ao_, n);
+}
+
+// step()'s rows, each of its own sequence: the products for all of them at once, each row's position from at_, and
+// each row's keys and values stored and attended to in its own sequence's caches.
+void Qwen35::attn_rows(Block& B, int n) {
+    const long long* at = at_;
+    lin(B.wq, xn_, qg_, n, xq_);
+    lin(B.wk, xn_, kraw_, n, xq_);
+    lin(B.wv, xn_, v_, n, xq_);
+    const float scale = 1.f / std::sqrt((float) head_dim_);
+    const size_t kv = (size_t) n_kv_ * head_dim_, hq = (size_t) n_head_ * head_dim_;
+    for (int i = 0; i < n; ++i) {
+        const Row& r = rows_of_[i];
+        const long long* ai = at + 2 * i;
+        // a row at a time: the turn takes one position and counts on from it, which suits a window's rows only
+        head_norm_rope(qg_ + 2 * i * hq, 2 * head_dim_, fp(B.q_norm), q_ + i * hq, head_dim_, n_head_, n_rot_,
+                       theta_scale_, 0, 1, rms_eps_, st_, nullptr, nullptr, sections_, ai + 1);
+        head_norm_rope(kraw_ + i * kv, head_dim_, fp(B.k_norm), k_ + i * kv, head_dim_, n_kv_, n_rot_, theta_scale_, 0, 1,
+                       rms_eps_, st_, nullptr, nullptr, sections_, ai + 1);
+        // --kv int8 stores codes and deltas in two arrays; the row is stored there and read back as halves
+        // through the fp16 twin, the way attn() reads a prompt batch (a Q8_0 cache has no cuBLAS scale).
+        uint16_t *kc = nullptr, *vc = nullptr;
+        if (opt_.kv_int8) {
+            store_q8_at(k_ + i * kv, B.k_code, B.k_delta, n_kv_, head_dim_, 1, ai, 0, st_);
+            store_q8_at(v_ + i * kv, B.v_code, B.v_delta, n_kv_, head_dim_, 1, ai, 0, st_);
+            const int64_t want = r.pos + 1;
+            int64_t from = f16_owner_ == &B && f16_rows_ < want ? f16_rows_ : 0;
+            f16_owner_ = &B;
+            if (want > from) {
+                const int per_row = n_kv_ * (head_dim_ / kQ8_0Values);
+                const size_t row_c = (size_t) n_kv_ * head_dim_;
+                const int64_t rows = want - from, blocks = rows * per_row;
+                dequant_q8_to_f16(B.k_code + from * row_c, B.k_delta + from * per_row, B.k_f16 + from * row_c, blocks,
+                                  st_);
+                dequant_q8_to_f16(B.v_code + from * row_c, B.v_delta + from * per_row, B.v_f16 + from * row_c, blocks,
+                                  st_);
+            }
+            f16_rows_ = want;
+            kc = B.k_f16;
+            vc = B.v_f16;
+        } else {
+            kc = (uint16_t*) seq_buf(r.seq, B.keys);
+            vc = (uint16_t*) seq_buf(r.seq, B.vals);
+            store_f16_at(k_ + i * kv, kc, (int) kv, ai, 1, 0, st_);
+            store_f16_at(v_ + i * kv, vc, (int) kv, ai, 1, 0, st_);
+        }
+        const int64_t keep = pos_;
+        pos_ = r.pos;
+        const int sized = room(1);
+        pos_ = keep;
+        attend(q_ + i * hq, kc, vc, r.pos, 1, score_, chunk_, att_ + i * hq, head_dim_, n_head_, n_kv_, scale, st_, 0, 0,
+               false, ai, sized);
+    }
     mul_sigmoid(att_, qg_ + head_dim_, head_dim_, n * n_head_, 2 * head_dim_, false, st_);
     lin(B.wo, att_, ao_, n);
 }

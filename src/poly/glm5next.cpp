@@ -294,7 +294,7 @@ void Glm5Next::alloc_caches() {
     const size_t conv_n = size_t(3) * d_inner_ * (kConv - 1), s_n = size_t(n_head_) * kda_dim_ * kda_dim_;
     ring_ = rows_ + kpool_;
     const size_t ring_n = (size_t) ring_ * 2 * idx_dim_;
-    float* ring = (float*) dmalloc(n_dsa_ * ring_n * sizeof(float), "the indexer cache");
+    float* ring = (float*) seq_alloc(n_dsa_ * ring_n * sizeof(float), "the indexer cache");
     float* st = state_;
     for (int il = 0; il < (int) blocks_.size(); ++il) {
         Block& B = blocks_[(size_t) il];
@@ -316,7 +316,7 @@ void Glm5Next::alloc_caches() {
     score_rows_ = (int) std::clamp<size_t>(kScoreBytes / (score_stride_ * sizeof(float)), 1, (size_t) rows_);
     sel_stride_ = idx_top_k_ + kpool_;
     const size_t n = (size_t) rows_;
-    sel_ = (int32_t*) dmalloc(n * sel_stride_ * sizeof(int32_t), "scratch");
+    if (!sel_) sel_ = (int32_t*) dmalloc(n * sel_stride_ * sizeof(int32_t), "scratch");
 }
 
 // A sparse layer's part of a state: its indexer rows of the pool the position is in, which the ring no longer
@@ -408,6 +408,31 @@ void Glm5Next::kda(Block& B, int n) {
     lin(B.wq, xn_, proj_, n, xq_);
     lin(B.wk, xn_, proj_ + d, n, xq_);
     lin(B.wv, xn_, proj_ + 2 * d, n, xq_);
+    if (rows_of_) {
+        // step(): the products for all rows at once, and each row's convolution and step in its own sequence's
+        // state.  The kernels take a row's q, k and v side by side, so they are copied together past the rows'.
+        lin(B.f_a, xn_, fa_, n, xq_);
+        lin(B.f_b, fa_, g1_, n);
+        add_bias(fp(B.dt_b), g1_, d_inner_, n, st_);
+        lin(B.beta, xn_, beta_, n, xq_);
+        lin(B.g_a, xn_, ga_, n, xq_);
+        lin(B.g_b, ga_, g2_, n);
+        float* one = proj_ + 3 * d;
+        const size_t row = (size_t) d_inner_;
+        for (int i = 0; i < n; ++i) {
+            const int s = rows_of_[i].seq;
+            for (int p = 0; p < 3; ++p)
+                ck(cudaMemcpyAsync(one + p * row, proj_ + p * d + i * row, row * sizeof(float), cudaMemcpyDeviceToDevice,
+                                   cs(st_)),
+                   "kda rows");
+            float* out = qkv_ + 3 * i * row;
+            kda_conv(one, seq_state(s, B.conv), fp(B.conv_q), fp(B.conv_k), fp(B.conv_v), out, d_inner_, 1, st_);
+            kda_step(out, g1_ + i * row, fp(B.a), beta_ + (size_t) i * n_head_, seq_state(s, B.s), g2_ + i * row,
+                     fp(B.o_norm), gated_ + i * row, kda_dim_, n_head_, 1, kda_lb_, rms_eps_, st_);
+        }
+        lin(B.wo, gated_, ao_, n);
+        return;
+    }
     kda_conv(proj_, B.conv, fp(B.conv_q), fp(B.conv_k), fp(B.conv_v), qkv_, d_inner_, n, st_,
              snap_bits_ ? snap_at_ + (B.conv - state_) : nullptr, rec_n_, std::popcount(snap_bits_));
 
@@ -461,6 +486,30 @@ void Glm5Next::dsa_store(Block& B, int64_t pos, int n) {
 }
 
 void Glm5Next::dsa(Block& B, int64_t pos, int n) {
+    if (rows_of_) {
+        // step(): a row at a time, the whole layer, with the row's sequence's latents, pools and ring; its
+        // kernels take their positions as arguments, so the layer is not recorded either way
+        const Row* rows = std::exchange(rows_of_, nullptr);
+        float *const xn = xn_, *const ao = ao_;
+        void* const xq = xq_;
+        const size_t q8 = kernels::native_q8_1_bytes(n_embd_);
+        for (int i = 0; i < n; ++i) {
+            const int s = rows[i].seq;
+            Block one = B;
+            one.lat = (uint16_t*) seq_buf(s, B.lat);
+            one.pool = (float*) seq_buf(s, B.pool);
+            one.ring = (float*) seq_buf(s, B.ring);
+            xn_ = xn + (size_t) i * n_embd_;
+            xq_ = (uint8_t*) xq + (size_t) i * q8;
+            ao_ = ao + (size_t) i * n_embd_;
+            dsa(one, rows[i].pos, 1);
+        }
+        xn_ = xn;
+        xq_ = xq;
+        ao_ = ao;
+        rows_of_ = rows;
+        return;
+    }
     lin(B.q_a, xn_, t1_, n, xq_);
     rms_norm(t1_, fp(B.q_a_norm), qr_, q_rank_, n, rms_eps_, st_);
     lin(B.q_b, qr_, q_, n);

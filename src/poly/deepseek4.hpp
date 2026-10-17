@@ -66,6 +66,7 @@ private:
         std::vector<int32_t> by_token;   ///< a hash layer's experts, n_used_ a token; empty in the others
     };
 
+    bool batch_heads() const override { return true; }
     void attention(Block& B, int64_t pos, int n);
     void squeeze(Block& B, Squeeze& S, int64_t pos, int n);
     void out_proj(Block& B, int n);

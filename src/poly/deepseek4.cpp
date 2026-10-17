@@ -219,22 +219,22 @@ void DeepSeek4::alloc_caches() {
     for (int il = 0; il < (int) blocks_.size(); ++il) {
         Block& B = blocks_[(size_t) il];
         if (!runs(il)) continue;
-        B.raw = (uint16_t*) dmalloc((size_t) raw_ring_ * head_dim_ * sizeof(uint16_t), "the attention cache");
+        B.raw = (uint16_t*) seq_alloc((size_t) raw_ring_ * head_dim_ * sizeof(uint16_t), "the attention cache");
         if (!B.ratio) continue;
         // a call's rows and the ones before it that its first block reads: the block's own, and with the overlap
         // the block before
         B.ring = rows_ + (B.ratio == 4 ? 2 : 1) * B.ratio;
         for (Squeeze* S : {&B.comp, &B.idx}) {
             if (!S->dim) continue;
-            S->kv = (float*) dmalloc((size_t) B.ring * S->width * sizeof(float), "the compressor's rows");
-            S->score = (float*) dmalloc((size_t) B.ring * S->width * sizeof(float), "the compressor's rows");
+            S->kv = (float*) seq_alloc((size_t) B.ring * S->width * sizeof(float), "the compressor's rows");
+            S->score = (float*) seq_alloc((size_t) B.ring * S->width * sizeof(float), "the compressor's rows");
         }
         B.rows = (uint16_t*) kv_alloc((size_t) head_dim_ * sizeof(uint16_t), B.ratio);
         if (B.ratio == 4) B.keys = (uint16_t*) kv_alloc((size_t) idx_dim_ * sizeof(uint16_t), 4);
     }
     score_stride_ = opt_.max_context / 4 + 1;
     score_rows_ = (int) std::clamp<size_t>(kScoreBytes / (score_stride_ * sizeof(float)), 1, (size_t) rows_);
-    sel_ = (int32_t*) dmalloc((size_t) rows_ * idx_top_k_ * sizeof(int32_t), "scratch");
+    if (!sel_) sel_ = (int32_t*) dmalloc((size_t) rows_ * idx_top_k_ * sizeof(int32_t), "scratch");
 }
 
 // Per-token buffers hold rows_ tokens, row after row.
@@ -324,6 +324,41 @@ void DeepSeek4::pair(const Dev& a, const Dev& b, float* ya, float* yb, int n) {
 // The queries, and the key the token leaves in the window ring, are turned on their last n_rot values; the queries
 // are normed a head without weights first.  The heads' output is turned back by the query's position.
 void DeepSeek4::attention(Block& B, int64_t pos, int n) {
+    if (rows_of_) {
+        // step(): a row at a time, the whole attention, with the row's sequence's window ring, compressed rows,
+        // indexer keys and compressors, at the row's buffers, position and recorded position
+        const Row* rows = std::exchange(rows_of_, nullptr);
+        float *const xn = xn_, *const ao = ao_;
+        void* const xq = xq_;
+        long long* const at = at_;
+        const int64_t keep = pos_;
+        const size_t q8 = kernels::native_q8_1_bytes(n_embd_);
+        for (int i = 0; i < n; ++i) {
+            const int s = rows[i].seq;
+            Block one = B;
+            one.raw = (uint16_t*) seq_buf(s, B.raw);
+            if (B.rows) one.rows = (uint16_t*) seq_buf(s, B.rows);
+            if (B.keys) one.keys = (uint16_t*) seq_buf(s, B.keys);
+            for (Squeeze* S : {&one.comp, &one.idx})
+                if (S->dim) {
+                    S->kv = (float*) seq_buf(s, S->kv);
+                    S->score = (float*) seq_buf(s, S->score);
+                }
+            xn_ = xn + (size_t) i * n_embd_;
+            xq_ = (uint8_t*) xq + (size_t) i * q8;
+            ao_ = ao + (size_t) i * n_embd_;
+            at_ = at + 2 * i;
+            pos_ = rows[i].pos;
+            attention(one, rows[i].pos, 1);
+        }
+        xn_ = xn;
+        xq_ = xq;
+        ao_ = ao;
+        at_ = at;
+        pos_ = keep;
+        rows_of_ = rows;
+        return;
+    }
     const int dim = head_dim_, off = dim - n_rot_;
     const long long* at = recording_ ? at_ : nullptr;   // a recorded launch: the tokens from what at_ holds
     const int sized = at ? room(n) : 0;

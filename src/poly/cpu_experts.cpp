@@ -5,7 +5,6 @@
 #include "ggml-cpu.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <immintrin.h>
@@ -120,28 +119,6 @@ void Workers::run(int n, const std::function<void(int)>& fn) {
     cur_.store(nullptr);   // every task is taken: a worker that comes now has nothing to find
     while (b.left.load(std::memory_order_acquire) != 0) _mm_pause();
     while (users_.load() != 0) _mm_pause();
-}
-
-// An MXFP4 value is kvalues_mxfp4[nibble] times the block's power of two halved; Q5_0's is (q - 16) times its half.
-bool mxfp4_block_to_q5_0(const uint8_t* src, uint8_t* dst) {
-    constexpr int kLow = -24, kHigh = 15;   // the powers of two a half holds, subnormals included
-    static const int8_t kv[16] = {0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12};
-    static const auto half = [] {
-        std::array<uint16_t, kHigh - kLow + 1> h{};
-        for (int p = kLow; p <= kHigh; ++p) h[(size_t) (p - kLow)] = ggml_fp32_to_fp16(std::ldexp(1.0f, p));
-        return h;
-    }();
-    const int p = (int) src[0] - 128;
-    if (p < kLow || p > kHigh) return false;
-    std::memcpy(dst, &half[(size_t) (p - kLow)], 2);
-    uint32_t qh = 0;
-    for (int j = 0; j < 16; ++j) {   // nibble j's low half is value j, its high half value j + 16, in both types
-        const int q0 = kv[src[1 + j] & 15] + 16, q1 = kv[src[1 + j] >> 4] + 16;
-        dst[6 + j] = (uint8_t) ((q0 & 15) | (q1 & 15) << 4);
-        qh |= (uint32_t) (q0 >> 4) << j | (uint32_t) (q1 >> 4) << (j + 16);
-    }
-    std::memcpy(dst + 2, &qh, 4);
-    return true;
 }
 
 bool cpu_expert_types_ok(int gu_type, int d_type, int n_embd, int n_ff, std::string& err) {

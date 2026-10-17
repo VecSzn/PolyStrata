@@ -59,9 +59,6 @@ struct CpuExpert {
 /// Checks that ggml-cpu has a dot product for both types.  Call once per layer format at load.
 bool cpu_expert_types_ok(int gu_type, int d_type, int n_embd, int n_ff, std::string& err);
 
-/// One MXFP4 block (an E8M0 exponent and 16 bytes of nibbles, 17 bytes) as the Q5_0 block of the same 32 values
-/// (22 bytes).  False, with dst unwritten, when the block's power of two does not fit a half.
-bool mxfp4_block_to_q5_0(const uint8_t* src, uint8_t* dst);
 
 /// For each of `rows` tokens, with n_embd values of x and of out each:
 /// out = sum over the token's experts of weight * down(silu(min(gate x, limit)) * clamp(up x, -limit, limit)),

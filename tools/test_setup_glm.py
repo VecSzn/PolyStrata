@@ -401,9 +401,10 @@ class Main(unittest.TestCase):
         code, out, cfg = self.main(["--kv", "q4_0", "--vision", "yes", "--parallel", "2"])
         self.assertEqual(code, 0, out)
         line = next(ln for ln in out.splitlines() if "not used with GLM 5.3 Flash" in ln)
-        for flag in ("--kv", "--vision", "--parallel"):
+        for flag in ("--kv", "--vision"):
             self.assertIn(flag, line)
-        self.assertNotIn("parallel", cfg)
+        self.assertNotIn("--parallel", line)   # strata-poly answers several requests at once too
+        self.assertEqual(cfg["parallel"], 2)
 
     def test_two_cards(self):
         code, out, cfg = self.main(["--gpu", "1"], n_gpus=2)

@@ -352,7 +352,7 @@ void Gemma4::alloc_caches() {
     size_t rings = 0;   // a window layer's rows are a ring, whatever the sequence's length
     for (const Block& B : blocks_)
         if (B.swa) rings += 2 * (size_t) ring_ * B.n_kv * B.dim;
-    uint16_t* kv = rings ? (uint16_t*) dmalloc(rings * sizeof(uint16_t), "the attention cache") : nullptr;
+    uint16_t* kv = rings ? (uint16_t*) seq_alloc(rings * sizeof(uint16_t), "the attention cache") : nullptr;
     for (int il = 0; il < (int) blocks_.size(); ++il) {
         Block& B = blocks_[(size_t) il];
         if (!runs(il)) continue;
@@ -659,6 +659,7 @@ int64_t Gemma4::whole(int64_t at, int64_t m) const {
 // Queries and keys are normed a head and turned by the position; values are normed without weights.  The scores
 // are not scaled: the norms set their size.
 void Gemma4::attn(Block& B, int64_t pos, int n) {
+    if (rows_of_) return attn_rows(B, n);
     // a call is a picture or has no row of one (whole())
     const Image* im = image_at(pos);
     for (const Image& o : images_)
@@ -714,6 +715,42 @@ void Gemma4::attn(Block& B, int64_t pos, int n) {
     else
         attend(q_, B.keys, B.vals, pos, n, score_, chunk_, att_, B.dim, n_head_, B.n_kv, 1.f, st_, window, ring,
                sees_all, at, !at ? 0 : B.swa ? std::min(window_ + n - 1, opt_.max_context) : room(n));
+    lin(B.wo, att_, ao_, n);
+}
+
+// step()'s rows, each of its own sequence and past its pictures: the products for all of them at once, and a row
+// at a time the turn (it takes one position and counts on from it), the stored keys and values and the attention,
+// in the row's sequence.  A layer's rows are its heads at its own width.
+void Gemma4::attn_rows(Block& B, int n) {
+    const float* freq = B.swa ? nullptr : fp(freq_);
+    lin(B.wq, xn_, qraw_, n, xq_);
+    lin(B.wk, xn_, kraw_, n, xq_);
+    const float* values = kraw_;   // a layer without a value projection takes the keys'
+    if (B.wv.p) {
+        lin(B.wv, xn_, vraw_, n, xq_);
+        values = vraw_;
+    }
+    head_norm_rope(values, B.dim, nullptr, v_, B.dim, B.n_kv, 0, 1.f, 0, n, rms_eps_, st_);   // a norm, no turn
+    const size_t hq = (size_t) n_head_ * B.dim, kv = (size_t) B.n_kv * B.dim;
+    const int window = B.swa ? window_ : 0, ring = B.swa ? ring_ : 0;
+    for (int i = 0; i < n; ++i) {
+        const Row& r = rows_of_[i];
+        const long long* ai = at_ + 2 * i;
+        head_norm_rope(qraw_ + i * hq, B.dim, fp(B.q_norm), q_ + i * hq, B.dim, n_head_, B.n_rot, B.theta_scale, 0, 1,
+                       rms_eps_, st_, freq, nullptr, 1, ai);
+        head_norm_rope(kraw_ + i * kv, B.dim, fp(B.k_norm), k_ + i * kv, B.dim, B.n_kv, B.n_rot, B.theta_scale, 0, 1,
+                       rms_eps_, st_, freq, nullptr, 1, ai);
+        uint16_t* kc = (uint16_t*) seq_buf(r.seq, B.keys);
+        uint16_t* vc = (uint16_t*) seq_buf(r.seq, B.vals);
+        store_f16_at(k_ + i * kv, kc, (int) kv, ai, 1, ring, st_);
+        store_f16_at(v_ + i * kv, vc, (int) kv, ai, 1, ring, st_);
+        const int64_t keep = pos_;
+        pos_ = r.pos;
+        const int sized = B.swa ? std::min(window_, opt_.max_context) : room(1);
+        pos_ = keep;
+        attend(q_ + i * hq, kc, vc, r.pos, 1, score_, chunk_, att_ + i * hq, B.dim, n_head_, B.n_kv, 1.f, st_, window,
+               ring, false, ai, sized);
+    }
     lin(B.wo, att_, ao_, n);
 }
 

@@ -34,6 +34,7 @@ protected:
     bool route_card(int il, int n, int32_t* ids, float* w) override;
     void moe_shared(const Layer& L, int il, int n) override;
     int head_key(int il, int n) const override;
+    bool batch_heads() const override { return true; }
     const Names* tensor_alias(const char* name) const override;
 
 private:
@@ -57,6 +58,7 @@ private:
 
     void conv(Block& B, int n);
     void attn(Block& B, int64_t pos, int n);
+    void attn_rows(Block& B, int n);
     void dense_ffn(Block& B, int il, int n);
 
     std::vector<Block> blocks_;   ///< one a layer of layers_

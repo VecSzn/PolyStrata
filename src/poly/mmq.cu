@@ -15,7 +15,7 @@ namespace {
 // The types with kernels in this build: one template instance each in CMakeLists.txt.
 #define STRATA_POLY_MMQ_TYPES(X)                                                                                \
     X(Q4_0) X(Q4_1) X(Q5_0) X(Q5_1) X(Q8_0) X(Q2_K) X(Q3_K) X(Q4_K) X(Q5_K) X(Q6_K)                             \
-    X(IQ1_S) X(IQ2_XXS) X(IQ2_XS) X(IQ2_S) X(IQ3_XXS) X(IQ3_S) X(IQ4_NL) X(IQ4_XS)
+    X(IQ1_S) X(IQ2_XXS) X(IQ2_XS) X(IQ2_S) X(IQ3_XXS) X(IQ3_S) X(IQ4_NL) X(IQ4_XS) X(MXFP4)
 
 int64_t pad512(int64_t n) { return (n + 511) / 512 * 512; }
 
@@ -49,6 +49,8 @@ bool Mmq::fits(int type, int64_t w_rows, int64_t w_cols) {
     if (w_cols % ggml_blck_size(t) != 0) return false;
     const bool fallback = w_rows % 128 != 0;
     const auto& dev = ggml_cuda_info().devices[ggml_cuda_get_device()];
+    // MXFP4's instance is built for 12.0a on Blackwell (CMakeLists.txt): another Blackwell has no image of it
+    if (t == GGML_TYPE_MXFP4 && dev.cc >= GGML_CUDA_CC_BLACKWELL && dev.cc != GGML_CUDA_CC_BLACKWELL) return false;
     for (int J = 8; J <= 128; J += 8) {
         const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config(t, J, fallback, dev.cc);
         if (c.type != GGML_TYPE_COUNT && mmq_get_nbytes_shared(c, dev.cc) <= dev.smpbo) return true;
@@ -64,8 +66,17 @@ size_t Mmq::q8_bytes(int64_t rows, int64_t cols) {
 void Mmq::quantize(const float* x, const int32_t* ids, void* xq, int type, int64_t cols, int64_t ld, int64_t rows,
                    void* stream) {
     if (rows <= 0) return;
-    quantize_mmq_q8_1_cuda(x, ids, xq, (ggml_type) type, cols, ld, rows * ld, rows * ld, pad512(cols), rows, 1, 1,
-                           (cudaStream_t) stream);
+    const ggml_type t = (ggml_type) type;
+    // On Blackwell llama.cpp's MXFP4 tiles take the rows as FP4 blocks, half the bytes of Q8_1's (mmq.cu's
+    // use_native_fp4); the rows of another type, or another card, are Q8_1.
+    if (t == GGML_TYPE_MXFP4 && blackwell_mma_available(ggml_cuda_info().devices[ggml_cuda_get_device()].cc)) {
+        const bool aligned = (uintptr_t) x % 32 == 0 && ((size_t) ld * sizeof(float)) % 32 == 0;
+        quantize_mmq_fp4_cuda(x, ids, xq, nullptr, t, aligned, cols, ld, rows * ld, rows * ld, pad512(cols), rows, 1, 1,
+                              (cudaStream_t) stream);
+    } else {
+        quantize_mmq_q8_1_cuda(x, ids, xq, t, cols, ld, rows * ld, rows * ld, pad512(cols), rows, 1, 1,
+                               (cudaStream_t) stream);
+    }
     ck("mmq quantize");
 }
 

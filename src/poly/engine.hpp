@@ -82,6 +82,8 @@ struct Options {
     bool kv_int8_k = false;  ///< --kv int8k: the keys' side is codes, the values' stays fp16 (gemma4)
                                   ///< 34 B: a fp16 delta and 32 int8 codes) instead of fp16, about halving the VRAM
                                   ///< a token takes; every reader dequantizes a block in the kernel (--kv int8)
+    int batch = 0;                ///< sequences beside the first, each with a state and caches of its own (bind(),
+                                  ///< step()); 0: one sequence
 };
 
 /// A thing a model's file may call by other names than the engine does: converters differ.
@@ -125,6 +127,8 @@ struct Layer {
     std::vector<void*> shared;         ///< the shared expert
     std::vector<void*> tail;           ///< after the experts
     std::vector<void*> card_moe;       ///< the routed experts, routed on the card (moe_card())
+    /// the head of step()'s rows in one call (Engine::batch_heads()): by the rows, their sequences and head keys
+    std::map<std::vector<int>, void*> rows_heads;
 };
 
 /// A routed expert is run from the VRAM cache or on the CPU when tokens come a few at a time, as an answer's do
@@ -290,6 +294,19 @@ public:
     size_t trim_kv(int64_t end);
     void save_profile() const;
 
+    /// Options::batch + 1 sequences, each with its own position, recurrent state, attention rows and pictures.  One
+    /// is bound at a time, and every call above but step() is the bound one's.  bind(s) leaves the bound one as it
+    /// is and goes on with sequence s where it was left.  Not between window() and keep().
+    int sequences() const { return (int) seqs_.size(); }
+    int bound() const { return bound_; }
+    void bind(int s);
+    /// One token for each of n sequences, together: tokens[i] fed to sequence seqs[i] at its position, as eval()
+    /// with logits would on its own.  logits_of(i) then holds the scores of what follows tokens[i].  The sequences
+    /// differ; none of them has pictures past its position.  The bound sequence stays bound.
+    void step(const int* seqs, const int32_t* tokens, int n);
+    /// Sequence `to` becomes what sequence `from` is: its position, state, rows and pictures, copied on the card.
+    void copy_seq(int from, int to);
+
 protected:
     // ---- what an architecture supplies ----
     /// The model's shape from its metadata: load_shape() for what every architecture has, then its own.
@@ -368,6 +385,21 @@ protected:
     /// Which recording of a layer's head fits n tokens from pos().  Launches that are sized by the rows they read
     /// are recorded once for each size (room()), and the architecture numbers the sizes from 0.
     virtual int head_key(int il, int n) const { (void) il, (void) n; return 0; }
+    /// layer_head() takes step()'s rows in one call: the products for every row at once, and each row's recurrent
+    /// state and attention rows from its own sequence (rows_of_, seq_state(), seq_buf()), its position from at_.
+    /// Otherwise step() runs the head a row at a time, with the row's sequence bound.
+    virtual bool batch_heads() const { return false; }
+    /// While step() runs a head in one call: each row's sequence and position, row after row; else null.
+    struct Row {
+        int seq;
+        int64_t pos;
+    };
+    const Row* rows_of_ = nullptr;
+    int n_rows_of_ = 0;
+    /// p, a place in the bound sequence's recurrent state, at the same place in sequence s's.
+    float* seq_state(int s, const float* p) const;
+    /// p, a place in one of the bound sequence's buffers (kv_alloc(), seq_alloc()), at the same place in s's.
+    void* seq_buf(int s, const void* p) const;
     /// The rotary position of a row of text: its place in the sequence, unless pictures before it took fewer
     /// positions than rows.
     virtual int64_t turn(int64_t row) const { return row; }
@@ -405,7 +437,6 @@ protected:
     float shape_f(const char* key) const;
     void load_shape();
     void load_moe(int il, bool shared = true);
-    void mxfp4_to_q5_0(int il);
     void alloc();
     void shared_scratch();
     float* draft_input(const int32_t* tokens, int64_t row, const float* h, int n);
@@ -450,6 +481,8 @@ protected:
     /// An attention cache for alloc_caches(): `bytes` for every `per` rows, with addresses for the whole context
     /// and VRAM for the rows the sequence has reached (cover()).
     void* kv_alloc(size_t bytes, int per);
+    /// A buffer of the sequence's own that does not grow with it, such as a window layer's ring of rows.
+    void* seq_alloc(size_t bytes, const char* what);
     /// VRAM in every attention cache for the rows below `end`, before a call writes them.
     void cover(int64_t end);
 
@@ -545,7 +578,6 @@ protected:
     std::vector<float> clamp_exp_, clamp_shexp_;   ///< a layer's SwiGLU limits: the routed experts', the shared one's
 
     std::vector<Layer> layers_;   ///< the model's, and after them the draft block
-    std::vector<std::unique_ptr<uint8_t[]>> converted_;   ///< experts converted at load (mxfp4_to_q5_0), in RAM
     Dev out_norm_, output_;
     bool draft_ = false;
     bool block_layer_ = false;    ///< what guesses ahead is a block after the model's layers (layers_' last)
@@ -565,6 +597,32 @@ protected:
     std::vector<Kv> kv_;         ///< the attention caches that grow with the sequence
     int64_t kv_rows_ = 0;        ///< the rows they have VRAM for
     int64_t kv_reach_ = 0;       ///< the furthest row cover() was asked for since the last trim_kv()
+    // The sequences (bind()).  The bound one's are the members above and below (pos_, kv_, state_ ...); the
+    // others wait in seqs_, with what alloc_caches() gave them and the launches recorded with their buffers.
+    struct Buf {
+        void* p = nullptr;
+        size_t bytes = 0;   ///< a kv_alloc() buffer's for every `per` rows; a seq_alloc() one's, all of it
+        int per = 0;        ///< 0: seq_alloc()'s
+    };
+    struct Seq {
+        int64_t pos = 0, kv_rows = 0, kv_reach = 0, ahead_pos = -1;
+        int32_t ahead_tok = 0;
+        float* state = nullptr;
+        std::vector<Kv> kv;
+        std::vector<Buf> bufs;
+        std::vector<Image> images;
+        std::vector<std::vector<void*>> heads;   ///< Layer::heads, by layer
+        std::map<std::vector<int>, void*> passes;
+        void* tail = nullptr;
+    };
+    std::vector<Seq> seqs_;      ///< the bound one's place holds nothing while it is bound
+    int bound_ = 0;
+    std::vector<Buf> bufs_;      ///< the bound sequence's: what kv_alloc() and seq_alloc() gave it, in that order
+    size_t again_ = SIZE_MAX;    ///< while alloc_caches() points at the bound sequence's buffers again: the next one
+    void park_bound();
+    void take_bound(int s);
+    void hold(int s);   ///< bind() on this card alone
+    size_t other_rows() const;
     size_t budget_ = 0;          ///< their VRAM and the expert cache's together, as the cache was filled
     int asked_reserve_mib_ = -1; ///< Options::vram_reserve_mib as load() got it
     int reserve_mib_ = 0;        ///< what the cache was sized to leave free

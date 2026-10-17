@@ -62,6 +62,7 @@ private:
         Dev probs_b_dev;              ///< the same on the card, when the file has it
     };
 
+    bool batch_heads() const override { return true; }
     void kda(Block& B, int n);
     void dsa(Block& B, int64_t pos, int n);
     void dsa_store(Block& B, int64_t pos, int n);

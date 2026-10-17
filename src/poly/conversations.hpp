@@ -171,6 +171,22 @@ public:
         due_.clear();
     }
 
+    /// The engine's sequence is about to hold another conversation, read elsewhere (a batch slot's copy): the one
+    /// it holds is parked, as resume() parks it, or forgotten.  adopt() then says what it holds.
+    void leave() {
+        if (!cur().seq.empty() && park(slots_.size())) cur_ = take(cur_);
+        slots_[cur_] = Slot{};
+        due_.clear();
+    }
+    /// The engine holds `seq` now, with the state at its end: a prompt that goes on from there reads none of it.
+    void adopt(std::vector<int32_t> seq) {
+        Slot& s = cur();
+        s = Slot{};
+        s.seq = std::move(seq);
+        s.prompt = len(s);
+        s.stamp = ++clock_;
+    }
+
     /// The parked conversations, the bytes they hold, and how many were pushed out so far.
     size_t parked() const { return held(slots_.size()).count; }
     size_t parked_bytes() const { return held(slots_.size()).bytes; }

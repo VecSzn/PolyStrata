@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -68,6 +69,11 @@ constexpr int kBlockWindow = 4;
 // A window longer than that is for a copy: a repeat of the conversation whose match is this many tokens or more.
 // A repeat of a few tokens is in any text, and what followed it there is seldom what follows here for long.
 constexpr int kCopyMatch = 8;
+
+// With batch slots a prompt is read in pieces: between two, a BYIELD can stop the read and the slots write for half
+// the time the piece took.  A piece is a call (max_rows()) while slots write, so that they are not held up long,
+// and this many calls while none does, as Strata's engine reads its chunks.
+constexpr int kPiece = 8;
 
 struct Sampling {
     float temperature = 0.f;   // 0: the most likely token
@@ -265,6 +271,28 @@ public:
         q_.pop_front();
         return s;
     }
+    /// The next line when there is one.
+    bool try_pop(std::string& s) {
+        std::lock_guard<std::mutex> l(m_);
+        if (q_.empty()) return false;
+        s = std::move(q_.front());
+        q_.pop_front();
+        return true;
+    }
+    /// The lines waiting that start with `head`, out of the queue, the others left in their order.
+    std::vector<std::string> take(const char* head) {
+        std::lock_guard<std::mutex> l(m_);
+        std::vector<std::string> out;
+        for (auto it = q_.begin(); it != q_.end();) {
+            if (it->rfind(head, 0) == 0) {
+                out.push_back(std::move(*it));
+                it = q_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return out;
+    }
 
     std::atomic<bool> stop{false};
 
@@ -314,6 +342,7 @@ struct Session {
     strata::spec::SuffixDrafter repeats;
     strata::spec::DraftPolicy policy;
     Guesses guesses;                      // whether the block is asked in a round, and for how many (guesses.hpp)
+    int piece_calls = kPiece;             // generate()'s pieces when it is given `between`
 
     Session(Engine& e, std::vector<int32_t> eos_ids, const CacheFlags& f, int lookup)
         : engine(e), eos(std::move(eos_ids)), flags(f), kept(e, with_floor(f)),
@@ -334,6 +363,7 @@ struct Session {
 
     struct Result {
         int64_t produced = 0, resume = 0, read = 0;
+        int64_t gave_way = -1;   // where `between` stopped the read
         int64_t guessed = 0, guessed_right = 0;
         double prompt_ms = 0, decode_ms = 0;
         const char* finish = "length";
@@ -341,10 +371,12 @@ struct Session {
 
     // Reads the prompt and generates.  on_token gets every token, the end-of-sequence one included.  The rows of
     // the prompt's pictures have ids below zero (take_pictures()); `pad` is the token they stand in for.
+    // `between`, when given, reads the prompt in pieces of piece_calls calls and is asked after each but the last
+    // one, with where the read is: false stops it there, as a cancel does, and the conversation holds what was read.
     template<class OnToken, class OnProgress>
     Result generate(const std::vector<int32_t>& ids, const Pictures& pictures, int32_t pad, int64_t turn_at,
                     int64_t max_new, const Sampling& s, const std::atomic<bool>& stop, OnToken on_token,
-                    OnProgress on_progress) {
+                    OnProgress on_progress, const std::function<bool(int64_t)>* between = nullptr) {
         Result r;
         const int64_t n = (int64_t) ids.size();
         Clock::time_point t0 = Clock::now(), shown = t0;   // bringing a parked conversation back is prompt time
@@ -376,7 +408,8 @@ struct Session {
                 break;
             }
             const bool last = i == n - 1;
-            const int64_t room = std::min<int64_t>(n - 1 - i, text ? engine.max_read() : engine.max_rows());
+            const int64_t most = between ? (int64_t) piece_calls * engine.max_rows() : INT64_MAX;
+            const int64_t room = std::min<int64_t>({n - 1 - i, text ? engine.max_read() : engine.max_rows(), most});
             const int64_t m = last ? 1 : text ? room : engine.whole(i, kept.until_checkpoint(i, room));
             kept.before(i, last);
             if (text && !last) {
@@ -407,6 +440,11 @@ struct Session {
             if (ms_since(shown) >= 500.0 || last) {
                 on_progress(i, n, ms_since(t0), false);
                 shown = Clock::now();
+            }
+            if (between && i < n - 1 && !(*between)(i)) {
+                r.gave_way = i;
+                r.finish = "cancel";
+                break;
             }
         }
         kept.prompt_was(n);
@@ -542,6 +580,19 @@ bool parse_gen(const std::string& line, long long& max_new, Sampling& s, int32_t
     return parse_ids(p, ids);
 }
 
+// A batch slot (--batch): a request that goes on in a sequence of its own, slot b in sequence b + 1, written with
+// the others a token each at a time (Engine::step()).  Its prompt is read in sequence 0, which the conversation
+// cache knows, and copied over.
+struct Slot {
+    bool active = false, stop = false;
+    int32_t next = 0;               // picked and not fed yet
+    long long produced = 0, max_new = 0;
+    Sampling s;
+    std::mt19937_64 rng{std::random_device{}()};
+    std::vector<int32_t> held;      // what its sequence has read: the prompt and the tokens fed since
+    Clock::time_point t0;
+};
+
 int serve(Session& ss) {
     Engine& engine = ss.engine;
     // the model file's own sampling defaults (llama.cpp's general.sampling.* keys), for the parameters it
@@ -561,12 +612,13 @@ int serve(Session& ss) {
                         "penalty_repeat=%.2f last_n=%d\n",
                         base.temperature, base.top_k, base.top_p, base.penalty_repeat, base.penalty_last_n);
     }
+    std::vector<Slot> slots((size_t) engine.sequences() - 1);
     std::printf("INFO context=%d expert_slots=%d expert_cache_mib=%lld pool_workers=%d conversation_cache_mib=%lld "
                 "conversation_cache_slots=%d conversation_cache_min_free_mib=%lld vram_free_mib=%lld vram_elastic=1 "
-                "engine=" STRATA_VERSION "\n",
+                "batch_slots=%d engine=" STRATA_VERSION "\n",
                 engine.max_context(), engine.cached_experts(), (long long) (engine.cached_gib() * 1024.0),
                 engine.threads(), (long long) ss.flags.o.park_mib, ss.flags.o.park_slots, ss.flags.min_free_mib,
-                (long long) engine.vram_free_mib());
+                (long long) engine.vram_free_mib(), (int) slots.size());
     std::printf("READY %d stop\n", engine.max_context());
     std::fflush(stdout);
 
@@ -574,11 +626,140 @@ int serve(Session& ss) {
     Pictures pictures;    // the engine reads the last request's until the next one's are set
     // the experts' use (--expert-profile): as if it was last saved long ago, so that the first answer saves it
     Clock::time_point saved = Clock::now() - std::chrono::milliseconds((long long) kProfileSaveMs);
+    const auto writing = [&] {
+        return std::any_of(slots.begin(), slots.end(), [](const Slot& sl) { return sl.active; });
+    };
+    // A token for every slot that writes: BT <slot> <token> each, and BDONE <slot> <produced> <finish> <ms> for a
+    // slot that ends with it.  False when the engine failed, which leaves it in no known state.
+    Sampler slot_sampler;
+    std::vector<int> seqs;
+    std::vector<int32_t> feed;
+    std::vector<size_t> which;
+    const auto step = [&] {
+        seqs.clear();
+        feed.clear();
+        which.clear();
+        for (size_t b = 0; b < slots.size(); ++b)
+            if (slots[b].active) {
+                seqs.push_back((int) b + 1);
+                feed.push_back(slots[b].next);
+                which.push_back(b);
+            }
+        try {
+            engine.step(seqs.data(), feed.data(), (int) seqs.size());
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "strata-poly: batch: %s\n", e.what());
+            std::printf("ERR %s\n", e.what());
+            std::fflush(stdout);
+            return false;
+        }
+        for (size_t i = 0; i < which.size(); ++i) {
+            Slot& sl = slots[which[i]];
+            sl.held.push_back(feed[i]);
+            const int32_t t = (int32_t) slot_sampler.pick(engine.logits_of((int) i), engine.n_vocab(), sl.s, sl.held, sl.rng);
+            ++sl.produced;
+            std::printf("BT %zu %d\n", which[i], (int) t);
+            const char* fin = ss.is_eos(t) ? "stop" : sl.stop ? "cancel" : sl.produced >= sl.max_new ? "length"
+                            : (long long) sl.held.size() + 2 > engine.max_context() ? "length" : nullptr;
+            if (fin) {
+                std::printf("BDONE %zu %lld %s %.1f\n", which[i], sl.produced, fin, ms_since(sl.t0));
+                sl.active = false;
+            }
+            sl.next = t;
+        }
+        std::fflush(stdout);
+        return true;
+    };
+    // A prompt that goes on from what a slot's sequence holds, further than from what sequence 0 holds, starts
+    // from a copy of that: a request that left its slot to write alone again (with guesses), or the next turn of
+    // a conversation a slot answered.
+    const auto from_slot = [&](const std::vector<int32_t>& ids) {
+        const auto common = [&](const std::vector<int32_t>& a) {
+            size_t n = 0;
+            while (n < a.size() && n < ids.size() && a[n] == ids[n]) ++n;
+            return n;
+        };
+        size_t best = slots.size(), most = common(ss.kept.seq());
+        for (size_t b = 0; b < slots.size(); ++b) {
+            const std::vector<int32_t>& h = slots[b].held;
+            if (!h.empty() && h.size() < ids.size() && common(h) == h.size() && h.size() > most) best = b, most = h.size();
+        }
+        if (best == slots.size()) return;
+        engine.bind(0);
+        ss.kept.leave();
+        engine.copy_seq((int) best + 1, 0);
+        ss.kept.adopt(slots[best].held);
+    };
+    // Between two pieces of a prompt read (Session::generate()): BSTOPs that came meanwhile, a BYIELD <slot> that
+    // stops the read there to wait in that slot (YIELDED <slot> <tokens read>), and the slots' tokens for half the
+    // time the piece took.  A read gives way only to a slot that does not write, with text alone, and with more than
+    // a piece left: the rest is read the same way after it.
+    int admit = -1, gives_to = -1;
+    long long ids_n = 0;
+    bool text = true, failed = false;
+    Clock::time_point piece_t0;
+    const std::function<bool(int64_t)> between = [&](int64_t at) {
+        for (const std::string& l : lines.take("BSTOP ")) {
+            const int b = std::atoi(l.c_str() + 6);
+            if (b >= 0 && b < (int) slots.size()) slots[(size_t) b].stop = true;
+        }
+        int to = -1;
+        for (const std::string& l : lines.take("BYIELD")) to = l.size() > 7 ? std::atoi(l.c_str() + 7) : -1;
+        if (to >= 0 && to < (int) slots.size() && !slots[(size_t) to].active && (admit < 0 || to == admit) && text &&
+            ids_n - at > (long long) engine.max_rows()) {
+            gives_to = to;
+            return false;
+        }
+        const double piece_ms = ms_since(piece_t0);
+        const Clock::time_point t0 = Clock::now();
+        while (writing() && ms_since(t0) < 0.5 * piece_ms)
+            if (!step()) {
+                failed = true;
+                throw std::runtime_error("a batch step failed");
+            }
+        ss.piece_calls = writing() ? 1 : kPiece;
+        piece_t0 = Clock::now();
+        return true;
+    };
     for (;;) {
-        const std::string line = lines.pop();
+        std::string line;
+        if (!writing()) {
+            line = lines.pop();
+        } else if (!lines.try_pop(line)) {
+            if (!step()) return 1;
+            continue;
+        }
         if (line == "QUIT") break;
         if (line.empty()) continue;
+        // BSTOP <slot>: the slot ends with its next token.  BYIELD: a long read gives way to a shorter one in the
+        // other engine only; this one reads it to its end.
+        if (line.rfind("BSTOP ", 0) == 0) {
+            const int b = std::atoi(line.c_str() + 6);
+            if (b >= 0 && b < (int) slots.size()) slots[(size_t) b].stop = true;
+            continue;
+        }
+        if (line.rfind("BYIELD", 0) == 0) continue;
         lines.stop.store(false);   // a STOP that came between requests is stale
+        // BGEN <slot> <max_new> ... reads the prompt and picks its first token as GEN 1 does, then the request goes
+        // on in that slot (BADM <slot> 1), or ends there (BADM <slot> 0)
+        admit = -1;
+        gives_to = -1;
+        long long admit_max = 0;
+        if (line.rfind("BGEN ", 0) == 0 || line.rfind("BGENI ", 0) == 0) {
+            const bool img = line[4] == 'I';
+            char* e1 = nullptr;
+            const long b = std::strtol(line.c_str() + (img ? 6 : 5), &e1, 10);
+            char* e2 = nullptr;
+            const long long mn = std::strtoll(e1, &e2, 10);
+            if (b < 0 || b >= (long) slots.size() || slots[(size_t) b].active || mn < 1 || e2 == e1) {
+                std::printf("ERR BGEN: no such free slot (--batch %d) or a bad max_new\n", (int) slots.size());
+                std::fflush(stdout);
+                continue;
+            }
+            admit = (int) b;
+            admit_max = mn;
+            line = std::string(img ? "GENI 1" : "GEN 1") + e2;
+        }
         long long max_new = 0;
         Sampling s = base;
         std::vector<int32_t> ids;
@@ -588,6 +769,11 @@ int serve(Session& ss) {
         // VRAM [reserve_mib], the server's POST /v1/vram: the expert cache sized again between requests, to leave
         // that much VRAM to other programs; alone, back to what the engine started with
         if (line.rfind("VRAM", 0) == 0 && (line.size() == 4 || line[4] == ' ')) {
+            if (writing()) {
+                std::printf("ERR VRAM: not while batch slots are writing\n");
+                std::fflush(stdout);
+                continue;
+            }
             char* end = nullptr;
             const bool bare = line.find_first_not_of(' ', 4) == std::string::npos;
             const long long reserve = bare ? -1 : std::strtoll(line.c_str() + 4, &end, 10);
@@ -655,7 +841,14 @@ int serve(Session& ss) {
         const strata::poly::Stats before = engine.stats();
         int64_t resume = 0;
         Session::Result r;
+        int32_t first = -1;   // the token BGEN's read picks
         try {
+            engine.bind(0);
+            from_slot(ids);
+            ids_n = n;
+            text = pictures.at.empty();
+            ss.piece_calls = writing() ? 1 : kPiece;
+            piece_t0 = Clock::now();
             const int had = engine.cached_experts();
             if (engine.mind_vram())
                 std::fprintf(stderr, "strata-poly: the expert cache %d -> %d experts (%.2f GiB) for the VRAM free "
@@ -663,7 +856,8 @@ int serve(Session& ss) {
                              had, engine.cached_experts(), engine.cached_gib(), (long long) engine.vram_free_mib());
             r = ss.generate(
                 ids, pictures, pad, turn_at, max_new, s, lines.stop,
-                [](int32_t t) {
+                [&](int32_t t) {
+                    first = t;
                     std::printf("T %d\n", (int) t);
                     std::fflush(stdout);
                 },
@@ -676,8 +870,16 @@ int serve(Session& ss) {
                                     ms > 0.0 ? 1000.0 * (double) (at - resume) / ms : 0.0);
                     }
                     std::fflush(stdout);
-                });
+                },
+                slots.empty() ? nullptr : &between);
+            if (r.gave_way >= 0) {
+                engine.copy_seq(0, gives_to + 1);
+                slots[(size_t) gives_to] = Slot{};
+                slots[(size_t) gives_to].held = ss.kept.seq();
+                std::printf("YIELDED %d %lld\n", gives_to, (long long) r.gave_way);
+            }
         } catch (const std::exception& e) {
+            if (failed) return 1;   // step() said ERR: the slots' sequences are in no known state
             // the engine's state is unknown now: the conversation it was reading is lost
             ss.kept.drop();
             try { engine.reset(); } catch (const std::exception&) {}
@@ -695,6 +897,32 @@ int serve(Session& ss) {
                     r.prompt_ms, r.decode_ms, r.finish, (long long) r.guessed_right, (long long) r.guessed,
                     (long long) r.resume, hits, hits + misses, (long long) r.read);
         std::fflush(stdout);
+        if (admit >= 0) {
+            Slot& sl = slots[(size_t) admit];
+            const bool goes_on = std::strcmp(r.finish, "length") == 0 && first >= 0 && admit_max > 1 &&
+                                 n + 2 <= engine.max_context();
+            sl = Slot{};
+            try {
+                engine.copy_seq(0, admit + 1);
+                sl.held = ss.kept.seq();
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "strata-poly: batch: %s\n", e.what());
+                std::printf("ERR %s\n", e.what());
+                std::fflush(stdout);
+                return 1;
+            }
+            if (goes_on) {
+                sl.active = true;
+                sl.next = first;
+                sl.produced = 1;
+                sl.max_new = admit_max;
+                sl.s = s;
+                if (s.seed != 0) sl.rng.seed(s.seed + 1);
+                sl.t0 = Clock::now();
+            }
+            std::printf("BADM %d %d\n", admit, goes_on ? 1 : 0);
+            std::fflush(stdout);
+        }
         if (ms_since(saved) >= kProfileSaveMs) {
             try {
                 engine.save_profile();
@@ -751,6 +979,60 @@ int once(Session& ss, const std::vector<int32_t>& ids, const Pictures& pictures,
                  st.route_wait_ms / (double) std::max<int64_t>(st.tokens, 1), (long long) st.swapped_experts,
                  (long long) st.tail_experts, (long long) r.guessed_right, (long long) r.guessed);
     return 0;
+}
+
+// --check-batch K: K prompts, the --tokens one without its first 0, 1, ... K-1 tokens, each answered greedily on
+// its own and then all of them together in their own sequences (Engine::step()).  Returns 1 when a token differs.
+int check_batch(Engine& engine, const std::vector<int32_t>& ids, int k, long long max_new) {
+    const auto read = [&](const std::vector<int32_t>& p) {
+        engine.reset();
+        for (size_t i = 0; i < p.size(); i += (size_t) engine.max_rows()) {
+            const int m = (int) std::min(p.size() - i, (size_t) engine.max_rows());
+            engine.eval(p.data() + i, m, i + (size_t) m == p.size());
+        }
+        return (int32_t) strata::poly::most_likely(engine.logits(), engine.n_vocab());
+    };
+    std::vector<std::vector<int32_t>> want((size_t) k), got((size_t) k);
+    std::vector<int> seqs((size_t) k);
+    std::vector<int32_t> next((size_t) k);
+    for (int j = 0; j < k; ++j) {
+        const std::vector<int32_t> p(ids.begin() + j, ids.end());
+        engine.bind(0);
+        int32_t t = read(p);
+        for (long long n = 0; n < max_new; ++n) {
+            want[(size_t) j].push_back(t);
+            engine.eval(&t, 1, true);
+            t = (int32_t) strata::poly::most_likely(engine.logits(), engine.n_vocab());
+        }
+    }
+    const Clock::time_point t0 = Clock::now();
+    for (int j = 0; j < k; ++j) {
+        seqs[(size_t) j] = j + 1;
+        engine.bind(j + 1);
+        next[(size_t) j] = read(std::vector<int32_t>(ids.begin() + j, ids.end()));
+    }
+    engine.bind(0);
+    const double read_ms = ms_since(t0);
+    const Clock::time_point t1 = Clock::now();
+    for (long long n = 0; n < max_new; ++n) {
+        for (int j = 0; j < k; ++j) got[(size_t) j].push_back(next[(size_t) j]);
+        engine.step(seqs.data(), next.data(), k);
+        for (int j = 0; j < k; ++j)
+            next[(size_t) j] = (int32_t) strata::poly::most_likely(engine.logits_of(j), engine.n_vocab());
+    }
+    const double step_ms = ms_since(t1);
+    int rc = 0;
+    for (int j = 0; j < k; ++j) {
+        size_t same = 0;
+        while (same < want[(size_t) j].size() && want[(size_t) j][same] == got[(size_t) j][same]) ++same;
+        std::fprintf(stderr, "check-batch: sequence %d: the first %zu of %lld tokens as on its own\n", j + 1, same,
+                     max_new);
+        if (same < want[(size_t) j].size()) rc = 1;
+    }
+    std::fprintf(stderr, "check-batch: %d prompts read in %.0f ms, %lld steps of %d tokens in %.0f ms (%.1f tok/s "
+                         "together)\n",
+                 k, read_ms, max_new, k, step_ms, step_ms > 0 ? 1000.0 * (double) (max_new * k) / step_ms : 0.0);
+    return rc;
 }
 
 void usage() {
@@ -811,6 +1093,11 @@ void usage() {
                  "  --conversation-cache-min-tokens N   a conversation shorter than this is not parked (default 1024)\n"
                  "  --conversation-cache-min-free-mib N park only while this much physical RAM stays free (default\n"
                  "                         2560)\n"
+                 "  --batch N              N answers written together, each in a sequence of its own with its own\n"
+                 "                         state and attention rows (default 0 = one at a time; at most 8);\n"
+                 "                         --slots N is the same\n"
+                 "  --check-batch K        with --tokens and --batch K or more: K prompts answered on their own and\n"
+                 "                         then together, compared token by token\n"
                  "  --eos-ids ID,ID,...    tokens that end a reply (default: the GGUF's eos, eot and eom)\n"
                  "  --temperature F --top-k N --top-p F --min-p F --seed N   sampling for --tokens (default greedy)\n"
                  "  --images FILE          with --tokens: the prompt's pictures, as strata-vision writes them\n"
@@ -846,7 +1133,7 @@ int main(int argc, char** argv) {
     Sampling s;
     bool want_serve = false;
     long long max_new = 32;
-    int top_probs = 0, lookup = 3, image_pad = -1;
+    int top_probs = 0, lookup = 3, image_pad = -1, check = 0;
     std::string images;
     std::vector<int32_t> ids, eos, follow;
     for (int i = 1; i < argc; ++i) {
@@ -885,6 +1172,8 @@ int main(int argc, char** argv) {
         else if (a == "--expert-swaps") o.expert_swaps = std::atoi(val());
         else if (a == "--tail-skip") o.tail_skip = std::atoi(val());
         else if (a == "--layer-split") o.layer_split = val();
+        else if (a == "--batch" || a == "--slots") o.batch = std::atoi(val());
+        else if (a == "--check-batch") check = std::atoi(val());
         else if (a == "--draft-vocab") o.draft_vocab = std::atoi(val());
         else if (a == "--prompt-batch") o.prompt_batch = std::atoi(val());
         else if (a == "--stage-mib") o.stage_mib = std::atoi(val());
@@ -919,6 +1208,11 @@ int main(int argc, char** argv) {
     }
     if (o.model.empty() || (!want_serve && ids.empty()) || max_new < 1) {
         usage();
+        return 2;
+    }
+    if (o.batch < 0 || o.batch > 8 || check < 0 || check > o.batch || (check > 0 && (int) ids.size() <= check)) {
+        std::fprintf(stderr, "strata-poly: --batch takes 0 to 8, and --check-batch at most --batch prompts, each "
+                             "with tokens left of --tokens\n");
         return 2;
     }
     // over --tail-skip, as Strata's engine reads it: =0 turns a model's default off
@@ -973,6 +1267,8 @@ int main(int argc, char** argv) {
             rc = serve(ss);
         } else if ((long long) ids.size() + max_new > engine.max_context()) {
             throw std::runtime_error("the prompt and --max-new together exceed --max-context");
+        } else if (check > 0) {
+            rc = check_batch(engine, ids, check, max_new);
         } else {
             Pictures pictures;
             if (!images.empty()) {

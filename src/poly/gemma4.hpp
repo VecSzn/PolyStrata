@@ -50,6 +50,7 @@ protected:
     void load_drafter() override;
     void draft_step(int32_t token, int i) override;
     int head_key(int il, int n) const override;
+    bool batch_heads() const override { return true; }
 
 private:
     void mlp(const Layer& L, int il, int n, float* out);
@@ -92,6 +93,7 @@ private:
 
     void load_draft_shape();
     void attn(Block& B, int64_t pos, int n);
+    void attn_rows(Block& B, int n);
     void store(const float* x, const Block& B, int64_t pos, int n, bool value);
     /// One side of a layer's cache as the (code, delta) pair attend_q8 reads: the fp16 pointers under --kv int8
     /// would be null, so the callers take this instead of naming keys/vals themselves.

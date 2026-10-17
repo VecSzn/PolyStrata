@@ -201,13 +201,20 @@ void Lfm2Moe::load_card_rows(const uint8_t* src, int64_t from, int64_t count, in
 // output projection.
 void Lfm2Moe::conv(Block& B, int n) {
     lin(B.in_proj, xn_, proj_, n, xq_);
-    shortconv(proj_, B.past, fp(B.conv), cv_, n_embd_, n, st_, snap_bits_ ? snap_at_ + (B.past - state_) : nullptr,
-              rec_n_, snap_bits_);
+    if (rows_of_) {   // step(): each row with its own sequence's convolution state
+        for (int i = 0; i < n; ++i)
+            shortconv(proj_ + (size_t) i * 3 * n_embd_, seq_state(rows_of_[i].seq, B.past), fp(B.conv),
+                      cv_ + (size_t) i * n_embd_, n_embd_, 1, st_);
+    } else {
+        shortconv(proj_, B.past, fp(B.conv), cv_, n_embd_, n, st_, snap_bits_ ? snap_at_ + (B.past - state_) : nullptr,
+                  rec_n_, snap_bits_);
+    }
     lin(B.wo, cv_, ao_, n);
 }
 
 // The attention: queries and keys normed a head and turned by the position, the keys and values into the caches.
 void Lfm2Moe::attn(Block& B, int64_t pos, int n) {
+    if (rows_of_) return attn_rows(B, n);
     const long long* at = recording_ ? at_ : nullptr;   // a recorded launch: the tokens from what at_ holds
     lin(B.wq, xn_, qraw_, n, xq_);
     head_norm_rope(qraw_, head_dim_, fp(B.q_norm), q_, head_dim_, n_head_, n_rot_, theta_scale_, pos, n, rms_eps_, st_,
@@ -231,6 +238,35 @@ void Lfm2Moe::attn(Block& B, int64_t pos, int n) {
     else
         attend(q_, B.keys, B.vals, pos, n, score_, chunk_, att_, head_dim_, n_head_, n_kv_, scale, st_, 0, 0, false,
                at, at ? room(n) : 0, score_n_);
+    lin(B.wo, att_, ao_, n);
+}
+
+// step()'s rows, each of its own sequence: the products for all of them at once, and a row at a time the turn (it
+// takes one position and counts on from it), the stored keys and values and the attention, in the row's sequence.
+void Lfm2Moe::attn_rows(Block& B, int n) {
+    lin(B.wq, xn_, qraw_, n, xq_);
+    lin(B.wk, xn_, kraw_, n, xq_);
+    lin(B.wv, xn_, v_, n, xq_);
+    const float scale = 1.f / std::sqrt((float) head_dim_);
+    const size_t kv = (size_t) n_kv_ * head_dim_, hq = (size_t) n_head_ * head_dim_;
+    for (int i = 0; i < n; ++i) {
+        const Row& r = rows_of_[i];
+        const long long* ai = at_ + 2 * i;
+        head_norm_rope(qraw_ + i * hq, head_dim_, fp(B.q_norm), q_ + i * hq, head_dim_, n_head_, n_rot_, theta_scale_, 0,
+                       1, rms_eps_, st_, nullptr, nullptr, 1, ai + 1);
+        head_norm_rope(kraw_ + i * kv, head_dim_, fp(B.k_norm), k_ + i * kv, head_dim_, n_kv_, n_rot_, theta_scale_, 0,
+                       1, rms_eps_, st_, nullptr, nullptr, 1, ai + 1);
+        uint16_t* kc = (uint16_t*) seq_buf(r.seq, B.keys);
+        uint16_t* vc = (uint16_t*) seq_buf(r.seq, B.vals);
+        store_f16_at(k_ + i * kv, kc, (int) kv, ai, 1, 0, st_);
+        store_f16_at(v_ + i * kv, vc, (int) kv, ai, 1, 0, st_);
+        const int64_t keep = pos_;
+        pos_ = r.pos;
+        const int sized = room(1);
+        pos_ = keep;
+        attend(q_ + i * hq, kc, vc, r.pos, 1, score_, chunk_, att_ + i * hq, head_dim_, n_head_, n_kv_, scale, st_, 0, 0,
+               false, ai, sized, score_n_);
+    }
     lin(B.wo, att_, ao_, n);
 }
 
