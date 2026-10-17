@@ -78,6 +78,9 @@ struct Options {
     int tail_skip = 0;            ///< a routed expert outside VRAM that every token of a call ranks this far down or
                                   ///< further (the router's first choice is 0) is left out (--tail-skip,
                                   ///< STRATA_ROUTE_TAIL_SKIP); 0: none is
+    float skip_weight = 0;        ///< in place of tail_skip: a routed expert outside VRAM whose router weight is under
+                                  ///< this share of its token's experts' weight, for every token of the call, is left
+                                  ///< out (--skip-weight); 0: tail_skip decides
     std::string layer_split;      ///< the layers across the CUDA devices this process sees, in their order: "auto"
                                   ///< (by each card's free VRAM) or the first layer of each later card ("20,30");
                                   ///< empty, or one device: the current card alone

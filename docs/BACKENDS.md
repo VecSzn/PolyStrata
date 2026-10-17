@@ -1808,6 +1808,27 @@ times their noise, further than the Strata project's default moves its own. Both
 in the environment is read over `--tail-skip`, and `=0` turns it off. With every expert in VRAM nothing is left
 out, so the RTX 5090 rows of the small models do not change. The other sizes of the families were not measured.
 
+`--skip-weight F` (opt-in, off by default) leaves out by weight in place of place: an expert outside VRAM is not
+computed when every token of the call gives it under F of the weight of its eight. A token's eight do not weigh
+the same at each place from token to token, so the weight keeps an expert the router weighs high whatever its
+place, and leaves out one it weighs low. On GLM 5.3 Flash 3.0BIT (RTX 5090, i7-13700K, DDR5-4000,
+the setup's reserve, no expert swaps, no guesses, one token a call), six chat prompts of 200 tokens, each run
+following the tokens of a run with nothing left out and comparing its 20 most likely tokens:
+
+| Setting | KL mean | KL p99 | Same most likely token | Experts left out | Tokens/s |
+| --- | --- | --- | --- | --- | --- |
+| nothing left out, a second run | 0.0085 | 0.098 | 97.8% | 0 | 12.5 |
+| `--tail-skip 7` | 0.0180 | 0.203 | 96.8% | 37,800 | 12.7 |
+| `--skip-weight 0.06` | 0.0174 | 0.246 | 95.7% | 39,324 | 14.2 |
+| `--tail-skip 6` | 0.0310 | 0.343 | 94.5% | 75,512 | 15.6 |
+| `--skip-weight 0.08` | 0.0330 | 0.387 | 94.7% | 91,627 | 17.1 |
+| `--tail-skip 5` | 0.0529 | 0.608 | 93.7% | 112,376 | 17.8 |
+| `--skip-weight 0.095` | 0.0430 | 0.473 | 93.8% | 131,871 | 19.9 |
+
+At about the same mean KL the weight is 10% to 12% faster; at 0.095 it moves the answers less than `--tail-skip 5`
+on every figure and leaves out 17% more experts. At 0.06 the most likely token agrees less often than at
+`--tail-skip 7`. With `--skip-weight` above 0, `--tail-skip` is not used. Other models were not measured.
+
 A call of fewer tokens than `--stage-ahead` routes a layer first and then copies the experts outside VRAM that it
 routes to: a turn of a conversation, a short prompt, the last call of a long one. A call of 150 to 800 tokens
 routes to most of a layer's experts, so with most of them outside VRAM the copies are most of its time, and the
