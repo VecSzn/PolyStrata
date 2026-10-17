@@ -436,6 +436,7 @@ protected:
     void lin(const Dev& w, const float* x, float* y, int n, const void* xq = nullptr, int rows_per_x = 0);
     void fill_expert_cache();
     void start_swaps();
+    void pin_experts();
     void plan_ahead(Layer& L, int il);
     void run(const int32_t* tokens, int n);
     bool pick_way(int t);
@@ -521,6 +522,9 @@ protected:
     mutable Stats all_stats_;             ///< stats() of every card's engine together
     double node_share_ = 0;
     std::thread mapper_;                  ///< reads the experts' pages once after load, so they are mapped
+    std::vector<char> pinned_layer_;      ///< STRATA_POLY_PIN_EXPERTS: a layer's mapped experts are registered with
+                                          ///< the driver, so stage() and the swaps upload straight from them
+    std::vector<void*> host_registered_;  ///< what cudaHostRegister took, given back by ~Engine
     std::atomic<bool> map_quit_{false};
     void* st_ = nullptr;   ///< the stream everything but the staging ahead runs on
     void* blas_ = nullptr; ///< cuBLAS on st_
