@@ -2166,7 +2166,7 @@ void* blas_create(void* stream) {
     const half* a = (const half*) p;
     cublasGemmStridedBatchedEx(h, CUBLAS_OP_T, CUBLAS_OP_N, n, n, n, &one, a, CUDA_R_16F, n, n * n, a + n * n,
                                CUDA_R_16F, n, n * n, &zero, (float*) (a + 2 * n * n), CUDA_R_32F, n, n * n, 1,
-                               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
     cudaStreamSynchronize(cs(stream));
     cudaFree(p);
     return h;
@@ -2636,7 +2636,7 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
             blas_ck(cublasGemmStridedBatchedEx(h, CUBLAS_OP_T, CUBLAS_OP_N, m, (int) cols, dim, &scale,
                                                krow, CUDA_R_16F, width, dim, qg,
                                                CUDA_R_16F, dim, cols * dim, &zero, score, CUDA_R_32F, m, cols * m,
-                                               kv_heads, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                                               kv_heads, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT),
                     "attention scores");
             attn_softmax_block_kernel<<<c * n_head, 128, 0, cs(stream)>>>(score, weight, m, lo0 + k0, (long long) pos,
                                                                          first, window, c, per, last, top, sum,
@@ -2647,7 +2647,7 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
                                                vrow, CUDA_R_16F, width, dim,
                                                weight, CUDA_R_16F, m, cols * m, k0 > 0 ? &one : &zero, og, CUDA_R_32F,
                                                dim, cols * dim, kv_heads, CUBLAS_COMPUTE_32F,
-                                               CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                                               CUBLAS_GEMM_DEFAULT),
                     "attention values");
         }
         attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, sum, dim, true);

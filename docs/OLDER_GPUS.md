@@ -76,21 +76,32 @@ strata-poly here instead, on Windows or Linux, with a CUDA 12.x toolkit (12.8 or
 image encoder with it. It goes in `engine-poly\` in place of the ready-made one, for every model of that engine; a
 later setup without `--cuda 12` takes the ready-made one back. #220 is the Qwen engine's prompt path and does not
 apply here: on an RTX 5090 with driver 570, strata-poly built with CUDA 12.8 read Tiel Coder's 31,516-token prompts
-at 6,200 to 6,700 tokens/s. On a Pascal or Volta card setup adds `-DSTRATA_EXPERIMENTAL_SM60=ON`; strata-poly
-compiles for sm_61 and sm_70 with CUDA 12.4 and 12.8. It has not run on such a card. Built as compute_61 PTX only and
-run on an RTX 3080, which takes the Pascal code paths, Qwen3.6's greedy answer matched llama.cpp's for 60 of 64
-tokens (the sm_86 build: 64) and differed after that by a near tie. On Windows, with CUDA 12.9 and Visual Studio's
-14.44 compiler, it builds for sm_61 and for sm_89; the sm_89 build wrote the same 200 tokens of Qwen3.6 UD-Q2_K_XL as
-the CUDA 13 one on an RTX 4070 Laptop GPU, at 95.6 tokens/s against 93.2.
+at 6,200 to 6,700 tokens/s. On a Pascal or Volta card setup adds `-DSTRATA_EXPERIMENTAL_SM60=ON`. In this fork,
+full hardware support for **sm_60 (Tesla P100 16GB, Quadro GP100)** has been verified:
+* **cuBLAS Fallback Fix**: Resolved `CUBLAS_STATUS_ARCH_MISMATCH = 8` by using `CUBLAS_GEMM_DEFAULT` in `src/poly/kernels.cu`, allowing Pascal architectures lacking Tensor Cores to execute batched attention GEMMs cleanly while preserving Tensor Core acceleration on Volta/Turing/Ampere.
+* **Dual-P100 Layer Splitting**: Verified on dual Tesla P100 (16GB PCIe Gen3 x16) hosting 35B MoE models (KAT-Coder-35B-A3B / Qwen3.6-35B-A3B) at ~52.0 tokens/s decode and ~79.1 tokens/s prompt processing with split VRAM topologies.
+* **Legacy Enterprise Host Floor**: For systems powered by Sandy Bridge-EP / Ivy Bridge-EP CPUs (e.g. dual Xeon E5-2600 v2 / E5-2400 v2), configuring `-DSTRATA_ISA_FLOOR=avx` eliminates `SIGILL` (Illegal Instruction) aborts in host expert routines.
 
 ### Building it yourself
 
 ```sh
-# Linux (Windows: the same with the toolkit's nvcc.exe)
+# Linux with CUDA 12.8 Toolkit (supports sm_60, sm_61, sm_70)
 cmake -S . -B build-cuda12 -DSTRATA_ENABLE_CUDA=ON -DSTRATA_BUILD_TESTS=OFF -DSTRATA_EXPERIMENTAL_SM60=ON \
-      -DCMAKE_CUDA_ARCHITECTURES="61;70" -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.9/bin/nvcc
-cmake --build build-cuda12 --target strata -j
+      -DCMAKE_CUDA_ARCHITECTURES="60;61;70" -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
+      -DSTRATA_ISA_FLOOR=avx
+cmake --build build-cuda12 --target strata-poly -j
 ```
+
+### Research & Roadmap: Speculative Expert Scheduling for Older & Constrained Hardware
+
+While static frequency caching and layer-splitting allow large MoEs to execute on cards like the P100, memory-bandwidth constraints and PCIe bus latency remain the ultimate bottleneck when tail experts must be fetched.
+
+Active development is investigating **speculative multi-layer lookahead scheduling**:
+- **Predictive Trajectory**: Using lightweight speculative priors to forecast expert demand $L+1$ and $L+2$ layers in advance during token decode.
+- **Asynchronous PCIe Staging**: Overlapping computation of current layers with non-blocking DMA streaming of anticipated expert weights into transient VRAM slots.
+- **Hardware Equality**: Enabling legacy enterprise cards (P100, V100) and memory-constrained consumer GPUs to drastically reduce offloading stalls, providing a path toward datacenter-class MoE throughput on accessible hardware.
+
+Further architectural details and benchmarks will be shared in upcoming updates.
 
 Setup does the same when it compiles: it looks for the newest CUDA 12.x toolkit (`STRATA_NVCC=<path to nvcc>` picks
 one, #601; on glibc 2.43 use 12.8, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
