@@ -43,6 +43,14 @@ with an 8 GB card as well.
 
 The server can change between installed models while it runs ([how](docs/BACKENDS.md#changing-the-model)).
 
+### Community Pascal (sm_60) & Legacy Enterprise Hardware Fork
+
+This fork incorporates verified hardware support and fixes for Pascal architectures including the **Tesla P100 (16GB)** and **Quadro GP100**:
+- **Non-Tensor cuBLAS Fallback**: Replaces tensor-op-only defaults with clean SIMT fallbacks, eliminating `CUBLAS_STATUS_ARCH_MISMATCH = 8`.
+- **Multi-GPU Layer Splitting**: Validated on dual Tesla P100s (Gen3 x16) running 35B MoE architectures (KAT-Coder / Qwen3.6 / Tiel Coder) at 52+ tok/s decode.
+- **Enterprise CPU Support**: Resolves `SIGILL` crashes on Sandy Bridge-EP / Ivy Bridge-EP Xeon CPUs via `-DSTRATA_ISA_FLOOR=avx`.
+- **Active Research**: Early work on speculative multi-layer lookahead scheduling and asynchronous PCIe streaming for older and memory-constrained accelerators. See [docs/OLDER_GPUS.md](docs/OLDER_GPUS.md).
+
 PolyStrata is built on [Strata](https://github.com/Niko1221/Strata) by Niko1221.
 Why it is a separate repo, AMD and smaller cards, fine-tunes and other questions: [FAQ](docs/FAQ.md).
 
