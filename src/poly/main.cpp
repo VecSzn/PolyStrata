@@ -52,7 +52,6 @@ using strata::poly::CacheOptions;
 using strata::poly::Conversations;
 using strata::poly::Engine;
 using strata::poly::Guesses;
-using strata::poly::KvFmt;
 using strata::poly::Options;
 using Clock = std::chrono::steady_clock;
 
@@ -1051,10 +1050,13 @@ void usage() {
                  "                         131072 for Qwen3.6, Ornith and Tiel, all of it for the others; 0 = all)\n"
                  "  --no-graphs            launch a token's kernels one by one (default: a layer's are recorded once\n"
                  "                         as a CUDA graph and replayed)\n"
+                 "  --kv fp16|int8|int8k   what the attention caches keep K and V as: fp16 (default), or llama.cpp's\n"
+                 "                         Q8_0 blocks, which about halve the VRAM a token takes; every reader\n"
+                 "                         dequantizes a block in the kernel.  int8k keeps the keys' side in Q8_0\n"
+                 "                         and the values' in fp16: a quarter of the fp16 cache saved, less of a\n"
+                 "                         loss.  Independent of --kv-whole\n"
                  "  --kv-whole             give the attention caches VRAM for the whole context at load (default: as\n"
                  "                         the conversation grows, the expert cache having the rest until then)\n"
-                 "  --kv fmt               the K and V attention caches' format: fp16 (default, unchanged) or q8_0\n"
-                 "                         (ggml Q8_0 blocks: half the KV VRAM, slightly different answers); opt-in\n"
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
                  "                         into VRAM, in place of cached ones it uses less (default 64, 0 = the cache\n"
                  "                         stays as it was loaded)\n"
@@ -1148,12 +1150,19 @@ int main(int argc, char** argv) {
         else if (a == "--no-graphs") o.graphs = false;
         else if (a == "--kv-whole") o.kv_grow = false;
         else if (a == "--kv") {
-            const std::string fmt = val();
-            if (fmt == "fp16") o.kv_format = KvFmt::kFp16;
-            else if (fmt == "q8_0") o.kv_format = KvFmt::kQ8_0;
+            const std::string v = val();
+            if (v == "fp16") o.kv_int8 = false;
+            else if (v == "int8" || v == "q8_0") {
+                o.kv_int8 = true;
+                o.kv_int8_k = false;
+            }
+            else if (v == "int8k") {
+                o.kv_int8 = true;
+                o.kv_int8_k = true;
+            }
             else {
-                std::fprintf(stderr, "strata-poly: --kv %s: unknown format (use fp16 or q8_0)\n", fmt.c_str());
-                std::exit(2);
+                std::fprintf(stderr, "strata-poly: --kv takes fp16, int8 or int8k, not %s\n", v.c_str());
+                return 2;
             }
         }
         else if (a == "--window") o.window = std::atoi(val());

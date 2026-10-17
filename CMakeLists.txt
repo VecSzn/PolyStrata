@@ -1,4 +1,4 @@
-﻿# Strata Engine - top-level build (P1.S1).
+# Strata Engine - top-level build (P1.S1).
 #
 # Targets (phase-1 Ă‚Â§P1.S1): `strata_artifact` (no CUDA dependency), `tests`.  `strata_plan` and the C++
 # `strata-pack` are added when their sources exist - a target with no sources would make the build graph
@@ -2127,13 +2127,14 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
   target_include_directories(poly_mxfp4_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gg}/include
                                                     ${_strata_gpu_include_directories})
   target_link_libraries(poly_mxfp4_test PRIVATE strata_kernels ggml-base ${_strata_gpu_runtime_target})
-  # the Q8_0 KV cache kernels (store_q8 / store_q8_at) against a host reference (GPU, synthetic, no model)
-  if(STRATA_BUILD_TESTS)
-    add_executable(poly_kv_q8_test src/poly/kv_q8_test.cpp src/poly/kernels.cu)
+  # the int8 KV cache kernels (store_q8 / store_q8_at / attend_q8) against ggml's quantizer and the fp16 paths
+  # (GPU, synthetic, no model); the int8 MMA is CUDA-only in v1, so HIP skips it
+  if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
+    add_executable(poly_kv_q8_test src/poly/kv_q8_poly_test.cpp src/poly/kernels.cu)
     target_include_directories(poly_kv_q8_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-                                                       ${_strata_gpu_include_directories})
+                                                       ${_strata_gpu_include_directories} ${_strata_gg}/include)
     target_link_libraries(poly_kv_q8_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
-                                                  Threads::Threads)
+                                                  ggml-cpu ggml-base Threads::Threads)
     add_test(NAME poly_kv_q8_test COMMAND poly_kv_q8_test)
   endif()
 endif()
