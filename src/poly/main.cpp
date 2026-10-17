@@ -1086,6 +1086,8 @@ void usage() {
                  "  --tail-skip N          an expert outside VRAM that every token of a window ranks at place N+1\n"
                  "                         or later among its experts is left out: faster, and the answers move a\n"
                  "                         little (default 0 = none is; setup gives Qwen3.6 6)\n"
+                 "  --skip-weight F        in place of --tail-skip: an expert outside VRAM that every token of a\n"
+                 "                         window weighs under F of its experts' weight is left out (default 0 = off)\n"
                  "environment: STRATA_ROUTE_TAIL_SKIP=N  in place of --tail-skip (0 turns it off)\n");
 }
 
@@ -1147,6 +1149,7 @@ int main(int argc, char** argv) {
         else if (a == "--draft-model") o.draft_model = val();
         else if (a == "--expert-swaps") o.expert_swaps = std::atoi(val());
         else if (a == "--tail-skip") o.tail_skip = std::atoi(val());
+        else if (a == "--skip-weight") o.skip_weight = (float) std::atof(val());
         else if (a == "--layer-split") o.layer_split = val();
         else if (a == "--batch" || a == "--slots") o.batch = std::atoi(val());
         else if (a == "--check-batch") check = std::atoi(val());
@@ -1209,7 +1212,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "strata-poly: loaded in %.1f s; %d of %d routed experts in VRAM (%.1f GiB), %d CPU threads\n",
                      ms_since(t0) / 1000.0, engine.cached_experts(), engine.total_experts(), engine.cached_gib(),
                      engine.threads());
-        if (o.tail_skip > 0)
+        if (o.skip_weight > 0)
+            std::fprintf(stderr, "strata-poly: skip weight %.3f: an expert outside VRAM that every token of a window "
+                                 "weighs under %.1f%% of its experts' weight is left out (in place of --tail-skip)\n",
+                         o.skip_weight, 100.0 * o.skip_weight);
+        else if (o.tail_skip > 0)
             std::fprintf(stderr, "strata-poly: tail skip %d: an expert outside VRAM that every token of a window ranks "
                                  "at place %d or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns "
                                  "it off\n",
