@@ -57,6 +57,8 @@ public:
             if (r > at || (r == at && i == cur_)) best = i, at = r, same = c;
         }
         ++clock_;
+        // A request begins: the freeze the one before it held the experts' split in ends here (STRATA_FREEZE_EXPERTS).
+        e_.unfreeze_experts();
         if (at == 0) {
             // nothing kept starts like this
             if (!cur().seq.empty() && park(slots_.size())) cur_ = take(cur_);

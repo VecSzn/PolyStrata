@@ -599,6 +599,10 @@ int serve(Session& ss) {
             try {
                 const Clock::time_point t0 = Clock::now();
                 const int before = engine.cached_experts();
+                // A frozen answer's cache is the one its first token saw: the resize waits for the answer to end
+                // (unfreeze_experts() runs where the next request's first token is read, so the freeze is over by
+                // then whichever way this request went).
+                engine.unfreeze_experts();
                 engine.resize_cache((int) reserve);
                 const long long free_mib = (long long) engine.vram_free_mib();
                 std::fprintf(stderr, "strata-poly: VRAM %d MiB kept free: the expert cache %d -> %d of %d experts "

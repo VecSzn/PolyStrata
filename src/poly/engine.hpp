@@ -182,6 +182,9 @@ public:
 
     /// Forget the sequence.
     void reset();
+    /// STRATA_FREEZE_EXPERTS: end the freeze the request under way holds the experts' split in.  Called where
+    /// a request's first token is about to be read, which is where reset() and load_state() are called from.
+    void unfreeze_experts();
     /// The most tokens one eval() takes.
     int max_rows() const { return rows_; }
     /// Feed n tokens from position pos().  With want_logits, logits() then holds the scores of the token after the
@@ -501,6 +504,8 @@ protected:
     int snap_il_ = 0;                        ///< the layer DSNAP digs into
     float* snap_dev_ = nullptr;
     float* snap_r0_ = nullptr;               ///< r_ at the end of load, to report where the snap row lies
+    bool freeze_experts_ = false;            ///< STRATA_FREEZE_EXPERTS: the experts' split is the request's first
+                                             ///< token's for the whole answer (see Engine::load())
     void* blas_ = nullptr; ///< cuBLAS on st_
     void* ev_ = nullptr;   ///< marks the router's copy to the host: ev_row_'s first, or a window's row's own
     void* ev_row_[8] = {}; ///< one for each token a window can have

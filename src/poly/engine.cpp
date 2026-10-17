@@ -620,6 +620,11 @@ void Engine::settle_swaps() {
 // slots lie there and that were used more than cached ones before the cut take those ones' slots, as follow()
 // ranks them, and the others leave the cache.
 void Engine::shrink_cache(size_t bytes) {
+    // STRATA_FREEZE_EXPERTS: a frozen answer reads a cache that never changes.  shrink_cache() would move
+    // experts between slots mid-answer (cover() calls it when the attention caches grow, and mind_vram() when
+    // another program takes VRAM), which is exactly the change the freeze is there to keep out.  A frozen
+    // answer's cache is the one its first token saw; the request after it may size it again.
+    if (freeze_experts_) return;
     size_t cut = arena_.mapped;
     for (size_t i = arena_.pieces.size(); i > 0 && arena_.mapped - cut < bytes; --i) cut -= arena_.pieces[i - 1].second;
     settle_swaps();
@@ -1171,6 +1176,9 @@ void Engine::resize_cache(int mib) {
 
 void Engine::resize_card_cache(int mib) {
     if (!opt_.gpu_experts || n_moe_ == 0) return;
+    // As shrink_cache(): a frozen answer's cache does not change under it (the vram API resizes between
+    // requests; unfreeze_experts() ends the freeze before one begins).
+    if (freeze_experts_) return;
     OnCard here(device_, split_);
     ck(cudaStreamSynchronize(cs(st_)), "resize");
     const auto failed = [&] {
@@ -1215,6 +1223,8 @@ bool Engine::mind_vram() {
 
 bool Engine::mind_card_vram() {
     if (!exp_ || reserve_mib_ <= 0) return false;
+    // As shrink_cache(): a frozen answer's cache is the one its first token saw.
+    if (freeze_experts_) return false;
     OnCard here(device_, split_);
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
@@ -1245,6 +1255,8 @@ void Engine::held_is_budget() {
 // keeps what was mapped.  Returns the experts it took.
 int Engine::grow_cache(size_t bytes) {
     if (!vmm_ || !exp_) return 0;
+    // As shrink_cache(): a frozen answer's cache does not change under it.
+    if (freeze_experts_) return 0;
     settle_swaps();
     ck(cudaStreamSynchronize(cs(st_)), "the expert cache");
     if (swap_st_) ck(cudaStreamSynchronize(cs(swap_st_)), "the expert cache");
@@ -1353,6 +1365,12 @@ void Engine::follow(int written) {
         std::lock_guard<std::mutex> l(swap_m_);
         if (!swap_error_.empty()) throw std::runtime_error("expert upload: " + swap_error_);
     }
+    // STRATA_FREEZE_EXPERTS: the split between the card's experts and the CPU's is the request's first token's
+    // for the whole answer, so an arrival claims no slot and no trade is asked while one is being written.  A
+    // frozen answer sees a cache that never changes, which makes it a function of the request alone.  The
+    // uploads themselves go on: the followers fill their slots, and unfreeze_experts() lets the next request's
+    // first token claim them.
+    if (freeze_experts_) return;
     const size_t ne = (size_t) n_expert_;
     int n_free = 0;
     for (int j = 0; j < n_swap_; ++j) {
@@ -1470,6 +1488,18 @@ void Engine::load(const Options& o) {
     snap_on_ = std::getenv("STRATA_SNAP") != nullptr;
     if (const char* sp = std::getenv("STRATA_SNAP_POS")) snap_pos_ = std::atoll(sp);
     if (const char* si = std::getenv("STRATA_SNAP_IL")) snap_il_ = std::atoi(si);
+    // STRATA_FREEZE_EXPERTS=1: an answer's experts are the cache's as it was at the request's first token.  The
+    // split between the card's experts and the CPU's (moe()) decides a layer's sums to the last bit - the two
+    // paths add in different orders - so a greedy answer is a function of the request alone only while the split
+    // is.  A freeze holds it still from the request's first token to its last: the followers' uploads are still
+    // made and still arrive, but their slots are claimed only between requests, where nothing reads the cache.
+    // What it costs: an expert the answer keeps using but that arrived after its first token is computed on the
+    // CPU instead (the cache holds it, but the split is the first token's).  What it buys: greedy answers that
+    // repeat bit for bit, which is what a test, a benchmark of quality or a comparison with another engine needs.
+    freeze_experts_ = std::getenv("STRATA_FREEZE_EXPERTS") != nullptr;
+    if (freeze_experts_)
+        std::fprintf(stderr, "strata-poly: the experts' split is frozen at each request's first token "
+                             "(STRATA_FREEZE_EXPERTS): greedy answers repeat bit for bit\n");
     if (snap_on_) ck(cudaMallocHost(&snap_dev_, (size_t) n_embd_ * sizeof(float) + 256), "snap buffer");
     cudaStream_t st = nullptr;
     ck(cudaStreamCreateWithFlags(&st, cudaStreamNonBlocking), "cudaStreamCreate");
@@ -1772,6 +1802,15 @@ void Engine::reset() {
     pos_ = 0;
     ahead_pos_ = -1;
     if (next_) next_->reset();
+}
+
+// STRATA_FREEZE_EXPERTS ends here: the request it held still for is over, and the followers' arrivals may take
+// their slots again.  Called where a request's first token is about to be read (Conversations::resume()), which
+// is the same place reset() and load_state() are, so the engine is between requests whichever way this one went.
+void Engine::unfreeze_experts() {
+    if (!freeze_experts_) return;
+    freeze_experts_ = false;
+    if (next_) next_->unfreeze_experts();
 }
 
 void Engine::save_state(uint8_t* dst) {
@@ -2205,7 +2244,10 @@ void Engine::moe_rows(Layer& L, int il, int n) {
     // several calls it copies ahead as the others do, and the copy is theirs too.
     if (ahead) plan_ahead(L, il);
     const int n_ahead = ahead ? (int) L.ahead.size() : 0;
-    const bool mine = ahead && staged_il_ == il && (staged_ == L.ahead || 2 * route_ms_ < ahead_ms_);
+    // Under a freeze the staging decisions are the measured times', and those are the machine's, not the
+    // request's: a frozen answer takes the staging as it finds it, which is what the first token saw.
+    const bool mine = ahead && staged_il_ == il &&
+                      (staged_ == L.ahead || (freeze_experts_ ? true : 2 * route_ms_ < ahead_ms_));
     const bool early = n_ahead > 0 && !mine;
     if (early) {
         const Clock::time_point t = Clock::now();
@@ -2213,14 +2255,16 @@ void Engine::moe_rows(Layer& L, int il, int n) {
         ck(cudaStreamWaitEvent(cs(up_), (cudaEvent_t) ev_free_, 0), "expert staging");
         stage(L, L.ahead.data(), n_ahead, up_);
         ck(cudaEventRecord((cudaEvent_t) ev_ahead_, cs(up_)), "expert staging");
-        ahead_ms_ = ms_since(t);
-        // out already: how long before is not known until a call waits for it
-        route_ms_ = cudaEventQuery((cudaEvent_t) ev_) == cudaSuccess ? 0 : ahead_ms_;
+        if (!freeze_experts_) {   // the measured times are the machine's, not the request's: keep them out of a freeze
+            ahead_ms_ = ms_since(t);
+            // out already: how long before is not known until a call waits for it
+            route_ms_ = cudaEventQuery((cudaEvent_t) ev_) == cudaSuccess ? 0 : ahead_ms_;
+        }
     }
 
     const Clock::time_point t0 = Clock::now();
     ck(cudaEventSynchronize((cudaEvent_t) ev_), "router");
-    if (ahead && !early) route_ms_ = ms_since(t0);
+    if (ahead && !early && !freeze_experts_) route_ms_ = ms_since(t0);
     stats_.route_wait_ms += ms_since(t0);
 
     const size_t cb_row = (size_t) n_expert_ + 1;
@@ -2430,7 +2474,7 @@ void Engine::moe_rows(Layer& L, int il, int n) {
         stats_.cpu_ms += cpu;
         stats_.cpu_experts += (int64_t) host_.size();
         // the share that would have had both done at once, if each one's time grows with its share
-        if (opt_.cpu_share < 0 && n_cpu < n_spare) {
+        if (opt_.cpu_share < 0 && n_cpu < n_spare && !freeze_experts_) {
             const double s = (double) n_cpu / n_spare, c = cpu / s, g = gpu / (1 - s);
             share_[size] = std::clamp(0.5 * share_[size] + 0.5 * g / (c + g), 0.05, 0.95);
         }
@@ -2491,6 +2535,9 @@ void Engine::run(const int32_t* tokens, int n) {
     // state at the first layer may not depend on whether an upload happened to have finished.  Every expert on
     // its way arrives here, and the followers' arrivals are claimed, before the first token reads the cache.
     // The cost is the upload a window still waits for, a millisecond or so of a token: under 5% of one.
+    // STRATA_FREEZE_EXPERTS holds the split still for the whole request instead: the request's first token
+    // claims the arrivals and asks for the trades, and the tokens after it see the cache as it was then.
+    // follow() above takes the arrivals it finds, so the freeze only has to keep the later ones from asking.
     if (n_swap_ > 0) {
         settle_swaps();
         follow(n < kStageRows ? n : 0);
@@ -3074,7 +3121,9 @@ void Engine::window(const int32_t* tokens, int t) {
     // the two ways are a choice only with experts on the CPU; a call that records launches says nothing of them
     const bool timed = t > 1 && !all_cached();
     const bool recorded = std::exchange(recorded_, false);
-    if (timed) halves_ = pick_way(t);
+    // Under a freeze the way is the measured times', not the request's: a frozen answer's sums are the ones its
+    // first token's way gives, whichever way that was.
+    if (timed && !freeze_experts_) halves_ = pick_way(t);
     const Clock::time_point t0 = Clock::now();
     windowed_ = true;
     snap_bits_ = snap_tokens(t);
@@ -3092,7 +3141,7 @@ void Engine::window(const int32_t* tokens, int t) {
     std::copy(tokens, tokens + t, win_tok_);
     if (next_) {   // a card's way is timed by its own layers
         hand_on(pos_, t, pass_rows(t));
-        if (timed && !recorded_) took_way(t, ms_since(t0));
+        if (timed && !recorded_ && !freeze_experts_) took_way(t, ms_since(t0));
         recorded_ = recorded_ || recorded;
         win_ = t;
         next_->window(tokens, t);
@@ -3105,7 +3154,7 @@ void Engine::window(const int32_t* tokens, int t) {
     ck(cudaMemcpyAsync(h_wlogits_, wlogits_, (size_t) t * n_vocab_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
        "logits");
     ck(cudaStreamSynchronize(cs(st_)), "window");
-    if (timed && !recorded_) took_way(t, ms_since(t0));
+    if (timed && !recorded_ && !freeze_experts_) took_way(t, ms_since(t0));
     recorded_ = recorded_ || recorded;
     win_ = t;
 }
