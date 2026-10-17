@@ -1496,10 +1496,11 @@ void Engine::load(const Options& o) {
     // What it costs: an expert the answer keeps using but that arrived after its first token is computed on the
     // CPU instead (the cache holds it, but the split is the first token's).  What it buys: greedy answers that
     // repeat bit for bit, which is what a test, a benchmark of quality or a comparison with another engine needs.
-    freeze_experts_ = std::getenv("STRATA_FREEZE_EXPERTS") != nullptr;
+    freeze_experts_ = freeze_experts_asked_ = std::getenv("STRATA_FREEZE_EXPERTS") != nullptr;
     if (freeze_experts_)
-        std::fprintf(stderr, "strata-poly: the experts' split is frozen at each request's first token "
-                             "(STRATA_FREEZE_EXPERTS): greedy answers repeat bit for bit\n");
+        std::fprintf(stderr, "strata-poly: the experts' split is frozen for the engine's whole run "
+                             "(STRATA_FREEZE_EXPERTS): greedy answers are a function of the request alone, "
+                             "and the only cache change after load is the serve VRAM resize\n");
     if (snap_on_) ck(cudaMallocHost(&snap_dev_, (size_t) n_embd_ * sizeof(float) + 256), "snap buffer");
     cudaStream_t st = nullptr;
     ck(cudaStreamCreateWithFlags(&st, cudaStreamNonBlocking), "cudaStreamCreate");
@@ -1804,13 +1805,20 @@ void Engine::reset() {
     if (next_) next_->reset();
 }
 
-// STRATA_FREEZE_EXPERTS ends here: the request it held still for is over, and the followers' arrivals may take
-// their slots again.  Called where a request's first token is about to be read (Conversations::resume()), which
-// is the same place reset() and load_state() are, so the engine is between requests whichever way this one went.
+// STRATA_FREEZE_EXPERTS: the freeze is for the engine's whole run, not one request — a greedy answer
+// has to be a function of the request alone, and with a cache that changes between requests it is
+// not.  The followers' uploads pile up in their slots (kSent) and are claimed by the one call below,
+// which the operator's VRAM resize makes between requests; after it, unfreeze stays off and the
+// cache is as the resize left it for every request after.
 void Engine::unfreeze_experts() {
-    if (!freeze_experts_) return;
     freeze_experts_ = false;
     if (next_) next_->unfreeze_experts();
+}
+
+void Engine::refreeze_experts() {
+    if (!freeze_experts_asked_) return;
+    freeze_experts_ = true;
+    if (next_) next_->refreeze_experts();
 }
 
 void Engine::save_state(uint8_t* dst) {
