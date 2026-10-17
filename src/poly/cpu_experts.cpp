@@ -17,7 +17,13 @@ namespace {
 // Rows of gate and up, and of down, a task.  With fewer tasks than several a thread, the last round left threads
 // idle at the end of every layer: 64 rows gave Tiel's 512-row experts 8 tasks each, and its down products 32 tasks.
 constexpr int kRowsPerTask = 32;
-constexpr int kRowsPerDownTask = 16;
+// 32 and not 16: with 16 a task read 10 KB of each expert's down, too little for the hardware prefetcher to get
+// going (GLM 5.3 Flash Q2_K, 4 experts a call, i7-13700K, DDR5-4000: down 31.6 GB/s; with 32 and kPrefetchRows 2,
+// 45 GB/s)
+constexpr int kRowsPerDownTask = 32;
+// Each row's dot products first ask for the row this many rows on in the same task, which the hardware prefetcher
+// does not see coming across the rows of several experts
+constexpr int kPrefetchRows = 2;
 constexpr int kSpinsBeforeSleep = 20000;   // about a millisecond of pause instructions
 
 const ggml_type_traits_cpu* traits(int type) { return ggml_get_type_traits_cpu((ggml_type) type); }
@@ -28,6 +34,10 @@ void init_once() {
 }
 
 thread_local bool in_task = false;   // this thread is running a task of a batch
+
+inline void prefetch_row(const uint8_t* p, size_t n) {
+    for (size_t i = 0; i < n; i += 64) _mm_prefetch((const char*) p + i, _MM_HINT_T0);
+}
 
 }  // namespace
 
@@ -187,6 +197,10 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         for (int r = r0; r < r1; ++r) {
             const uint8_t* gate = e.gate + (size_t) r * gu_row;
             const uint8_t* up = e.up + (size_t) r * gu_row;
+            if (r + kPrefetchRows < r1) {
+                prefetch_row(gate + (size_t) kPrefetchRows * gu_row, gu_row);
+                prefetch_row(up + (size_t) kPrefetchRows * gu_row, gu_row);
+            }
             for (int i = i0; i < i1; ++i) {
                 const int j = byp[i];
                 const uint8_t* a = actp + (size_t) experts[j].row * a_bytes;
@@ -217,6 +231,7 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         for (int r = r0; r < r1; ++r) {
             for (int u = 0; u < n_run; ++u) {
                 const uint8_t* down = experts[byp[runp[u]]].down + (size_t) r * d_row;
+                if (r + kPrefetchRows < r1) prefetch_row(down + (size_t) kPrefetchRows * d_row, d_row);
                 for (int i = runp[u]; i < runp[u + 1]; ++i)
                     td->vec_dot(n_ff, s + byp[i], 0, down, 0, hqp + (size_t) byp[i] * h_bytes, 0, 1);
             }
