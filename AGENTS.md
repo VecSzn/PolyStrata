@@ -50,3 +50,8 @@ offers the same steps as tools.
   [docs/COMMUNITY_BENCHMARKS.md](docs/COMMUNITY_BENCHMARKS.md), compare against a same-day run of the build you are
   testing, and say what you did not test.
 - Open test requests and the hardware that is wanted are listed in [docs/TEST_REQUESTS.md](docs/TEST_REQUESTS.md).
+
+## 进程清理铁律（2026-10-17 增补）
+- **taskkill 前必须打印目标映像名核对**：`tasklist //FI "PID eq N"` 的输出不是 `strata-poly.exe` / 可乐自起的 `python.exe` / `ninja.exe` / `cmake.exe`，一律不杀。
+- 禁止用端口号反杀进程（端口可能属于官家的程序，如 8081 = xerj.exe）；只许杀可乐自己 spawn 的 PID，且杀前核对映像名。
+- xerj.exe（官家的程序，监听 8081）**永远不碰**。
