@@ -2402,6 +2402,10 @@ void native_quantize_q8_1(const float* x, void* x_q8_1, int n_in, int ncols, voi
     validate_pointer(x);
     validate_pointer(x_q8_1);
     validate_stream(stream);
+    const auto err_pre = cudaGetLastError();
+    if (err_pre != cudaSuccess) {
+        throw std::runtime_error(std::string("Pre-existing CUDA error before native_quantize_q8_1: ") + cudaGetErrorString(err_pre));
+    }
     // Columns are contiguous and n_in is a multiple of 32, so ncols columns quantize as one vector of
     // ncols * n_in elements: every 32-element block stays inside one column.
     const int n_total = n_in * ncols;

@@ -77,7 +77,7 @@ template <typename... KArgs, typename... Args>
 inline void launch_pdl(void (*kernel)(KArgs...), dim3 grid, dim3 block, size_t smem, cudaStream_t stream,
                        Args&&... args) {
 #if !defined(__HIPCC__)
-    if (pdl_scope() && pdl_launch_ok((const void*) kernel, stream)) {
+    if (pdl_supported() && pdl_scope() && pdl_launch_ok((const void*) kernel, stream)) {
         cudaLaunchConfig_t cfg = {};
         cfg.gridDim = grid;
         cfg.blockDim = block;
