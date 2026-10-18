@@ -1539,7 +1539,7 @@ void launch_multi(const void* weights, const void* x_q8_1, float* y, int n_in, i
 // Several matrices of one format and shape in one launch (native_mmvq_slots, native_mmvq_ids): blockIdx.y is the
 // matrix, and the rest is native_mmvq_multi_kernel for one column in its EXACT layout.
 template<typename F, int ROWS, typename S>
-__launch_bounds__(WARPS * WARP, (ROWS <= 2 ? 4 : 1))
+__launch_bounds__(WARPS * WARP, 1)
 __global__ void native_mmvq_slots_kernel(S slots, int n_in, int n_out) {
     const SlotPtrs at = slot_ptrs(slots, int(blockIdx.y));
     const auto* w = static_cast<const typename F::Block*>(at.w);
