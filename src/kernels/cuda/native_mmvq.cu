@@ -203,7 +203,7 @@ __global__ void native_swiglu_quantize_q8_1_kernel(const float* __restrict__ gat
 // --use_fast_math).  Then every thread of the block takes values, a warp 32 of one Q8_1 block, and quantizes them as
 // native_quantize_q8_1_kernel does: more threads than the sum's make the row's quantization fewer steps.
 template<int SUM>
-__launch_bounds__(1024, 1)
+__launch_bounds__(256, 1)
 __global__ void native_add_rms_norm_q8_1_kernel(float* __restrict__ x, const float* __restrict__ add,
                                                 const float* __restrict__ w, float* __restrict__ y,
                                                 Q81Block* __restrict__ yq, int n, float eps) {
@@ -1349,7 +1349,7 @@ static bool s26_tsum_on() {
 // S26 STRATA_LFUSE (PAIR): blocks n_out.. compute the same rows of w2 into y2 (two matrices of one shape on one
 // input in one launch; each output's code is the single matrix's)
 template<typename F, int NCOLS, int NW, int ROWS, bool TS = false, bool PAIR = false>
-__launch_bounds__(NW * WARP, (ROWS <= 2 ? 4 : 1))
+__launch_bounds__(NW * WARP, 1)
 __global__ void native_mmvq_multi_kernel(const typename F::Block* __restrict__ w, const Q81Block* x_, float* y_,
                                          int n_in, int n_out,
                                          const typename F::Block* __restrict__ w2 = nullptr, float* __restrict__ y2 = nullptr) {
@@ -1843,12 +1843,14 @@ void validate_pointer(const void* p) {
 void validate_stream(void* stream) {
     if (!stream) throw std::invalid_argument("native MMVQ requires an explicit non-null CUDA stream");
 }
-void launch_check() {
+static inline void launch_check_at(const char* func, int line) {
     const auto error = cudaGetLastError();
     if (error != cudaSuccess) {
-        throw std::runtime_error(std::string("native MMVQ launch: ") + cudaGetErrorString(error));
+        throw std::runtime_error(std::string("native MMVQ launch at ") + func + ":" + std::to_string(line) + ": " + cudaGetErrorString(error));
     }
 }
+#define launch_check() launch_check_at(__FUNCTION__, __LINE__)
+
 
 
 #if defined(STRATA_HIP_GFX906)
@@ -2395,6 +2397,7 @@ std::size_t native_q8_1_bytes(int n_in, int ncols) {
 }
 
 void native_quantize_q8_1(const float* x, void* x_q8_1, int n_in, int ncols, void* stream) {
+
     validate_shape(n_in, ncols);
     validate_pointer(x);
     validate_pointer(x_q8_1);
@@ -2434,7 +2437,7 @@ void native_add_rms_norm_q8_1(float* x, const float* add, const float* w, float*
     if (rows < 1) return;
     const auto s = static_cast<cudaStream_t>(stream);
     auto* q = static_cast<Q81Block*>(y_q8_1);
-    const int block = std::max(threads, std::min(1024, n));   // n is a multiple of 32, and so is this
+    const int block = std::max(threads, std::min(256, n));   // n is a multiple of 32, and so is this
     switch (threads) {
     case 128: native_add_rms_norm_q8_1_kernel<128><<<rows, block, 0, s>>>(x, add, w, y, q, n, eps); break;
     case 256: native_add_rms_norm_q8_1_kernel<256><<<rows, block, 0, s>>>(x, add, w, y, q, n, eps); break;

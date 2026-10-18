@@ -29,7 +29,7 @@ constexpr size_t kAttendResults = size_t(8) << 20;
 constexpr int VALUE_DIMS = 32, VALUE_SHARES = 32, VALUE_QUERIES = 8;
 constexpr int KDA_TERMS = 16, KDA_COLUMNS = 16;   // kda_state_kernel: a thread's values, a block's columns
 // the indexer: a key's values; idx_score_kernel's keys a tile and tokens a block; idx_select_kernel's threads
-constexpr int IDX_DIM = 128, IDX_TILE = 32, IDX_WARPS = 8, IDX_SELECT = 1024;
+constexpr int IDX_DIM = 128, IDX_TILE = 32, IDX_WARPS = 8, IDX_SELECT = 256;
 
 __device__ __forceinline__ float warp_sum(float x) {
 #pragma unroll
@@ -93,7 +93,7 @@ __global__ void gemv_kernel(const W* __restrict__ w, const float* __restrict__ x
 // ms a token its card worked before a layer's router had its scores.
 int sum_threads(int n) {
     int threads = 128;
-    while (threads < 1024 && threads * 4 < n) threads *= 2;
+    while (threads < 256 && threads * 4 < n) threads *= 2;
     return threads;
 }
 
