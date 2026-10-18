@@ -382,6 +382,7 @@ __global__ void kda_conv_state_kernel(const float* __restrict__ proj, float* __r
 // value of its column, so a column's two sums are a few terms a thread and a sum over its threads.  A thread a
 // column read the column's 128 values one after the other, twice, and that was 25 microseconds a token.  The
 // block walks the tokens.  s[i + hd * j] holds key dimension i of column j.  blockDim.x is hd * lanes.
+__launch_bounds__(512, 1)
 __global__ void kda_step_kernel(const float* __restrict__ qkv, const float* __restrict__ g1,
                                 const float* __restrict__ a, const float* __restrict__ beta, float* __restrict__ s,
                                 const float* __restrict__ g2, const float* __restrict__ o_norm,
@@ -2269,12 +2270,14 @@ void kda_step(float* qkv, float* g1, const float* a, const float* beta, float* s
     if (head_dim % WARP != 0 || head_dim > 256)
         throw std::invalid_argument("kda_step: a head of 32 to 256 values, in 32s");
     int lanes = WARP;   // threads a column, while a block has them
-    while (head_dim * lanes > 1024) lanes /= 2;
+    while (head_dim * lanes > 512) lanes /= 2;
     // a few tokens, or a head that is not kda_state_kernel's size: one launch
     if (rows < 32 || snap || head_dim != KDA_TERMS * lanes) {
         kda_step_kernel<<<n_head, head_dim * lanes, 0, cs(stream)>>>(qkv, g1, a, beta, s, g2, o_norm, out, head_dim,
                                                                     n_head, rows, gate_lower_bound, norm_eps, snap,
                                                                     stride, snap ? n_snap : 0);
+        if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess)
+            throw std::runtime_error(std::string("kda_step_kernel: ") + cudaGetErrorString(e));
         return;
     }
     const int group = WARP / lanes;
