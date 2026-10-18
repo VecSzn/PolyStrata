@@ -2227,8 +2227,12 @@ void hc_pre(const float* r, const float* fn, const float* scale, const float* ba
             float* cur, int n_embd, int rows, float norm_eps, float hc_eps, int sinkhorn_iters, void* stream) {
     const int n_mix = HC * (2 + HC);
     hc_mix_kernel<<<dim3(n_mix + 1, rows), sum_threads(HC * n_embd), 0, cs(stream)>>>(r, fn, mix, HC * n_embd, n_mix);
+    if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess)
+        throw std::runtime_error(std::string("hc_mix_kernel: ") + cudaGetErrorString(e));
     hc_read_kernel<<<dim3(grid(n_embd, 256), rows), 256, 0, cs(stream)>>>(r, mix, scale, base, hcw, cur, n_embd,
                                                                          norm_eps, hc_eps, sinkhorn_iters);
+    if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess)
+        throw std::runtime_error(std::string("hc_read_kernel: ") + cudaGetErrorString(e));
 }
 
 void hc_post(const float* x, const float* hcw, float* r, int n_embd, int rows, void* stream) {
