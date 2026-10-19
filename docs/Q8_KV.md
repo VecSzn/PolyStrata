@@ -63,6 +63,9 @@ speculative path cannot change a token (`timings.draft_n` was 0 on every request
 fp16 and Q8_0 arms were compared over five prompts each: the four short factual ones and one open-ended
 sentence about the colour blue.
 
+*The table below is the one the previous `--kv q8_0` readers measured (v0.1.43-poly.5, three models on a
+RTX 3070). The int8 readers were measured again, on the models still at hand, and that table follows.*
+
 | model | exact matches | mean character agreement | longest common prefix |
 | --- | ---: | ---: | --- |
 | Tiel Coder 35B-A3B | 5/5 | 1.0000 | full reply (137 chars) |
@@ -83,6 +86,24 @@ tokens, and every attention stage's every layer agreed — **3603 of 3603 dump r
 engine-to-engine A/B over 36 requests: decode ratio 1.0167, bootstrap 95% CI [0.9813, 1.0577] (the CI
 contains 1.0 — the two arms are statistically indistinguishable at decode); prefill ratio 0.9844. The
 answers agree where greedy is stable, and every difference traces to the quantization, not the plumbing.
+
+### The int8 readers against fp16 (re-measured)
+
+The int8 readers quantize the queries as well as the keys, so the scores move in the last bits and greedy
+can pick a different token after the same reasoning. What was measured on the models at hand (RTX 4070
+Laptop, 8 GiB, greedy, `--no-draft`, `--tail-skip 0`, `max_tokens: 64`, the same five prompts):
+
+| model | arm | exact token match vs fp16 | final answer vs fp16 |
+| --- | --- | ---: | --- |
+| Ornith 1.5 35B-A3B (qwen35moe) | `--kv int8` | 1/5 prompts | 2/2 prompts that finished reasoning in 64 tokens |
+| gemma-4-26B-A4B | `--kv int8` | 1/5 prompts | 5/5 prompts keep every key fact |
+| gemma-4-26B-A4B | `--kv int8k` | 1/5 prompts | 5/5 prompts keep every key fact |
+
+On Ornith the differences are rewordings inside the reasoning chain (`Recall the fact` / `Retrieve
+knowledge`); both finished prompts still answer `KV OK` and `42`. On Gemma 4 the arms that diverge keep the
+answer token (`KV OK`, `42`, `Paris`) and one prompt is bit-identical in all three arms. So the int8
+readers change the wording of a reasoning chain before they change an answer — the old readers' 15/15
+character-for-character equality was a property of not touching the query side, not of the layout.
 
 ## What it saves
 
@@ -154,8 +175,10 @@ The three run configs (`strata-tiel.json`, `strata-ornith.json` and `strata-occa
 
 - The int8 **MMA tier** uses NVIDIA's `mma.sync` PTX, which a HIP build does not have; the `__dp4a` tiers run
   through `hip_compat`'s `dp4a` (the same signed-bytes-in-int32 contract). On AMD the engine takes the dp4a
-  readers and the cuBLAS batch path; `STRATA_KV_MMA=0` pins the same choice on CUDA. The AMD numbers below are
-  the old elementwise readers (PR 29); they are re-measured with this change pending.
+  readers and the cuBLAS batch path: the MMA tier is gated on `tensor_cores()` (false under `__HIPCC__`) and its
+  PTX body compiles to an empty stub there, so the choice is compile-time clean and never picked at runtime.
+  `STRATA_KV_MMA=0` pins the same choice on CUDA. The AMD numbers below are the old elementwise readers
+  (PR 29); they are re-measured with this change pending.
 - Gemma 4 is in with this change (`--kv int8` / `--kv int8k`; int8k is its best mode — see above).
 
 ## The comparison with another implementation
