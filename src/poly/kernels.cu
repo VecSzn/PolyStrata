@@ -28,6 +28,12 @@ constexpr int SCORE_WARPS = 8, SCORE_VALUES = 4, SCORE_QUERIES = 4, SCORE_KEYS =
 // One m16n8k32 on the int8 tensor cores: A is [16][32] row-major (a query's codes), B is [8][32] (a key's codes,
 // and that is the column-major 32x8 the instruction asks for), C comes back as a 16x8 block of int32 in four
 // registers.  Both caches already lie in exactly these shapes, so nothing has to be shuffled into fragments.
+#if defined(__HIPCC__)
+// ROCm has no mma.sync.aligned.m16n8k32.s8: this build never launches the tensor-core tier
+// (attend_q8 gates it on tensor_cores(), which is false under HIP), so the body is never referenced.
+__device__ __forceinline__ void mma_s8(int&, int&, int&, int&, unsigned, unsigned, unsigned,
+                                       unsigned, unsigned, unsigned) {}
+#else
 __device__ __forceinline__ void mma_s8(int& c0, int& c1, int& c2, int& c3, unsigned a0, unsigned a1, unsigned a2,
                                        unsigned a3, unsigned b0, unsigned b1) {
     asm volatile(
@@ -35,6 +41,7 @@ __device__ __forceinline__ void mma_s8(int& c0, int& c1, int& c2, int& c3, unsig
         : "+r"(c0), "+r"(c1), "+r"(c2), "+r"(c3)
         : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
 }
+#endif
 // attend_batch(): the bytes of a chunk's results, which every block of rows reads and writes once more: in the
 // card's L2 cache (32 MiB on the 4070 Laptop's AD106) that costs little, from its memory a lot
 constexpr size_t kAttendResults = size_t(8) << 20;
@@ -2954,7 +2961,10 @@ void attend_q8(const float* q, Q8Cache q8, Q8Cache k, Q8Cache v, int64_t pos, in
             // instead, once that is wired in.
             static const char* mma_env = std::getenv("STRATA_KV_MMA");
             const int mma_choice = mma_env ? std::atoi(mma_env) : -1;
-            const bool use_mma = dim == 256 && mma_choice != 0 && (mma_choice > 0 || keys <= 16384);
+            // a card without the int8 mma steps (HIP, or a PTX version below 7.5) takes the dp4a tiers instead:
+            // STRATA_KV_MMA cannot force it there, since the kernel would not load
+            const bool use_mma = tensor_cores() && dim == 256 && mma_choice != 0 &&
+                                     (mma_choice > 0 || keys <= 16384);
             const auto mgo = [&](auto kernel) {
                 const unsigned warps =
                     grid(size_t(keys), SCORE_KEYS) * grid(size_t(c * per), 16) * kv_heads;   // a warp: 8 keys x 16
@@ -3043,7 +3053,10 @@ void attend_q8_mixed(const float* q, Q8Cache q8, Q8Cache k, const uint16_t* v_h,
             // instead, once that is wired in.
             static const char* mma_env = std::getenv("STRATA_KV_MMA");
             const int mma_choice = mma_env ? std::atoi(mma_env) : -1;
-            const bool use_mma = dim == 256 && mma_choice != 0 && (mma_choice > 0 || keys <= 16384);
+            // a card without the int8 mma steps (HIP, or a PTX version below 7.5) takes the dp4a tiers instead:
+            // STRATA_KV_MMA cannot force it there, since the kernel would not load
+            const bool use_mma = tensor_cores() && dim == 256 && mma_choice != 0 &&
+                                     (mma_choice > 0 || keys <= 16384);
             const auto mgo = [&](auto kernel) {
                 const unsigned warps =
                     grid(size_t(keys), SCORE_KEYS) * grid(size_t(c * per), 16) * kv_heads;   // a warp: 8 keys x 16

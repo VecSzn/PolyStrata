@@ -2128,8 +2128,10 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
                                                     ${_strata_gpu_include_directories})
   target_link_libraries(poly_mxfp4_test PRIVATE strata_kernels ggml-base ${_strata_gpu_runtime_target})
   # the int8 KV cache kernels (store_q8 / store_q8_at / attend_q8) against ggml's quantizer and the fp16 paths
-  # (GPU, synthetic, no model); the int8 MMA is CUDA-only in v1, so HIP skips it
-  if(STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP)
+  # (GPU, synthetic, no model).  The readers build on HIP too: the dp4a tiers need only __dp4a (mapped in
+  # hip_compat/intrinsics.hpp) and the tensor-core tier is gated off there at run time (tensor_cores() is
+  # false under __HIPCC__), so the test covers AMD's dp4a tier as well.
+  if(STRATA_BUILD_TESTS)
     add_executable(poly_kv_q8_test src/poly/kv_q8_poly_test.cpp src/poly/kernels.cu)
     target_include_directories(poly_kv_q8_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                        ${_strata_gpu_include_directories} ${_strata_gg}/include)
