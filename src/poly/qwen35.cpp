@@ -433,7 +433,11 @@ void Qwen35::attn(Block& B, int64_t pos, int n) {
         // attention that is O(rows^2).  Decode stays on the q8 kernels: one query is memory-bound and the
         // quantized cache is half the bytes.  With `at` (a recorded launch) the caches are replayed as they were,
         // so there is nothing new to convert.
-        if (n >= kStageRows && !at) {
+        // --batch: a step() of several sequences must give a row the same bits as the same row read alone
+        // through eval(), so both of them take the one reader when a batch is on.  Without --batch the prompt
+        // keeps the cuBLAS path: it is 1.7x faster at 16k and 2.4x at 32k, and a prompt's rows are not compared
+        // against anything.
+        if (n >= kStageRows && !at && opt_.batch == 0) {
             const int64_t want = pos + n;
             // The pair is the model's, not this layer's, so a layer that is not the one that left it starts from
             // row 0; the layer that is picks up where it left off.  Its rows are this layer's cache either way.
@@ -484,31 +488,22 @@ void Qwen35::attn_rows(Block& B, int n) {
                        theta_scale_, 0, 1, rms_eps_, st_, nullptr, nullptr, sections_, ai + 1);
         head_norm_rope(kraw_ + i * kv, head_dim_, fp(B.k_norm), k_ + i * kv, head_dim_, n_kv_, n_rot_, theta_scale_, 0, 1,
                        rms_eps_, st_, nullptr, nullptr, sections_, ai + 1);
-        // --kv int8 stores codes and deltas in two arrays; the row is stored there and read back as halves
-        // through the fp16 twin, the way attn() reads a prompt batch (a Q8_0 cache has no cuBLAS scale).
+        // --kv int8 stores codes and deltas in two arrays, and this row reads them back with the same dp4a
+        // reader a decode does.  The halves are not an option here: Block::k_f16 is one pair for the whole
+        // model (see the alloc comment), so a batch's rows would overwrite each other's rows at the same
+        // position -- four sequences at row 100 all land on the pair's row 100.  The codes are the sequence's
+        // own, which is what seq_buf() reaches.
+        Q8Cache kc8c{}, vc8c{};
         uint16_t *kc = nullptr, *vc = nullptr;
         if (opt_.kv_int8) {
-            // --batch gives every row its own sequence, so the codes this row writes and the ones it reads
-            // are that sequence's, not the bound one's (seq_buf is how the fp16 path reaches them).
-            int8_t* kc8 = (int8_t*) seq_buf(r.seq, B.k_code);
-            uint16_t* kd8 = (uint16_t*) seq_buf(r.seq, B.k_delta);
-            int8_t* vc8 = (int8_t*) seq_buf(r.seq, B.v_code);
-            uint16_t* vd8 = (uint16_t*) seq_buf(r.seq, B.v_delta);
-            store_q8_at(k_ + i * kv, kc8, kd8, n_kv_, head_dim_, 1, ai, 0, st_);
-            store_q8_at(v_ + i * kv, vc8, vd8, n_kv_, head_dim_, 1, ai, 0, st_);
-            // The fp16 twin is one pair for the whole model, and attn()'s incremental conversion assumes one
-            // sequence growing row after row (f16_owner_/f16_rows_).  A batch interleaves sequences, so those
-            // two no longer say anything; convert this row's own sequence up to its position instead.  A
-            // batch is a few rows, so this is O(rows in the batch x the row's position), not the per-token
-            // decode cost the incremental path exists to avoid.
-            const int per_row = n_kv_ * (head_dim_ / kQ8_0Values);
-            const int64_t blocks = (r.pos + 1) * per_row;
-            dequant_q8_to_f16(kc8, kd8, B.k_f16, blocks, st_);
-            dequant_q8_to_f16(vc8, vd8, B.v_f16, blocks, st_);
-            kc = B.k_f16;
-            vc = B.v_f16;
-            f16_owner_ = nullptr;   // they now hold some sequence's rows, not the bound one's: attn() must
-                                    // convert from row 0 again rather than trust f16_rows_
+            int8_t* kcp = (int8_t*) seq_buf(r.seq, B.k_code);
+            uint16_t* kdp = (uint16_t*) seq_buf(r.seq, B.k_delta);
+            int8_t* vcp = (int8_t*) seq_buf(r.seq, B.v_code);
+            uint16_t* vdp = (uint16_t*) seq_buf(r.seq, B.v_delta);
+            store_q8_at(k_ + i * kv, kcp, kdp, n_kv_, head_dim_, 1, ai, 0, st_);
+            store_q8_at(v_ + i * kv, vcp, vdp, n_kv_, head_dim_, 1, ai, 0, st_);
+            kc8c = Q8Cache{kcp, kdp};
+            vc8c = Q8Cache{vcp, vdp};
         } else {
             kc = (uint16_t*) seq_buf(r.seq, B.keys);
             vc = (uint16_t*) seq_buf(r.seq, B.vals);
@@ -520,12 +515,17 @@ void Qwen35::attn_rows(Block& B, int n) {
         const int sized = room(1);
         pos_ = keep;
         const size_t sf = (size_t) chunk_ * n_head_ * opt_.max_context;
-        // --kv int8: this row's keys and values were written into the codes above and read back through the
-        // fp16 twin (kc/vc point at it), so the fp16 decode reader is the right one and it sees the same
-        // bytes a prompt batch sees.  Without --kv int8 the row came from this sequence's fp16 caches.
+        // --kv int8: this row's keys and values were written into this sequence's codes above (kc8c/vc8c point
+        // at them), and its reader is the one a decode takes.  Without --kv int8 the row came from this
+        // sequence's fp16 caches and the fp16 reader takes it.
         const bool fdec_on = fdec_ && !opt_.kv_int8;
-        if (!(fdec_on && fdec_f16(q_ + i * hq, kc, vc, r.pos, 1, ai, sized, att_ + i * hq, head_dim_, n_head_, n_kv_,
-                                   scale, score_, sf, st_)))
+        if (opt_.kv_int8)
+            // the same reader and the same order of products a decode takes, so a row's answer does not
+            // depend on whether it was taken alone or beside other sequences
+            attend_q8(q_ + i * hq, Q8Cache{q8c_, q8d_}, kc8c, vc8c, r.pos, 1, score_, chunk_, att_ + i * hq, head_dim_,
+                      n_head_, n_kv_, scale, st_, 0, 0, false, ai, sized);
+        else if (!(fdec_on && fdec_f16(q_ + i * hq, kc, vc, r.pos, 1, ai, sized, att_ + i * hq, head_dim_, n_head_,
+                                        n_kv_, scale, score_, sf, st_)))
             attend(q_ + i * hq, kc, vc, r.pos, 1, score_, chunk_, att_ + i * hq, head_dim_, n_head_, n_kv_, scale, st_,
                    0, 0, false, ai, sized, /*score_floats*/ 0);
     }

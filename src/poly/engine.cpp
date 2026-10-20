@@ -1837,8 +1837,9 @@ void Engine::shared_scratch() {
 
 // The sequence's state, the caches and every buffer, once the weights are known.
 void Engine::alloc() {
-    // --dump-layers prints one token's stages
-    rows_ = opt_.dump ? 1 : std::min(opt_.prompt_batch, opt_.max_context);
+    // --dump-layers prints one token's stages.  step() writes several sequences' rows together and cannot do
+    // that in one row, so a batch keeps its rows and the dump prints the first of them.
+    rows_ = opt_.dump && opt_.batch == 0 ? 1 : std::min(opt_.prompt_batch, opt_.max_context);
     const size_t most = std::min<size_t>(kReadBytes / ((size_t) streams() * n_embd_ * sizeof(float)), opt_.max_context);
     read_rows_ = rows_ < kStageRows ? rows_ : std::max(rows_, (int) most / rows_ * rows_);
     rec_n_ = recurrent_floats();
