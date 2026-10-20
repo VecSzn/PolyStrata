@@ -3529,7 +3529,10 @@ def hipblaslt_table(arch, lib_dirs, ver=None):
 def build_engine_hip(gpu, llama, vision="none") -> Path:
     """Compile the HIP engine for this AMD GPU into engine/ (again only when its source changed: a `git pull`).
     gpu["archs"]: every architecture it needs code for (the cards of a layer split), else gpu["arch"].  vision "cpu"
-    (#304): the image encoder too, for the CPU (there is no HIP encoder build yet)."""
+    (#304): the image encoder too, for the CPU (there is no HIP encoder build yet).  Windows: AMD's TheRock wheels in
+    .rocm-win and MSVC's build tools, as the strata-poly Windows build (build_engine_hip_win)."""
+    if WIN:
+        return build_engine_hip_win(gpu, llama)
     eng = ROOT / "engine"
     eng.mkdir(exist_ok=True)
     stamp = eng / "BUILD.json"
@@ -3582,6 +3585,64 @@ def build_engine_hip(gpu, llama, vision="none") -> Path:
     return eng
 
 
+def build_engine_hip_win(gpu, llama) -> Path:
+    """Compile the HIP engine for this AMD GPU on Windows into engine/ (again only when its source changed: a
+    `git pull`).  ROCm comes from AMD's TheRock Windows wheels in .rocm-win (rocm_win_root), MSVC's headers, linker
+    and runtime from the Visual Studio C++ build tools, and ROCm's clang compiles the host code too (CMake refuses to
+    mix it with cl.exe: tools/hip/build_windows.bat).  The DLLs and kernels it loads are .rocm-win's own, which the
+    config's lib_dirs points at (the ready-made zip keeps a copy of the DLLs it needs instead).  There is no HIP image
+    encoder: images stay off."""
+    eng = ROOT / "engine"
+    eng.mkdir(exist_ok=True)
+    stamp = eng / "BUILD.json"
+    meta = json.loads(stamp.read_text(encoding="utf-8")) if stamp.exists() else {}
+    src = source_hash(ENGINE_SOURCES)
+    archs = sorted(set(gpu.get("archs") or [gpu["arch"]]))
+    engine_ok = meta.get("backend") == "hip" and meta.get("source") == "local-hip" and (eng / EXE).exists() and \
+        meta.get("src") == src and set(archs) <= set(meta.get("archs", [])) and not stale_binary(eng / EXE)
+    if engine_ok:
+        ok("engine already built for this PC")
+        return eng
+    vcvars = find_vcvars()
+    if vcvars is None:
+        fail("the Visual Studio C++ build tools were not found",
+             "install them (Visual Studio 2019 or 2022, workload 'Desktop development with C++') and run setup again")
+    root, _ = rocm_win_root(archs)
+    rocm = str(root).replace("\\", "/")
+    bitcode = f"{rocm}/lib/llvm/amdgcn/bitcode"
+    os.environ.update({"HIP_PLATFORM": "amd", "HIP_PATH": str(root), "ROCM_PATH": str(root)})
+    os.environ["PATH"] = os.pathsep.join([str(root / "bin"), str(root / "lib" / "llvm" / "bin"),
+                                          os.environ.get("PATH", "")])
+    say("  The engine's source changed: compiling it again (only what changed, a few minutes) ..."
+        if meta.get("backend") == "hip" and (eng / EXE).exists()
+        else f"  Compiling the PolyStrata engine for your AMD GPU ({', '.join(archs)}; 10-20 minutes, once) ...")
+    bdir = ROOT / "build-hip-win"
+    cmake_build(ROOT, bdir, ["strata", "strata-device"],
+                ["-DSTRATA_ENABLE_HIP=ON", "-DSTRATA_ENABLE_CUDA=OFF", "-DSTRATA_BUILD_TESTS=OFF",
+                 "-DSTRATA_PREFILL_MMQ=ON", "-DSTRATA_NATIVE_EXPERTS=ON",
+                 "-DSTRATA_PORTABLE=OFF",
+                 "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
+                 f"-DCMAKE_C_COMPILER={rocm}/lib/llvm/bin/clang.exe",
+                 f"-DCMAKE_CXX_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
+                 f"-DCMAKE_HIP_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
+                 f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={rocm}", f"-DCMAKE_PREFIX_PATH={rocm}",
+                 f"-DCMAKE_HIP_FLAGS=--rocm-path={rocm} --rocm-device-lib-path={bitcode}",
+                 f"-DSTRATA_GGML_DIR={llama}"], vcvars, "build-strata-hip-win.bat")
+    if stale_binary(bdir / EXE):                       # #2054: no stamp for a binary of another source
+        fail(f"the engine build finished without a new engine ({EXE} is version "
+             f"{binary_engine_version(bdir / EXE)}, this source is {source_version()}): "
+             "the installed engine is left as it was", "delete the folder build-hip-win and run this again")
+    for name in (EXE, "strata-device.exe"):
+        shutil.copy2(bdir / name, eng / name)
+    meta = {"source": "local-hip", "backend": "hip", "platform": "windows-x64", "version": source_version(),
+            "archs": archs, "rocm": ROCM_WIN_VERSION, "hipblaslt_version": hipblaslt_version([str(root / "bin")]),
+            "vision": "none", "lib_dirs": [str(root / "bin")], "src": src}
+    stamp.write_text(json.dumps(meta, indent=1))
+    hip_runtime_beside_exe(eng)                        # #468 #461: before System32's amdhip64_7.dll
+    ok(f"engine compiled: {eng / EXE}")
+    return eng
+
+
 def hip_vision(asked) -> str:
     """The image encoder with the AMD backend (--vision): the CPU one when asked for (#304); a HIP (GPU) encoder build
     is a later step, so `yes`/`gpu` leave images off, as before, and say how to get them."""
@@ -3589,8 +3650,8 @@ def hip_vision(asked) -> str:
         warn("the AMD backend has no GPU image encoder yet: images off"
              + ("" if WIN else " (--vision cpu reads them on the CPU)"))
     if asked == "cpu" and WIN:
-        warn("images on the CPU with an AMD card are Linux-only for now (the ready-made Windows AMD engine has no "
-             "image encoder): images off")
+        warn("images on the CPU with an AMD card are Linux-only for now (the Windows AMD engine has no image "
+             "encoder): images off")
         return "none"
     return "cpu" if asked == "cpu" else "none"
 
@@ -4176,21 +4237,23 @@ def update_installed_engine(url_base, toolkit=None) -> None:
         return
     meta_text = info.read_text(encoding="utf-8")
     meta = json.loads(meta_text)
-    if meta.get("backend") == "hip" and WIN:           # AMD on Windows: the ready-made HIP engine, when older
-        ver = tuple(int(x) for x in str(meta.get("version", "0")).split(".")[:4] if x.isdigit())
-        if meta.get("source") == "prebuilt" and ver < WIN_HIP_MIN_ENGINE:
-            try:
-                g = next((x for x in amd_gpus() if amd_problem(x) is None), None)
-                if g is None:
-                    raise RuntimeError("no supported AMD GPU found")
-                say(f"  Updating the ready-made AMD engine ({meta.get('version')} -> "
-                    f"{'.'.join(map(str, WIN_HIP_MIN_ENGINE))} or newer) ...")
-                if get_prebuilt_hip(url_base, g, updating=True) is None:
-                    raise RuntimeError("not published yet")
-            except (Exception, SystemExit) as e:
-                warn(f"could not update the AMD engine{'' if isinstance(e, SystemExit) else f' ({e})'}: "
-                     "starting the installed one")
-        return
+    if meta.get("backend") == "hip" and WIN:
+        if meta.get("source") != "local-hip":          # AMD on Windows: the ready-made HIP engine, when older
+            ver = tuple(int(x) for x in str(meta.get("version", "0")).split(".")[:4] if x.isdigit())
+            if meta.get("source") == "prebuilt" and ver < WIN_HIP_MIN_ENGINE:
+                try:
+                    g = next((x for x in amd_gpus() if amd_problem(x) is None), None)
+                    if g is None:
+                        raise RuntimeError("no supported AMD GPU found")
+                    say(f"  Updating the ready-made AMD engine ({meta.get('version')} -> "
+                        f"{'.'.join(map(str, WIN_HIP_MIN_ENGINE))} or newer) ...")
+                    if get_prebuilt_hip(url_base, g, updating=True) is None:
+                        raise RuntimeError("not published yet")
+                except (Exception, SystemExit) as e:
+                    warn(f"could not update the AMD engine{'' if isinstance(e, SystemExit) else f' ({e})'}: "
+                         "starting the installed one")
+            return
+        # one compiled here (--build): compiled again when its source changed, as on Linux below
     if meta.get("backend") == "hip":                   # AMD: compiled here, again when its source changed
         if meta.get("src") != source_hash(ENGINE_SOURCES) or stale_binary(eng / EXE):
             try:
@@ -4200,7 +4263,7 @@ def update_installed_engine(url_base, toolkit=None) -> None:
                     raise RuntimeError("no supported AMD GPU found")
                 # every architecture it was built for (a layer split across two families keeps both)
                 build_engine_hip({**g, "archs": [x for x in meta.get("archs", []) if x in AMD_ARCHS] or [g["arch"]]},
-                                 get_llama_cpp(vision=True), meta.get("vision") or "none")
+                                 get_llama_cpp(vision=not WIN), meta.get("vision") or "none")  # no Windows HIP image encoder
             except (Exception, SystemExit) as e:
                 warn(f"could not compile the updated engine{'' if isinstance(e, SystemExit) else f' ({e})'}: "
                      "starting the installed one")
@@ -4389,12 +4452,16 @@ def install_build_tools(gpu, yes):
 
 
 def cmake_build(src, bdir, target, defs, vcvars, bat_name):
+    """`target`: one CMake target, or a list of them (one `--target` each: the Windows HIP engine builds `strata` and
+    `strata-device` together, as tools/hip/build_windows.bat does)."""
     cmake, ninja = find_tool("cmake"), find_tool("ninja")
     if cmake is None or ninja is None:
         fail("cmake / ninja not found after installing them", "run: .venv python -m pip install cmake ninja")
+    targets = [target] if isinstance(target, str) else list(target)
     conf = [cmake, "-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={ninja}", "-S", str(src), "-B", str(bdir),
             "-DCMAKE_BUILD_TYPE=Release", *defs]
-    build = [cmake, "--build", str(bdir), "--target", target, "-j", str(max(2, (os.cpu_count() or 4) // 2))]
+    build = [cmake, "--build", str(bdir), *[x for t in targets for x in ("--target", t)],
+             "-j", str(max(2, (os.cpu_count() or 4) // 2))]
     # A failed build is tried once more: CUDA 13.0's ptxas now and then fails to parse a PTX file it just wrote, and
     # the same command then gets past it (issue #45); a second attempt only compiles what is still missing.
     if WIN:
@@ -4537,7 +4604,7 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
     if not vision_ok:
         say("  Compiling the image encoder" + (" with CUDA (10-20 minutes, once) ..." if vision == "gpu" else " ..."))
         defs = [f"-DLLAMA_DIR={get_llama_cpp(vision=True)}", f"-DSTRATA_VISION_CUDA={'ON' if vision == 'gpu' else 'OFF'}",
-                "-DSTRATA_PORTABLE=OFF", *host_compiler_defs(vision == "gpu")]   # native, like the engine
+                "-DSTRATA_PORTABLE=OFF", *host_compiler_defs(vision == "gpu")]
         if vision == "gpu":
             defs += [f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}", f"-DCMAKE_CUDA_COMPILER={nvcc}",
                      *toolkit_root_defs(nvcc)]
@@ -6261,9 +6328,9 @@ def build_engine_poly(gpu, yes, llama, vision="none", toolkit=13) -> Path:
 
 def build_engine_poly_hip(gpu, llama) -> Path:
     """Compile strata-poly for this AMD GPU into engine-poly/ (again only when its source changed: a `git pull`).
-    Windows: AMD's TheRock Windows wheels in .rocm-win (build_engine_poly_hip_win).  Linux: ROCm from rocm_root: a
-    system ROCm 7 or AMD's TheRock wheels in .venv, as for the main engine's HIP build.  There is no ready-made AMD
-    engine and no HIP image encoder: images stay off."""
+    Windows: AMD's TheRock Windows wheels in .rocm-win (build_engine_poly_hip_win).
+    Linux: ROCm from rocm_root: a system ROCm 7 or AMD's TheRock wheels in .venv, as for the main engine's HIP
+    build.  There is no ready-made AMD engine and no HIP image encoder: images stay off."""
     if WIN:
         return build_engine_poly_hip_win(gpu, llama)
     eng = ROOT / ENGINE_POLY_DIR
@@ -6809,19 +6876,32 @@ def sycl_setup(argv) -> int:
     return subprocess.call([sys.executable, str(script), *rest])
 
 
+def hip_build_here(gpu) -> bool:
+    """Windows: whether engine/ holds the HIP engine compiled here (--build) for this card.  Then setup keeps that
+    build - compiling it again when its source changed - instead of downloading the ready-made one over it."""
+    try:
+        meta = json.loads((ROOT / "engine" / "BUILD.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return meta.get("backend") == "hip" and meta.get("source") == "local-hip" and \
+        gpu.get("arch") in meta.get("archs", [])
+
+
 def engine_step(a, gpu, hip, amd, cuda_tk, vision):
     """Step 4: llama.cpp's sources and the engine (ready-made, or compiled here).  Returns (llama, engine folder, its
     BUILD.json, its library folders, the GPU (AMD on Windows: as the engine sees it), the image-encoder choice)."""
     llama = get_llama_cpp()
     ok(f"llama.cpp {LLAMA_CPP_COMMIT[:7]} (gguf-py, ggml, mtmd)")
-    if hip and WIN:                                    # AMD on Windows: the ready-made HIP engine (no compiler)
-        eng = None if a.build else get_prebuilt_hip(a.prebuilt, gpu)
-        if eng is None:
-            fail("no ready-made AMD engine for this PolyStrata version" + (" (--build)" if a.build else ""),
-                 "compiling it on Windows: tools\\hip\\build_windows.bat makes strata-windows-x64-hip.zip, then run "
-                 "START-HERE.bat --backend hip --prebuilt <its dist folder> (docs/AMD_HIP.md)")
-        gpu = hip_card(eng, gpu, amd)
-        a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
+    if hip and WIN:                                    # AMD on Windows: the ready-made HIP engine, or one built here
+        if a.build or hip_build_here(gpu):
+            eng = None                                 # compiled below (build_engine_hip_win; again when stale)
+        else:
+            eng = get_prebuilt_hip(a.prebuilt, gpu)
+            if eng is None:
+                fail("no ready-made AMD engine for this PolyStrata version",
+                     "compile it on this PC: START-HERE.bat --backend hip --build (Visual Studio 2022 Build Tools "
+                     "with the C++ workload, git; docs/AMD_HIP.md), or run tools\\hip\\build_windows.bat and start "
+                     "setup with --prebuilt <its dist folder>")
     else:
         eng = None if a.build or hip else get_prebuilt(a.prebuilt, gpu, vision, **({"toolkit": 12} if cuda_tk == 12
                                                                                     else {}))
@@ -6833,7 +6913,11 @@ def engine_step(a, gpu, hip, amd, cuda_tk, vision):
         else:
             vision = prebuilt_vision(json.loads((eng / "BUILD.json").read_text(encoding="utf-8")), gpu, vision)
     if eng is None:
-        eng = build_engine_hip(gpu, llama, vision) if hip else build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk)
+        eng = build_engine_hip(gpu, llama, vision) if hip else \
+            build_engine(gpu, vision, a.yes, llama, toolkit=cuda_tk)
+    if hip and WIN:                                    # the card as the installed engine numbers it (#325)
+        gpu = hip_card(eng, gpu, amd)
+        a.gpu = gpu["index"] if gpu["count"] > 1 else a.gpu
     meta = json.loads((eng / "BUILD.json").read_text(encoding="utf-8"))
     if hip and WIN:                                    # the ready-made engine's rocm/bin, first on the engine's PATH
         lib_dirs = [str(d) for d in hip_lib_dirs(eng)]
@@ -6892,8 +6976,8 @@ def own_path_vision(a, fam: dict, gpu: dict, hip: bool) -> str:
         if asked == "gpu":
             say("  The AMD backend has no GPU image encoder yet: the encoder runs on the CPU.")
         if WIN:
-            warn("images on the CPU with an AMD card are Linux-only for now (the ready-made Windows AMD engine has no "
-                 "image encoder): images off")
+            warn("images on the CPU with an AMD card are Linux-only for now (the Windows AMD engine has no image "
+                 "encoder): images off")
             return "none"
         return "cpu"
     if asked == "yes":
@@ -7593,7 +7677,7 @@ def main() -> int:
              "CPU's share of the experts runs on ggml-cpu's kernels, a few times slower than on an AVX2 CPU. "
              "See \"Older CPUs\" in docs/INSTALL.md")
         if hip and WIN:
-            fail("the older-CPU engine is compiled from source, and setup compiles the AMD engine on Linux only",
+            fail("the older-CPU engine is not compiled on Windows for an AMD card",
                  "use Linux for an AMD card on this CPU, or an NVIDIA card")
         a.build = True
     if a.check:

@@ -6,6 +6,7 @@ which TheRock index each family installs from.  No GPU, no ROCm, no downloads.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -163,7 +164,7 @@ class GpuLists(unittest.TestCase):
         """build_engine_hip compiles for the set of the chosen cards' archs and records it in BUILD.json."""
         calls = {}
         saved = {k: getattr(setup, k) for k in ("ROOT", "rocm_root", "cmake_build", "source_hash", "source_version",
-                                                "ok", "shutil")}
+                                                "ok", "shutil", "WIN")}
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
 
@@ -177,6 +178,7 @@ class GpuLists(unittest.TestCase):
                 copy2 = staticmethod(lambda a, b: Path(b).write_text(Path(a).read_text()))
             setup.ROOT, setup.cmake_build, setup.ok, setup.shutil = root, fake_build, lambda *a: None, Sh
             setup.source_hash, setup.source_version = (lambda *a: "h"), (lambda: "0.1.31")
+            setup.WIN = False                             # the Linux build this test is about (Windows: build_engine_hip_win)
             setup.rocm_root = lambda archs: (calls.setdefault("archs", archs) and root, [str(root / "lib")])
             try:
                 setup.build_engine_hip({"arch": "gfx1201", "archs": ["gfx1201", "gfx1100", "gfx1201"]}, root)
@@ -670,9 +672,10 @@ class PolyHipWindows(unittest.TestCase):
     def test_the_windows_engine_is_dispatched_from_the_amd_build(self):
         seen = {}
         with mock.patch.object(setup, "WIN", True), \
-                mock.patch.object(setup, "build_engine_poly_hip_win", lambda gpu, llama: seen.update(gpu=gpu)):
+                mock.patch.object(setup, "build_engine_poly_hip_win",
+                                  lambda gpu, llama: seen.update(gpu=gpu)):
             setup.build_engine_poly_hip({"arch": "gfx1201"}, Path("llama.cpp"))
-        self.assertEqual(seen["gpu"], {"arch": "gfx1201"})
+        self.assertEqual(seen, {"gpu": {"arch": "gfx1201"}})
 
     def test_the_check_line_names_amd_on_windows(self):
         d = setup.FAMILIES["tiel"]["models"]["UD-Q3_K_XL"]
@@ -720,6 +723,175 @@ class PolyHipWindows(unittest.TestCase):
             defs, meta = self.build(root, root / "engine" / "rocm" / "bin")
             self.assertEqual(meta["lib_dirs"], [str(root / "rocm" / "bin")])   # .rocm-win's own
             self.assertFalse((root / setup.ENGINE_POLY_DIR / "rocm").exists())
+
+
+class HipWindowsBuild(unittest.TestCase):
+    """The engine setup compiles itself on Windows for an AMD card (`--backend hip --build`): build_engine_hip_win,
+    its dispatch, engine_step's use of it and update_installed_engine's recompile.  No ROCm, no MSVC, no GPU, no
+    downloads (the poly engine's Windows build has its own tests in PolyHipWindows)."""
+
+    def run_build(self, root, src="new", version="0.1.45", cmake=None):
+        """One compile with cmake, ROCm, MSVC and the runtime copy mocked.  `cmake`: the recorder to use (None: one
+        that writes the two programs the build makes).  Returns (the engine folder, what it was asked to build)."""
+        calls = []
+
+        def fake_cmake(src_dir, bdir, target, defs, vcvars, bat):
+            calls.append((target, defs, vcvars, bat))
+            bdir.mkdir(parents=True, exist_ok=True)
+            for name in (setup.EXE, "strata-device.exe"):
+                (bdir / name).write_text("engine")
+
+        with mock.patch.object(setup, "ROOT", root), \
+                mock.patch.object(setup, "source_hash", lambda parts: src), \
+                mock.patch.object(setup, "source_version", lambda: version), \
+                mock.patch.object(setup, "find_vcvars", lambda: "vcvars"), \
+                mock.patch.object(setup, "rocm_win_root", lambda archs: (root / "rocm", [str(root / "rocm" / "bin")])), \
+                mock.patch.object(setup, "cmake_build", cmake or fake_cmake), \
+                mock.patch.object(setup, "hipblaslt_version", lambda dirs: None), \
+                mock.patch.object(setup, "hip_runtime_beside_exe", lambda eng: None), \
+                mock.patch.dict(os.environ, {}):
+            got = setup.build_engine_hip_win({"arch": "gfx1201", "archs": ["gfx1201"]}, root / "llama.cpp")
+        return got, calls
+
+    def test_it_builds_the_engine_and_the_device_probe(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            got, built = self.run_build(root)
+            self.assertEqual(got, root / "engine")
+            self.assertEqual(len(built), 1)
+            target, defs, vcvars, _ = built[0]
+            self.assertEqual(target, ["strata", "strata-device"])      # hip_card() numbers the cards by the probe
+            self.assertEqual(vcvars, "vcvars")
+            self.assertIn("-DSTRATA_ENABLE_HIP=ON", defs)
+            self.assertIn("-DSTRATA_ENABLE_CUDA=OFF", defs)
+            self.assertIn("-DSTRATA_PREFILL_MMQ=ON", defs)             # the ready-made Windows HIP engine's build
+            self.assertIn("-DSTRATA_NATIVE_EXPERTS=ON", defs)
+            self.assertTrue(any(x.startswith("-DCMAKE_HIP_ARCHITECTURES=gfx1201") for x in defs), defs)
+            meta = json.loads((root / "engine" / "BUILD.json").read_text(encoding="utf-8"))
+            self.assertEqual((meta["source"], meta["backend"], meta["archs"]), ("local-hip", "hip", ["gfx1201"]))
+            self.assertEqual(meta["lib_dirs"], [str(root / "rocm" / "bin")])   # .rocm-win's own ROCm
+            self.assertEqual(meta["vision"], "none")                   # there is no HIP image encoder
+            self.assertTrue((root / "engine" / "strata-device.exe").exists())
+
+    def test_an_engine_of_this_source_is_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            self.run_build(root)
+            refused = mock.Mock(side_effect=AssertionError("compiled"))
+            got, calls = self.run_build(root, cmake=refused)
+            self.assertEqual(got, root / "engine")
+            refused.assert_not_called()
+            self.assertEqual(calls, [])
+
+    def test_a_git_pull_compiles_it_again(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            self.run_build(root)
+            _, built = self.run_build(root, src="pulled")              # a git pull: the source moved
+            self.assertEqual(len(built), 1)
+            _, built = self.run_build(root, src="pulled")
+            self.assertEqual(built, [])
+
+    def test_the_windows_build_is_dispatched_from_the_amd_build(self):
+        seen = {}
+        with mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "build_engine_hip_win",
+                                  lambda gpu, llama: seen.update(gpu=gpu)):
+            setup.build_engine_hip({"arch": "gfx1201"}, Path("llama.cpp"), "none", True)
+        self.assertEqual(seen, {"gpu": {"arch": "gfx1201"}})
+
+    def step(self, root, build, local, ready_made=False):
+        """engine_step on an AMD PC on Windows, with the compile and the card probe mocked: (its result, the
+        ready-made engine lookup, and what it compiled (gpu)."""
+        eng = root / "engine"
+        eng.mkdir(parents=True, exist_ok=True)
+        (eng / setup.EXE).write_text("engine")
+        (eng / "BUILD.json").write_text(json.dumps({"backend": "hip", "source": "local-hip" if local else "prebuilt",
+                                                    "archs": ["gfx1201"], "version": "0.1.45", "lib_dirs": []}))
+        built = []
+        pre = mock.Mock(return_value=eng if ready_made else None)
+        a = argparse.Namespace(build=build, prebuilt=None, yes=True, gpu=None)
+        with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "get_llama_cpp", lambda vision=False: root / "llama.cpp"), \
+                mock.patch.object(setup, "get_prebuilt_hip", pre), \
+                mock.patch.object(setup, "build_engine_hip",
+                                  lambda gpu, llama, vision="none": built.append(gpu) or eng), \
+                mock.patch.object(setup, "hip_card", lambda e, gpu, amd: {**gpu, "index": 0, "count": 1}), \
+                mock.patch.object(setup, "ok", lambda *x, **k: None), \
+                mock.patch.object(setup, "say", lambda *x, **k: None):
+            got = setup.engine_step(a, {"arch": "gfx1201"}, True, None, 13, "none")
+        return got, pre, built
+
+    def test_build_compiles_here_instead_of_stopping(self):
+        """The stop this change removes: `--build` on Windows AMD said there was no ready-made engine."""
+        with tempfile.TemporaryDirectory() as t:
+            got, pre, built = self.step(Path(t), build=True, local=False)
+            self.assertEqual(built, [{"arch": "gfx1201"}])              # the compile comes before the probe numbers
+            self.assertEqual(got[1].name, "engine")
+            pre.assert_not_called()
+
+    def test_a_build_here_is_kept_without_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            _, pre, built = self.step(Path(t), build=False, local=True)
+            self.assertEqual(built, [{"arch": "gfx1201"}])
+            pre.assert_not_called()
+
+    def test_the_ready_made_engine_is_still_used_without_a_build_here(self):
+        with tempfile.TemporaryDirectory() as t:
+            _, pre, built = self.step(Path(t), build=False, local=False, ready_made=True)
+            self.assertEqual(built, [])
+            pre.assert_called_once()
+
+    def test_without_build_or_a_ready_made_engine_it_says_to_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            (root / "engine").mkdir()
+            (root / "engine" / "BUILD.json").write_text(json.dumps({"backend": "hip", "source": "prebuilt",
+                                                                    "archs": ["gfx1201"]}))
+            (root / "engine" / setup.EXE).write_text("engine")
+            failed = mock.Mock(side_effect=SystemExit(1))
+            a = argparse.Namespace(build=False, prebuilt=None, yes=True, gpu=None)
+            with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "WIN", True), \
+                    mock.patch.object(setup, "get_llama_cpp", lambda vision=False: root / "llama.cpp"), \
+                    mock.patch.object(setup, "get_prebuilt_hip", lambda *x, **k: None), \
+                    mock.patch.object(setup, "fail", failed), \
+                    mock.patch.object(setup, "ok", lambda *x, **k: None), \
+                    mock.patch.object(setup, "say", lambda *x, **k: None):
+                with self.assertRaises(SystemExit):
+                    setup.engine_step(a, {"arch": "gfx1201"}, True, None, 13, "none")
+            self.assertIn("--build", failed.call_args[0][1])
+
+    def test_a_build_here_is_compiled_again_after_a_git_pull(self):
+        """update_installed_engine (a start, UPDATE.bat): not replaced by the ready-made engine, compiled again."""
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            eng = root / "engine"
+            eng.mkdir()
+            (eng / setup.EXE).write_text("engine")
+            (eng / "BUILD.json").write_text(json.dumps({"backend": "hip", "source": "local-hip", "archs": ["gfx1201"],
+                                                        "src": "old", "version": "0.1.45"}))
+            built = []
+            with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "WIN", True), \
+                    mock.patch.object(setup, "source_hash", lambda parts: "new"), \
+                    mock.patch.object(setup, "get_prebuilt_hip", mock.Mock(side_effect=AssertionError("downloaded"))), \
+                    mock.patch.object(setup, "amd_gpus", lambda: [{"arch": "gfx1201", "index": 0}]), \
+                    mock.patch.object(setup, "amd_problem", lambda gpu: None), \
+                    mock.patch.object(setup, "get_llama_cpp", lambda vision=False: root / "llama.cpp"), \
+                    mock.patch.object(setup, "build_engine_hip",
+                                      lambda gpu, llama, vision="none": built.append(gpu)):
+                setup.update_installed_engine("https://example.invalid", 13)
+            self.assertEqual(built, [{"arch": "gfx1201", "index": 0, "archs": ["gfx1201"]}])
+
+    def test_cmake_build_takes_a_list_of_targets(self):
+        """cmake_build gives each target its own --target (the Windows HIP build makes the engine and the probe)."""
+        ran = []
+        with mock.patch.object(setup, "WIN", False), \
+                mock.patch.object(setup, "find_tool", lambda name: name), \
+                mock.patch.object(setup, "run", lambda cmd, **k: ran.append(cmd) or mock.Mock(returncode=0)):
+            setup.cmake_build(Path("src"), Path("bdir"), ["strata", "strata-device"], ["-DX=1"], None, "")
+        build = ran[1]
+        self.assertEqual(build[:7], ["cmake", "--build", "bdir", "--target", "strata", "--target", "strata-device"])
+        self.assertEqual(ran[0][-1], "-DX=1")
 
 
 class TdrPointer(unittest.TestCase):

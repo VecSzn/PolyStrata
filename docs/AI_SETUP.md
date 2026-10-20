@@ -122,6 +122,7 @@ The flags (all of them: `START-HERE.bat --help`):
 | `--vision yes\|no\|gpu\|cpu` | read pictures; `--yes` leaves images off. AMD cards: `cpu` |
 | `--gpu N` / `--gpus 0,1` / `--gpus all` | one card, or several sharing the model (default: the card with the most VRAM) |
 | `--backend cuda\|hip` | NVIDIA or AMD engine; chosen by itself on a PC with only one kind of card |
+| `--build` | compile the engine on this PC instead of using the ready-made one (AMD on Windows too: needs Visual Studio 2022 Build Tools with C++) |
 | `--data-dir PATH` | where the 70-120 GB of model files go |
 | `--port N` | the server port (default 8080) |
 | `--host H --api-key K` | listen beyond this PC; **only together with a key** |
@@ -139,7 +140,9 @@ Notes:
 - **AMD on Linux:** setup installs ROCm into `.venv` (~10 GB, no sudo) unless a system ROCm 7 exists, and compiles the
   engine for the card (10-20 minutes, once).
 - **AMD on Windows (new in 0.1.34):** setup downloads the ready-made AMD engine (~550 MB, ROCm included) - nothing
-  is compiled and only the AMD driver is needed. Before the model download it runs `engine\strata-device.exe
+  is compiled and only the AMD driver is needed. If the release has no engine for the card (or with `--build`), setup
+  compiles it for the card instead: Visual Studio 2022 Build Tools with the C++ workload (~8 GB, 20-40 minutes) and
+  10-20 minutes for the engine. Before the model download it runs `engine\strata-device.exe
   --list-devices`; if that does not list the card, the driver is the problem (tell the user to update AMD Software).
   One card per model and no images on Windows for now. It is new: ask the user to report how it runs (docs/AMD_HIP.md).
 - **NVIDIA with no ready-made engine for the card:** setup offers to install build tools and compile (20-40 minutes);
