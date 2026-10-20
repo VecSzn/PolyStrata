@@ -151,6 +151,25 @@ test (35 checks) times the q8 decode path against the fp16 one at 0.88–0.96× 
 reads half the bytes and pays the quantize of the queries, which nets out level with fp16 on a 4070-class
 card and clears VRAM for experts it would otherwise spill.
 
+## Open: 9-12% slower prompt stage on an RTX 5090
+
+On an RTX 5090 (Linux, CUDA 12.8, Qwen3.6-35B-A3B UD-Q4_K_M) the int8 arm's **prompt**
+stage runs 9-12% below the fp16 arm, while its decode matches. That card's writer reports
+it on the new readers, so it is tracked here rather than left in review. Not yet explained:
+the prompt path is fp16 either way -- it dequantizes the codes into the twin and hands
+cuBLAS the same halves -- so the cost sits in the conversion or in what it costs the cache
+to hold. What would settle it:
+
+- the same three-model comparison above on a 5090, so the number is comparable to the
+  3070/4070 figures already in this file;
+- a `--kv int8` run with the prompt stage timed separately from the conversion (the kernel
+  test already separates them: 32768 keys x 512 queries is cuBLAS 18.9 ms against the q8
+  kernels 111.4 ms, and the engine does not use the q8 kernels there).
+
+Until that is measured, treat prompt throughput on a 5090 as a known open cost of this
+option rather than a settled regression, and note it when choosing `--kv int8` over
+`--kv fp16` on that card.
+
 ## A caveat that is not about Q8_0
 
 At 131072 with the default 256 MiB reserve, long chats intermittently fail with
