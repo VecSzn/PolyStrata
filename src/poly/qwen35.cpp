@@ -27,6 +27,11 @@ constexpr size_t kScoreFloats = size_t(16) << 20;  // the attention's scores of 
 // the one that left the pair fills it from row 0, so a request converts O(rows^2 / chunk) over its chunks where a
 // pair a layer converted O(rows).  At 32k that is 42 ms of a 26 s prompt, and the alternative -- llama.cpp's own
 // cap on the convert buffer with the KV chunked under it (PR #29827) -- trades the GEMM's size for it.
+// A prompt batch's product reads a block of keys at a time; before each block its K and V rows are
+// dequantized into an fp16 workspace of this many rows.  Bounded, so it does not grow with the context: the
+// natural block is about 16/3 * head_dim rows, well under this, so real prompts take the same products the
+// fp16 path takes.
+constexpr size_t kQ8WorkRows = 2048;
 
 }  // namespace
 

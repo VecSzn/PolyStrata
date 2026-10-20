@@ -16,6 +16,14 @@
 
 namespace strata::poly {
 
+/// A q8_0 cache as fattn_q8() and fdec_q8() read it: the codes of every 32-value block back to back, and that
+/// block's deltas in a second array. The same two planes --k_code / k_delta and v_code / v_delta -- the int8
+/// cache keeps, so a caller passes a block's own pointers.
+struct Kvq8 {
+    const int8_t* codes = nullptr;
+    const uint16_t* scales = nullptr;
+};
+
 /// This build has the kernel for heads of `dim` values, n_head / kv_heads heads a group, on the current card, and a
 /// scratch of scratch_floats floats holds a block for batches of up to `rows` tokens: fattn_q8() and fattn_f16()
 /// then take every such batch.
