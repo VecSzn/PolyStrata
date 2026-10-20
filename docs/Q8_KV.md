@@ -156,9 +156,10 @@ card and clears VRAM for experts it would otherwise spill.
 On an RTX 5090 (Linux, CUDA 12.8, Qwen3.6-35B-A3B UD-Q4_K_M) the int8 arm's **prompt**
 stage runs 9-12% below the fp16 arm, while its decode matches. That card's writer reports
 it on the new readers, so it is tracked here rather than left in review. Not yet explained:
-the prompt path is fp16 either way -- it dequantizes the codes into the twin and hands
-cuBLAS the same halves -- so the cost sits in the conversion or in what it costs the cache
-to hold. What would settle it:
+without `--batch` the prompt path is fp16 either way -- it dequantizes the codes into the twin
+and hands cuBLAS the same halves -- so the cost sits in the conversion or in what it costs the
+cache to hold. With `--batch` it is not fp16 either way (see the section below), and that alone
+accounts for more than 9-12%. What would settle it:
 
 - the same three-model comparison above on a 5090, so the number is comparable to the
   3070/4070 figures already in this file;
@@ -169,6 +170,34 @@ to hold. What would settle it:
 Until that is measured, treat prompt throughput on a 5090 as a known open cost of this
 option rather than a settled regression, and note it when choosing `--kv int8` over
 `--kv fp16` on that card.
+
+## What `--batch` costs the prompt stage
+
+The prompt reader is not the same in the two modes. Without `--batch` a prompt row's
+attention goes through `attend_batch`, which dequantizes the codes into the fp16 twin once and
+hands cuBLAS the halves -- the fast path. With `--batch` the rows of a step must take the same
+reader as a decode row, because those two readers do not agree bit for bit and `--check-batch`
+compares them; so `--batch` puts the prompt through the int8 kernels, and pays for it:
+
+| prompt | arm | `--batch 4` prompt tok/s | `--batch 0` prompt tok/s |
+| ---: | --- | ---: | ---: |
+| 16K | `--kv int8` | 811.1 | 1410.4 |
+| 16K | `--kv q8_0`, main | 1177.1 | 1409.2 |
+| 32K | `--kv int8` | 574.5 | 1379.3 |
+| 32K | `--kv q8_0`, main | 1068.6 | 1377.0 |
+
+Ornith Q6_K, `--max-new 4`, serial arms, a fresh process each, GPU back at its baseline
+between arms. Against main's `q8_0`: **1.45x slower prompt at 16K, 1.86x at 32K**; with
+`--batch 0` the two are level (0.999x, 0.998x). Decode is unaffected (31.25 against 31.25 at
+16K).
+
+The reason is structural and cannot be ordered away: `Block::k_f16` / `v_f16` is one pair of
+twins for the whole model (a pair per layer would be 737 MiB per model, more than the int8
+cache saves), so it can only serve one reader at a time, and a prompt read spread over several
+calls cannot use it while decode rows are also in flight. A server running `"parallel": N`
+with `--batch N` therefore reads long prompts at the slower rate. Where the VRAM the int8
+cache saves does not turn into resident experts, `--kv q8_0` is the better arm for such a
+server; `--kv int8` is for the case where it does, and for Gemma 4, which `q8_0` never covered.
 
 ## A caveat that is not about Q8_0
 
