@@ -92,16 +92,17 @@ int check(cublasHandle_t blas, const Cache& K, const Cache& V, Kvq8 kq, Kvq8 vq,
           uint16_t* kwork, float* out, long long pos, int n, size_t fattn_floats) {
     const size_t cells = size_t(n) * kHeads * kDim;
     const float scale = 1.f / 16.f;
-    const size_t halves = size_t(2048) * kWidth;
     cudaEvent_t e0, e1, e2, e3;
     cudaEventCreate(&e0), cudaEventCreate(&e1), cudaEventCreate(&e2), cudaEventCreate(&e3);
     cudaEventRecord(e0);
     if (kh)
         attend_batch(blas, dq, kh, vh, pos, n, score, kScore, awork, out, kDim, kHeads, kKvHeads, scale, nullptr, 0, 0,
-                     false, Kvq8{}, Kvq8{}, nullptr, nullptr, 0);
+                     false);
     else
-        attend_batch(blas, dq, nullptr, nullptr, pos, n, score, kScore, awork, out, kDim, kHeads, kKvHeads, scale,
-                     nullptr, 0, 0, false, kq, vq, kwork, kwork + halves, halves);
+        // the int8 prompt path hands attend_batch() the fp16 twin of the codes, the whole cache the way
+        // dequant_q8_to_f16() leaves it, so the reference here reads the same halves it would
+        attend_batch(blas, dq, kwork, kwork + size_t(kMaxRows) * kWidth, pos, n, score, kScore, awork, out, kDim,
+                     kHeads, kKvHeads, scale, nullptr, 0, 0, false);
     cudaEventRecord(e1);
     const std::vector<float> ref = download(out, cells);
     cudaMemset(out, 0, cells * sizeof(float));
@@ -189,6 +190,16 @@ int decode_main() {
     int8_t *kc = upload(K.codes), *vc = upload(V.codes);
     uint16_t *ks = upload(K.scales), *vs = upload(V.scales);
     const Kvq8 kq{kc, ks}, vq{vc, vs};
+    // the fp16 twins of the codes the int8 decode path would read, K then V, the whole cache either way
+    uint16_t* kwork = nullptr;
+    cudaMalloc(&kwork, size_t(2) * kRows * kWidth * sizeof(uint16_t));
+    std::vector<uint16_t> kw(K.codes.size()), vw(V.codes.size());
+    for (size_t i = 0; i < kw.size(); ++i) {
+        kw[i] = __half_as_ushort(__float2half(K.at(i / kWidth, int(i % kWidth))));
+        vw[i] = __half_as_ushort(__float2half(V.at(i / kWidth, int(i % kWidth))));
+    }
+    cudaMemcpy(kwork, kw.data(), kw.size() * sizeof(uint16_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(kwork + size_t(kRows) * kWidth, vw.data(), vw.size() * sizeof(uint16_t), cudaMemcpyHostToDevice);
     // the same values as an fp16 cache
     std::vector<uint16_t> kf(K.codes.size()), vf(V.codes.size());
     for (size_t i = 0; i < kf.size(); ++i) {
@@ -208,8 +219,8 @@ int decode_main() {
     cudaEvent_t e0, e1;
     cudaEventCreate(&e0), cudaEventCreate(&e1);
     auto old = [&](long long pos, int n) {
-        attend(dq, f16 ? kh : nullptr, f16 ? vh : nullptr, pos, n, score, 4, out, kDim, kHeads, kKvHeads, scale, nullptr,
-               0, 0, false, nullptr, 0, 0, f16 ? Kvq8{} : kq, f16 ? Kvq8{} : vq);
+        attend(dq, f16 ? kh : kwork, f16 ? vh : kwork + size_t(kRows) * kWidth, pos, n, score, 4, out, kDim, kHeads,
+               kKvHeads, scale, nullptr, 0, 0, false, nullptr, 0, 0);
     };
     auto dec = [&](long long pos, int n, bool on_card) {
         int room = 1024;
@@ -316,16 +327,28 @@ int main(int argc, char** argv) {
     std::vector<float> q(size_t(kBatch) * kHeads * kDim);
     for (float& x : q) x = 2.f * draw(rng);   // spread scores, so the softmax has a few large weights
     Cache K = make(rng), V = make(rng);
+    // the int8 prompt path's fp16 twin covers the whole context (the codes' dequantized halves), not a block
+    uint16_t *ktwin = nullptr, *vtwin = nullptr;
+    cudaMalloc(&ktwin, size_t(kMaxRows) * kWidth * sizeof(uint16_t));
+    cudaMalloc(&vtwin, size_t(kMaxRows) * kWidth * sizeof(uint16_t));
     int8_t *kc = upload(K.codes), *vc = upload(V.codes);
     uint16_t *ks = upload(K.scales), *vs = upload(V.scales);
     const Kvq8 kq{kc, ks}, vq{vc, vs};
+    // the twins the int8 path would have left: the same values as the codes, in fp16
+    {
+        std::vector<uint16_t> kw(K.codes.size()), vw(V.codes.size());
+        for (size_t i = 0; i < kw.size(); ++i) {
+            kw[i] = __half_as_ushort(__float2half(K.at(i / kWidth, int(i % kWidth))));
+            vw[i] = __half_as_ushort(__float2half(V.at(i / kWidth, int(i % kWidth))));
+        }
+        cudaMemcpy(ktwin, kw.data(), kw.size() * sizeof(uint16_t), cudaMemcpyHostToDevice);
+        cudaMemcpy(vtwin, vw.data(), vw.size() * sizeof(uint16_t), cudaMemcpyHostToDevice);
+    }
     float* dq = upload(q);
     float *score, *awork, *out;
-    uint16_t* kwork;
     const size_t heads = size_t(kBatch) * kHeads * kDim;
     cudaMalloc(&score, kScore * sizeof(float));
     cudaMalloc(&awork, (heads + heads / 2 + 1 + 3 * size_t(kBatch) * kHeads) * sizeof(float));
-    cudaMalloc(&kwork, size_t(2) * 2048 * kWidth * sizeof(uint16_t));
     cudaMalloc(&out, heads * sizeof(float));
     cublasHandle_t blas;
     cublasCreate(&blas);
@@ -339,16 +362,16 @@ int main(int argc, char** argv) {
                           {30000, kBatch, kScore},  {30000, kBatch, few(kBatch, 4096)},
                           {30001, 100, few(100, 160)}, {120000, kBatch, kScore}};
     for (const Case& c : cases)
-        bad += check(blas, K, V, kq, vq, nullptr, nullptr, q, dq, score, awork, kwork, out, c.pos, c.n, c.floats);
+        bad += check(blas, K, V, kq, vq, nullptr, nullptr, q, dq, score, awork, ktwin, out, c.pos, c.n, c.floats);
     // the fp16 cache in place of the q8 one, which is freed first: the card may be shared with a running server
     cudaFree(kc), cudaFree(vc), cudaFree(ks), cudaFree(vs);
     K.fp16(), V.fp16();
     uint16_t *kh = upload(K.halves), *vh = upload(V.halves);
     for (const Case& c : cases)
-        bad += check(blas, K, V, Kvq8{}, Kvq8{}, kh, vh, q, dq, score, awork, kwork, out, c.pos, c.n, c.floats);
+        bad += check(blas, K, V, Kvq8{}, Kvq8{}, kh, vh, q, dq, score, awork, ktwin, out, c.pos, c.n, c.floats);
     cublasDestroy(blas);
     cudaFree(kh), cudaFree(vh), cudaFree(dq), cudaFree(score), cudaFree(awork);
-    cudaFree(kwork), cudaFree(out);
+    cudaFree(ktwin), cudaFree(vtwin), cudaFree(out);
     std::printf(bad ? "%d failed\n" : "all passed\n", bad);
     return bad ? 1 : 0;
 }
