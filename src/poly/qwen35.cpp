@@ -483,27 +483,23 @@ void Qwen35::attn_rows(Block& B, int n) {
         // through the fp16 twin, the way attn() reads a prompt batch (a Q8_0 cache has no cuBLAS scale).
         uint16_t *kc = nullptr, *vc = nullptr;
         if (opt_.kv_int8) {
-            // --batch gives every row its own sequence, so the codes this row writes and the ones it reads
-            // are that sequence's, not the bound one's (seq_buf is how the fp16 path reaches them).
-            int8_t* kc8 = (int8_t*) seq_buf(r.seq, B.k_code);
-            uint16_t* kd8 = (uint16_t*) seq_buf(r.seq, B.k_delta);
-            int8_t* vc8 = (int8_t*) seq_buf(r.seq, B.v_code);
-            uint16_t* vd8 = (uint16_t*) seq_buf(r.seq, B.v_delta);
-            store_q8_at(k_ + i * kv, kc8, kd8, n_kv_, head_dim_, 1, ai, 0, st_);
-            store_q8_at(v_ + i * kv, vc8, vd8, n_kv_, head_dim_, 1, ai, 0, st_);
-            // The fp16 twin is one pair for the whole model, and attn()'s incremental conversion assumes one
-            // sequence growing row after row (f16_owner_/f16_rows_).  A batch interleaves sequences, so those
-            // two no longer say anything; convert this row's own sequence up to its position instead.  A
-            // batch is a few rows, so this is O(rows in the batch x the row's position), not the per-token
-            // decode cost the incremental path exists to avoid.
-            const int per_row = n_kv_ * (head_dim_ / kQ8_0Values);
-            const int64_t blocks = (r.pos + 1) * per_row;
-            dequant_q8_to_f16(kc8, kd8, B.k_f16, blocks, st_);
-            dequant_q8_to_f16(vc8, vd8, B.v_f16, blocks, st_);
+            store_q8_at(k_ + i * kv, B.k_code, B.k_delta, n_kv_, head_dim_, 1, ai, 0, st_);
+            store_q8_at(v_ + i * kv, B.v_code, B.v_delta, n_kv_, head_dim_, 1, ai, 0, st_);
+            const int64_t want = r.pos + 1;
+            int64_t from = f16_owner_ == &B && f16_rows_ < want ? f16_rows_ : 0;
+            f16_owner_ = &B;
+            if (want > from) {
+                const int per_row = n_kv_ * (head_dim_ / kQ8_0Values);
+                const size_t row_c = (size_t) n_kv_ * head_dim_;
+                const int64_t rows = want - from, blocks = rows * per_row;
+                dequant_q8_to_f16(B.k_code + from * row_c, B.k_delta + from * per_row, B.k_f16 + from * row_c, blocks,
+                                  st_);
+                dequant_q8_to_f16(B.v_code + from * row_c, B.v_delta + from * per_row, B.v_f16 + from * row_c, blocks,
+                                  st_);
+            }
+            f16_rows_ = want;
             kc = B.k_f16;
             vc = B.v_f16;
-            f16_owner_ = nullptr;   // they now hold some sequence's rows, not the bound one's: attn() must
-                                    // convert from row 0 again rather than trust f16_rows_
         } else {
             kc = (uint16_t*) seq_buf(r.seq, B.keys);
             vc = (uint16_t*) seq_buf(r.seq, B.vals);

@@ -53,7 +53,11 @@ uint16_t half_bits(float f) {
     return b;
 }
 
-float half_value(uint16_t b) { return __half2float(__ushort_as_half((unsigned short) b)); }
+float half_value(uint16_t b) {   // through memcpy: HIP has no host __ushort_as_half
+    __half h;
+    std::memcpy(&h, &b, sizeof h);
+    return __half2float(h);
+}
 
 /// ggml's own 34-byte blocks for these rows, taken apart into the two arrays --kv int8 keeps.
 struct Reference {
@@ -227,7 +231,7 @@ void case_error(const char* name, int n_kv, int head_dim, int rows) {
 
     float worst = 0.0f;
     for (size_t b = 0; b < blocks; ++b) {
-        const float d = __half2float(__ushort_as_half(delta[b]));
+        const float d = half_value(delta[b]);
         float amax = 0.0f;
         for (int j = 0; j < kQ8_0Values; ++j)
             amax = std::fmax(amax, std::fabs(src[b * kQ8_0Values + (size_t) j]));
@@ -774,7 +778,9 @@ int main() {
     }
     // n_kv = 2 and head_dim = 256 are Qwen3.6's; 256/32 tells how many blocks a head has
     const int n_kv = 2, head_dim = 256;
+#ifndef STRATA_USE_HIP   // no int8 mma tier on HIP: attend_q8 never takes it there (tensor_cores())
     check(probe_mma_layout(), "the m16n8k32 fragment layout is what I think it is");
+#endif
     // FIRST, while the card still has room for anything: attend() and attend_q8() against attend_batch, which is
     // the attention the engine uses for every call of kStageRows (32) rows or more - a prompt chunk and, with
     // --window, a commit of accepted guesses.  attend() is asked for fewer rows than that, and this is the only
@@ -792,12 +798,14 @@ int main() {
     case_attend_rows_batch("rows  8, window 512 of a 1024 ring", 256, 16, 8, 1024, 8, 512, 1024);
     case_attend_rows_batch("rows  1, window 256 of a 1024 ring", 256, 16, 8, 1024, 1, 256, 1024);
     case_attend_rows_batch("rows  8, window 256 of a 1024 ring", 256, 16, 8, 1024, 8, 256, 1024);
+#ifndef STRATA_USE_HIP
     {
         double tm = 0.0, td = 0.0;
         probe_mma_speed(&tm, &td);
         std::printf("  one 16x8x256 product x20000 x384 warps: mma %.1f ms, dp4a %.1f ms -> mma is %.1fx\n",
                     tm, td, td / tm);
     }
+#endif
     for (int kind = 0; kind < 4; ++kind) {
         char name[96];
         std::snprintf(name, sizeof name, "store_q8 rows=5 kind=%d", kind);
