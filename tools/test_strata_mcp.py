@@ -667,5 +667,8 @@ class Helpers(unittest.TestCase):
         self.assertEqual(r["context"], 32768)
 
 
+TablesMatch = Helpers
+
+
 if __name__ == "__main__":
     unittest.main()
