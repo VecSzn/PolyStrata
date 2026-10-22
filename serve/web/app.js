@@ -328,7 +328,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
             multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : "");
   spark("sp-temp", h.gpu_temp, 90);
   setMetric("power", hw.gpu_power == null ? null : fmt(hw.gpu_power), "W", hw.gpu_power_limit ? `of ${fmt(hw.gpu_power_limit)} W limit` : "");
-  spark("sp-power", h.gpu_power, hw.gpu_power_limit);
+  spark("sp-power", hw.gpu_power, hw.gpu_power_limit);
   const gen = hw.gpu_pcie_gen_max || hw.gpu_pcie_gen;
   setMetric("pcie", gen ? `Gen${gen}` : null, hw.gpu_pcie_width ? `x${hw.gpu_pcie_width}` : "",
             hw.gpu_pcie_rx_mb == null ? "" : `to GPU ${fmt(hw.gpu_pcie_rx_mb, hw.gpu_pcie_rx_mb < 10 ? 1 : 0)} MB/s` +
@@ -611,12 +611,170 @@ if (samplingUntouched(settings)) settings.temperature = DEFAULTS.temperature;
 let messages = store.get("chat", []);
 let attachments = [];                 // {name, url}
 let busy = null;                      // {controller, msg}
+let editUndo = null;
 
 function saveChat() {
   store.set("chat", messages.map((m) => ({...m, images: (m.images || []).map((i) => ({name: i.name})),
                                            files: (m.files || []).map((f) => ({name: f.name}))})));
 }
 function timeStr(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); }
+
+function editUserMessage(i) {
+  if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
+  const m = messages[i];
+  if (!m || m.role !== "user") return;
+  const el = $("chat").querySelector(`.st-msg[data-i="${i}"]`);
+  if (!el) return;
+  const bubble = el.querySelector(".st-bubble");
+  if (!bubble || el.querySelector(".edit-box")) return;
+  
+  const original = m.text || "";
+  const box = document.createElement("textarea");
+  box.className = "edit-box st-input";
+  box.value = original;
+  box.rows = Math.min(20, Math.max(2, original.split("\n").length));
+  
+  const actions = document.createElement("div");
+  actions.className = "edit-actions";
+  const save = document.createElement("button");
+  save.className = "st-btn st-btn--primary";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.className = "st-btn st-btn--secondary";
+  cancel.textContent = "Cancel";
+  
+  actions.append(save, cancel);
+  bubble.replaceWith(box);
+  box.after(actions);
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+
+  const close = () => { box.replaceWith(bubble); actions.remove(); };
+  cancel.onclick = close;
+  
+  save.onclick = () => {
+    const next = box.value.trim();
+    if (next === original) { close(); return; }
+    
+    // Variant B: keep the tail aside for Undo, then drop it
+    const dropped = messages.slice(i + 1);
+    m.text = next;
+    messages = messages.slice(0, i + 1);
+    editUndo = dropped.length ? {at: i + 1, items: dropped, wasText: original} : null;
+    close();
+    
+    // append a fresh assistant placeholder and start generation right away
+    const a = {role: "assistant", text: "", reasoning: "", time: Date.now()};
+    messages.push(a);
+    saveChat();
+    renderChat();
+    
+    const el2 = $("chat").lastElementChild;
+    const controller = new AbortController();
+    busy = {controller, msg: a};
+    setBusy(true);
+    
+    // Inlined streaming logic (same as send())
+    (async () => {
+      const body = {model: health.model, messages: apiMessages(), stream: true, reasoning_effort: settings.thinking};
+      if (!(settings.temperature > 0)) {
+        body.temperature = 0;
+      } else if (!samplingUntouched(settings)) {
+        Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
+      }
+      if (settings.seed) body.seed = +settings.seed;
+      if (settings.max) body.max_tokens = +settings.max;
+      if (projectionLoaded()) body.experimental_speed_projection = !!settings.esp;
+      if (settings.mcp !== false && mcpInfo.tools > 0) body.strata_mcp = true;
+
+      let firstAt = null, thinkStart = null, usage = null, frame = 0;
+      const paint = () => { frame = 0; updateAssistant(el2, a, true); scrollDown(); };
+      try {
+        const r = await fetch("v1/chat/completions", {method: "POST", headers: headers(true), body: JSON.stringify(body), signal: controller.signal});
+        if (!r.ok) {
+          let msg = `HTTP ${r.status}`;
+          try { msg = (await r.json()).error.message || msg; } catch (e) { /* not json */ }
+          if (r.status === 401) msg = "This server needs an API key: add it under About > Settings.";
+          throw new Error(msg);
+        }
+        const reader = r.body.getReader(), dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, {stream: true});
+          let nl;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (data === "[DONE]") continue;
+            let j;
+            try { j = JSON.parse(data); } catch (e) { continue; }
+            if (j.error) throw new Error(j.error.message || "the engine reported an error");
+            if (j.usage) usage = j.usage;
+            if (j.strata_mcp) onTool(a, j.strata_mcp);
+            const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
+            const lastTool = a.tools && a.tools.length ? a.tools[a.tools.length - 1] : null;
+            if (d.reasoning_content) {
+              if (!firstAt) firstAt = performance.now();
+              if (!thinkStart) thinkStart = performance.now();
+              if (lastTool && a.reasoning && lastTool.rat === a.reasoning.length) a.reasoning += "\n\n";
+              a.reasoning += d.reasoning_content;
+            }
+            if (d.content) {
+              if (!firstAt) firstAt = performance.now();
+              if (thinkStart && a.thinkSecs == null) a.thinkSecs = (performance.now() - thinkStart) / 1000;
+              if (lastTool && a.text && lastTool.at === a.text.length) a.text += "\n\n";
+              a.text += d.content;
+            }
+            if (!frame) frame = requestAnimationFrame(paint);
+          }
+        }
+      } catch (e) {
+        if (e.name === "AbortError") a.stopped = true;
+        else { a.error = e.message || String(e); toast("error", "The request failed", a.error, 6000); }
+      }
+      if (thinkStart && a.thinkSecs == null) a.thinkSecs = (performance.now() - thinkStart) / 1000;
+      const n = usage ? usage.completion_tokens : null;
+      if (n && firstAt) {
+        const secs = (performance.now() - firstAt) / 1000;
+        a.meta = `${fmt(n)} tokens${secs > 0.25 ? ` · ${fmt(n / secs, 1)} tok/s` : ""}${a.stopped ? " · stopped" : ""}` +
+                 (projectionLoaded() ? (settings.esp ? " · projection on" : " · projection off") : "");
+      } else if (a.stopped) {
+        a.meta = "Stopped";
+      }
+      for (const t of a.tools || []) if (t.state === "writing" || t.state === "running") { t.state = "skipped"; t.ms = null; }
+      const ran = (a.tools || []).filter((t) => t.state === "done" || t.state === "error").length;
+      if (ran) a.meta = `${a.meta ? `${a.meta} · ` : ""}${ran} tool call${ran > 1 ? "s" : ""}`;
+      if (a.limit) a.meta = `${a.meta || ""} · stopped at the limit of ${a.limit} tool rounds (mcp.max_rounds)`;
+      
+      busy = null;
+      setBusy(false);
+      if (frame) cancelAnimationFrame(frame);
+      updateAssistant(el2, a, false);
+      saveChat();
+      scrollDown();
+    })();
+
+    if (editUndo) {
+      toast("info", "Edited",
+            `${dropped.length} later message(s) removed; writing a new answer.`,
+            8000, {label: "Undo", run: () => {
+              if (busy) busy.controller.abort();
+              if (!editUndo) return;
+              messages[i].text = editUndo.wasText;
+              messages = messages.slice(0, editUndo.at).concat(editUndo.items);
+              editUndo = null;
+              saveChat();
+              renderChat();
+            }});
+    } else {
+      toast("success", "Edited", "");
+    }
+  };
+}
 
 function msgEl(m, i) {
   const el = document.createElement("div");
@@ -650,7 +808,16 @@ function msgEl(m, i) {
     el.appendChild(b);
     const meta = document.createElement("div");
     meta.className = "st-msg__meta";
-    meta.textContent = `You · ${timeStr(m.time)}`;
+    const t = document.createElement("span");
+    t.textContent = `You · ${timeStr(m.time)}`;
+    meta.appendChild(t);
+    const edit = document.createElement("button");
+    edit.className = "st-btn st-btn--icon";
+    edit.dataset.msgEdit = "";
+    edit.setAttribute("aria-label", "Edit");
+    edit.title = "Edit (removes the messages after it and writes a new answer)";
+    edit.textContent = "✎";
+    meta.appendChild(edit);
     el.appendChild(meta);
   } else {
     el.innerHTML = `<details class="st-collapse think" hidden><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
@@ -747,6 +914,8 @@ function nearBottom() { const s = $("chat-scroll"); return s.scrollHeight - s.sc
 function scrollDown(force) { const s = $("chat-scroll"); if (force || nearBottom()) s.scrollTop = s.scrollHeight; }
 
 $("chat").addEventListener("click", (e) => {
+  const ed = e.target.closest("[data-msg-edit]");
+  if (ed) { editUserMessage(+ed.closest(".st-msg").dataset.i); return; }
   const cc = e.target.closest("[data-code-copy]");
   if (cc) { copyText(cc.closest(".st-code").querySelector("pre").textContent, cc); return; }
   const mc = e.target.closest("[data-msg-copy]");
