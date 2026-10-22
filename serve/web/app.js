@@ -328,7 +328,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept) {
             multi ? per((g) => (g.temp == null ? "–" : `${fmt(g.temp)}°`)) : "");
   spark("sp-temp", h.gpu_temp, 90);
   setMetric("power", hw.gpu_power == null ? null : fmt(hw.gpu_power), "W", hw.gpu_power_limit ? `of ${fmt(hw.gpu_power_limit)} W limit` : "");
-  spark("sp-power", h.gpu_power, hw.gpu_power_limit);
+  spark("sp-power", hw.gpu_power, hw.gpu_power_limit);
   const gen = hw.gpu_pcie_gen_max || hw.gpu_pcie_gen;
   setMetric("pcie", gen ? `Gen${gen}` : null, hw.gpu_pcie_width ? `x${hw.gpu_pcie_width}` : "",
             hw.gpu_pcie_rx_mb == null ? "" : `to GPU ${fmt(hw.gpu_pcie_rx_mb, hw.gpu_pcie_rx_mb < 10 ? 1 : 0)} MB/s` +
@@ -611,6 +611,7 @@ if (samplingUntouched(settings)) settings.temperature = DEFAULTS.temperature;
 let messages = store.get("chat", []);
 let attachments = [];                 // {name, url}
 let busy = null;                      // {controller, msg, cutoff?}
+let editUndo = null;
 
 function saveChat() {
   store.set("chat", messages.map((m) => ({...m, images: (m.images || []).map((i) => ({name: i.name})),
@@ -624,12 +625,12 @@ function timeStr(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit"
 // Regenerating discards any variants after the current one and appends the new one at the end.
 function swipeInit(m) {
   if (!Array.isArray(m.swipes) || !m.swipes.length) {
-    m.swipes = [{text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null}];
+    m.swipes = [{text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null, thinkSecs: m.thinkSecs || null}];
     m.swipeIndex = 0;
   }
 }
 function swipeSnapshot(m) {
-  return {text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null};
+  return {text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null, thinkSecs: m.thinkSecs || null};
 }
 function swipeSave(m) {
   swipeInit(m);
@@ -639,11 +640,10 @@ function swipeLoad(m) {
   swipeInit(m);
   const s = m.swipes[m.swipeIndex] || {};
   m.text = s.text || ""; m.reasoning = s.reasoning || ""; m.tools = s.tools || null; m.meta = s.meta || null;
-  m.thinkSecs = null; m.stopped = false; m.error = null; m.limit = null;
+  m.thinkSecs = s.thinkSecs || null; m.stopped = false; m.error = null; m.limit = null;
 }
 
-// The streaming itself, shared by send() and regenerateMessage(). On abort it sets m.stopped and returns
-// normally (so the caller can still save the partial answer); on any other error it rethrows.
+// The streaming itself, shared by send(), regenerateMessage() and editUserMessage().
 async function streamInto(m, el, signal) {
   const body = {model: health.model, messages: apiMessages(), stream: true, reasoning_effort: settings.thinking};
   if (!(settings.temperature > 0)) {
@@ -784,6 +784,95 @@ function swipeGo(i, delta) {
   saveChat();
 }
 
+// Edits a user message in place. Variant B: saving removes every message after it, then immediately asks
+// the model for a fresh answer against the new wording. The old tail is kept aside for Undo.
+function editUserMessage(i) {
+  if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
+  const m = messages[i];
+  if (!m || m.role !== "user") return;
+  const el = $("chat").querySelector(`.st-msg[data-i="${i}"]`);
+  if (!el) return;
+  const bubble = el.querySelector(".st-bubble");
+  if (!bubble || el.querySelector(".edit-box")) return;
+  
+  const original = m.text || "";
+  const box = document.createElement("textarea");
+  box.className = "edit-box st-input";
+  box.value = original;
+  box.rows = Math.min(20, Math.max(2, original.split("\n").length));
+  
+  const actions = document.createElement("div");
+  actions.className = "edit-actions";
+  const save = document.createElement("button");
+  save.className = "st-btn st-btn--primary";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.className = "st-btn st-btn--secondary";
+  cancel.textContent = "Cancel";
+  
+  actions.append(save, cancel);
+  bubble.replaceWith(box);
+  box.after(actions);
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+
+  const close = () => { box.replaceWith(bubble); actions.remove(); };
+  cancel.onclick = close;
+  
+  save.onclick = () => {
+    const next = box.value.trim();
+    if (next === original) { close(); return; }
+    
+    // Variant B: keep the tail aside for Undo, then drop it
+    const dropped = messages.slice(i + 1);
+    m.text = next;
+    messages = messages.slice(0, i + 1);
+    editUndo = dropped.length ? {at: i + 1, items: dropped, wasText: original} : null;
+    close();
+    
+    // append a fresh assistant placeholder and start generation right away
+    const a = {role: "assistant", text: "", reasoning: "", time: Date.now()};
+    messages.push(a);
+    saveChat();
+    renderChat();
+    
+    const el2 = $("chat").lastElementChild;
+    const controller = new AbortController();
+    busy = {controller, msg: a};
+    setBusy(true);
+    
+    (async () => {
+      try {
+        await streamInto(a, el2, controller.signal);
+      } catch (e) {
+        a.error = e.message || String(e);
+        toast("error", "The request failed", a.error, 6000);
+      }
+      busy = null;
+      setBusy(false);
+      updateAssistant(el2, a, false);
+      saveChat();
+      scrollDown();
+    })();
+
+    if (editUndo) {
+      toast("info", "Edited",
+            `${dropped.length} later message(s) removed; writing a new answer.`,
+            8000, {label: "Undo", run: () => {
+              if (busy) busy.controller.abort();
+              if (!editUndo) return;
+              messages[i].text = editUndo.wasText;
+              messages = messages.slice(0, editUndo.at).concat(editUndo.items);
+              editUndo = null;
+              saveChat();
+              renderChat();
+            }});
+    } else {
+      toast("success", "Edited", "");
+    }
+  };
+}
+
 function msgEl(m, i) {
   const el = document.createElement("div");
   el.className = `st-msg st-msg--${m.role}`;
@@ -816,7 +905,16 @@ function msgEl(m, i) {
     el.appendChild(b);
     const meta = document.createElement("div");
     meta.className = "st-msg__meta";
-    meta.textContent = `You · ${timeStr(m.time)}`;
+    const t = document.createElement("span");
+    t.textContent = `You · ${timeStr(m.time)}`;
+    meta.appendChild(t);
+    const edit = document.createElement("button");
+    edit.className = "st-btn st-btn--icon";
+    edit.dataset.msgEdit = "";
+    edit.setAttribute("aria-label", "Edit");
+    edit.title = "Edit (removes the messages after it and writes a new answer)";
+    edit.textContent = "✎";
+    meta.appendChild(edit);
     el.appendChild(meta);
   } else {
     el.innerHTML = `<details class="st-collapse think" hidden><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
@@ -928,6 +1026,8 @@ function nearBottom() { const s = $("chat-scroll"); return s.scrollHeight - s.sc
 function scrollDown(force) { const s = $("chat-scroll"); if (force || nearBottom()) s.scrollTop = s.scrollHeight; }
 
 $("chat").addEventListener("click", (e) => {
+  const ed = e.target.closest("[data-msg-edit]");
+  if (ed) { editUserMessage(+ed.closest(".st-msg").dataset.i); return; }
   const rg = e.target.closest("[data-msg-regen]");
   if (rg) { regenerateMessage(+rg.closest(".st-msg").dataset.i); return; }
   const pv = e.target.closest("[data-msg-prev]");
