@@ -200,3 +200,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .img-results figure{margin:0}
 .img-results img{max-width:100%;border-radius:var(--st-r-lg);display:block}
 .img-results figcaption{font-size:var(--st-fs-sm, 13px);color:var(--st-ink-2, inherit);margin-top:4px}
+
+/* Editing user messages */
+.edit-box { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; min-height: 2.5em; }
+.edit-actions { display: flex; gap: 6px; margin-top: 6px; }
+.st-msg__meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
