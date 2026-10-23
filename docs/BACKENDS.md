@@ -16,6 +16,7 @@ a second machine, a Windows laptop whose card has 8 GB.
 | GLM 5.3 Flash | `glm5-next` | `strata-poly` | GSQ-RCO 3.0bit, REAP50-Q3_K_M, UD-IQ2_XXS | draft block |
 | Qwen3.6-35B-A3B | `qwen35moe` | `strata-poly` | Unsloth UD-Q3_K_M, UD-Q2_K_XL and UD-Q4_K_M, 12.6 to 22.7 GB | draft block in the file |
 | Ornith 1.5 35B-A3B | `qwen35moe` | `strata-poly` | APEX-MTP-I-Compact, I-Mini and I-Quality, 14.4 to 23.7 GB | draft block in the file |
+| Ornith 1.5 122B | `qwen35moe` | `strata-poly` | Unsloth UD-Q3_K_XL, UD-Q2_K_XL, UD-IQ3_XXS and UD-Q4_K_XL, 44.5 to 79.7 GB | draft block in the file |
 | Gemma 4 26B-A4B | `gemma4` | `strata-poly` | Unsloth UD-Q3_K_M, UD-Q2_K_XL and UD-Q4_K_M, 10.5 to 16.9 GB | its draft model, a file of 0.46 GB |
 | Tiel Coder 35B-A3B | `qwen35moe` | `strata-poly` | peculiar-ragdoll's UD-Q3_K_XL, UD-IQ3_XXS and UD-Q4_K_XL, 13.6 to 22.7 GB | draft block in the file |
 | MiniCPM-V 4.7 35B-A3B | `qwen35moe` | `strata-poly` | OpenBMB Q4_K_M, mix_q3gud_im and Q6_K, 15.5 to 28.5 GB | none: it answers one token at a time |
@@ -31,9 +32,8 @@ The optional CUDA [GDN prefill adapter](DETAILS.md#strata-poly-chunked-gdn-prefi
 
 ## Install
 
-Setup installs all eight. The four new models are in its list of models, and each has a family name that goes
-straight to it. GLM 5.3 Flash and DeepSeek V4 Flash, the two large ones, have pages of their own,
-[GLM.md](GLM.md) and [DEEPSEEK.md](DEEPSEEK.md):
+Setup installs all nine. The models have family names that go straight to them. The larger models have pages of their own,
+[GLM.md](GLM.md), [DEEPSEEK.md](DEEPSEEK.md) and [ORNITH.md](ORNITH.md):
 
 ```bash
 ./setup.sh --family qwen36
@@ -41,6 +41,10 @@ straight to it. GLM 5.3 Flash and DeepSeek V4 Flash, the two large ones, have pa
 
 ```bash
 ./setup.sh --family ornith
+```
+
+```bash
+./setup.sh --family ornith122
 ```
 
 ```bash
@@ -63,6 +67,10 @@ straight to it. GLM 5.3 Flash and DeepSeek V4 Flash, the two large ones, have pa
 | `ornith` | Ornith 1.5 35B-A3B | APEX-MTP-I-Compact | 17.4 GB | about 22 GB |
 | | | APEX-MTP-I-Mini | 14.4 GB | about 18 GB |
 | | | APEX-MTP-I-Quality | 23.7 GB | about 28 GB |
+| `ornith122` | Ornith 1.5 122B | Unsloth UD-Q3_K_XL, three files | 59.8 GB | about 47 GB (needs a 16 GB+ card, ~47 GB beside 24 GB) |
+| | | Unsloth UD-Q2_K_XL | 44.5 GB | about 32 GB beside a 24 GB card |
+| | | Unsloth UD-IQ3_XXS | 49.5 GB | about 37 GB beside a 24 GB card |
+| | | Unsloth UD-Q4_K_XL, three files | 79.7 GB | about 66 GB beside a 24 GB card |
 | `gemma4` | Gemma 4 26B-A4B | Unsloth UD-Q3_K_M and its draft model | 13.2 GB | about 18 GB |
 | | | Unsloth UD-Q2_K_XL and the draft model | 11.0 GB | about 15 GB |
 | | | Unsloth UD-Q4_K_M and the draft model | 17.4 GB | about 21 GB |

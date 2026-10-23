@@ -86,6 +86,8 @@ HF_REVISIONS = {
     "unsloth/LFM2.5-24B-A2B-GGUF": "faa77113e93335b63423e9e8d33395f86eaf8946",                        # 2026-10-15
     "LiquidAI/LFM2.5-24B-A2B-GGUF": "0912d33141f77e10705345a6732bfd83f0252fdc",                       # 2026-10-15
     "openbmb/MiniCPM-V-4.7-35B-A3B-gguf": "77f6d8cb08b2b115ce27d2e2ac1359e126921689",                   # 2026-10-12
+    "unsloth/Ornith-1.5-122B-GGUF": "3842d003341507c216295c6f28dfcd30349925c6",                          # 2026-10-20
+    "ornith-ai/Ornith-1.5-122B": "dfa07bab90e90746ffbfc0b0cba3126eb9265de2",                              # 2026-10-20
 }
 
 
@@ -692,6 +694,51 @@ FAMILIES = {
                            (28513556672, "159ce7d2fe4aab95233096ad007c23d86d99dd6c4a20d3f7c31e990d09aa71b7"),
                            "mmproj-model-f16.gguf":
                            (1119575840, "bff3b688e14c300eca273092c37c50a0ddfcc2054e079af1a0480edeed5d20f1")}},
+    "ornith122": {"title": "Ornith 1.5 122B", "by": "ornith-ai; quantized by Unsloth",
+                  "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 60 GB file, ~47 GB of RAM beside a 24 GB card; 4 sizes, images",
+                  "hf": hf("unsloth/Ornith-1.5-122B-GGUF"), "file": "Ornith-1.5-122B-{q}.gguf",
+                  "shards": 1, "tag": "ornith122-", "name": "ornith-1.5-122b", "engine": "poly",
+                  "vision": True, "experimental": True, "windows": True, "ran_on_gb": 16,
+                  "row_bytes": 26624, "mmproj_hf": hf("unsloth/Ornith-1.5-122B-GGUF"),
+                  "mmproj": "mmproj-F16.gguf", "vision_gb": 0.9, "vision_vram_gb": 1.6,
+                  "models": {"UD-Q3_K_XL": {"about": "3-bit i-quant experts, 4-bit where they write: the daily choice",
+                                            "download_gb": 59.8, "ram_gb": 47, "arena_gb": 53.3,
+                                            "vram_beside_gb": 8.5, "shards": 3,
+                                            "file": "UD-Q3_K_XL/Ornith-1.5-122B-UD-Q3_K_XL-0000{i}-of-00003.gguf",
+                                            "draft": "own"},
+                             "UD-Q2_K_XL": {"about": "2-bit i-quant experts (Unsloth Dynamic): the least RAM",
+                                            "download_gb": 44.5, "ram_gb": 32, "arena_gb": 38.5,
+                                            "vram_beside_gb": 8.5, "shards": 1,
+                                            "file": "Ornith-1.5-122B-UD-Q2_K_XL.gguf",
+                                            "draft": "own"},
+                             "UD-IQ3_XXS": {"about": "2- and 3-bit i-quant experts: less RAM than UD-Q3_K_XL",
+                                            "download_gb": 49.5, "ram_gb": 37, "arena_gb": 43.2,
+                                            "vram_beside_gb": 8.5, "shards": 1,
+                                            "file": "Ornith-1.5-122B-UD-IQ3_XXS.gguf",
+                                            "draft": "own"},
+                             "UD-Q4_K_XL": {"about": "4-bit experts (Unsloth Dynamic), 5- and 6-bit where they write",
+                                            "download_gb": 79.7, "ram_gb": 66, "arena_gb": 73.0,
+                                            "vram_beside_gb": 8.5, "shards": 3,
+                                            "file": "UD-Q4_K_XL/Ornith-1.5-122B-UD-Q4_K_XL-0000{i}-of-00003.gguf",
+                                            "draft": "own"}},
+                  "sha256": {"Ornith-1.5-122B-UD-Q3_K_XL-00001-of-00003.gguf":
+                             (10942929, "d8a23c487741fdac7026e10013fa8e320502cf01048a2333b2db8ba2a9f74fe5"),
+                             "Ornith-1.5-122B-UD-Q3_K_XL-00002-of-00003.gguf":
+                             (49791670080, "95f76e67ffc49e2b0b4a4dfe5c42269b4b275ecf9e3696f599f3eeac92180323"),
+                             "Ornith-1.5-122B-UD-Q3_K_XL-00003-of-00003.gguf":
+                             (9958641536, "1c4b52bbb1d45a21b5b7927429a5c80f264c688f2d14ed50ba0b6da0260d4028"),
+                             "Ornith-1.5-122B-UD-Q2_K_XL.gguf":
+                             (44533952768, "93fb32cfb1c31b34df426b4a41d961bdaffcddbbd217d850262136cf3689ba66"),
+                             "Ornith-1.5-122B-UD-IQ3_XXS.gguf":
+                             (49515667712, "027a9a480e8bcc6079fcf834e368467a169953561fb4b98dc9528d6185c8a438"),
+                             "Ornith-1.5-122B-UD-Q4_K_XL-00001-of-00003.gguf":
+                             (10942929, "7159d31a6a6ce5528500b490880383844c3c9b21fcdaad94e66c9e65233ff359"),
+                             "Ornith-1.5-122B-UD-Q4_K_XL-00002-of-00003.gguf":
+                             (49971099680, "e66952128394bb4c75554c7e10a12a8b63dd1c7f049d876a02885a946e30c1c3"),
+                             "Ornith-1.5-122B-UD-Q4_K_XL-00003-of-00003.gguf":
+                             (29731729056, "21325ec18a9e3210eeffada0fc327a25a79171918f1d04f8f0a06b61866ac9ba"),
+                             "mmproj-F16.gguf":
+                             (908724544, "39db176176a904b101f5173a4f03e785990f9279f94ab373c4fd629ae7011817")}},
 }
 MMPROJ = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 # Qwen3.6-35B-A3B (GGUF architecture qwen35moe), Unsloth's GGUFs with the MTP block: a family with an engine path of its
@@ -6621,7 +6668,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
 
     # one file, or the numbered files of a split GGUF: the engine is given the first and finds the others by name
     models_dir = Path(a.gguf_dir) if a.gguf_dir else Path(a.models_dir) / tag
-    shards = [models_dir / model_file(fam, model, i) for i in range(1, model_shards(fam, model) + 1)]
+    shards = gguf_dir_shards(models_dir, fam, model) if a.gguf_dir else \
+        [models_dir / model_file(fam, model, i) for i in range(1, model_shards(fam, model) + 1)]
     absent = [s.name for s in shards if not s.exists()]
     if a.gguf_dir and absent:
         fail(f"{models_dir} has no {absent[0]}",
@@ -6680,7 +6728,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
             if s.exists() and done(s):
                 ok(f"{s.name} already downloaded")
                 continue
-            download(d.get("hf", fam["hf"]) + s.name, s)
+            rel = s.relative_to(models_dir).as_posix() if s.is_relative_to(models_dir) else s.name
+            download(d.get("hf", fam["hf"]) + rel, s)
     check_shards(shards)
     for s in shards:
         if a.gguf_dir:
@@ -7240,7 +7289,7 @@ def main() -> int:
                     help="qwen = Qwen3.8-Flash-Next, swift = Swift 1.5, glm = GLM 5.3 Flash (docs/GLM.md), deepseek = "
                          "DeepSeek V4 Flash, lfm25 = LFM2.5-24B-A2B, qwen36 = Qwen3.6-35B-A3B on strata-poly, ornith = "
                          "Ornith 1.5, gemma4 = Gemma 4 26B-A4B, tiel = Tiel Coder 35B-A3B, minicpmv = MiniCPM-V 4.7 "
-                         "35B-A3B (docs/BACKENDS.md), qwen36-strata = Qwen3.6-35B-A3B on the Strata project's "
+                         "35B-A3B, ornith122 = Ornith 1.5 122B (docs/BACKENDS.md), qwen36-strata = Qwen3.6-35B-A3B on the Strata project's "
                          "own engine (UD-Q4_K_XL and up, 32 GB of RAM or more; pictures with --vision, several "
                          "requests at once with --parallel; docs/QWEN36.md)")
     ap.add_argument("--model", choices=list(dict.fromkeys(
