@@ -2096,7 +2096,8 @@ the document, +0.4% on the chat. Details: `bench/results/2026-09-27-esp/`.
 
 ## strata-poly: flash attention for prompt reading (`STRATA_FATTN=1`, off by default)
 
-For strata-poly's Qwen3.6 family (heads of 256 values, 8 heads a group) on an Ampere or later NVIDIA card. With
+For strata-poly's Qwen3.6 family, including Ornith 122B (heads of 256 values, 8 or 16 heads a group), on an
+Ampere or later NVIDIA card. With
 `STRATA_FATTN=1` in the environment a prompt batch's attention runs through llama.cpp's flash-attention kernel
 (`src/poly/fattn_mma.cuh`, a copy of `fattn-mma-f16.cuh` with the causal mask computed in the kernel) instead of
 two cuBLAS products and a softmax over scores in memory. Under the q8_0 cache (`--kv int8`) blocks of keys are
@@ -2117,9 +2118,10 @@ also parts from itself between runs.
 The decode side of the same layers: the few tokens of an answer's step (one, or a window of guesses). With
 `STRATA_FDEC=1` they go through a kernel of this project's own (`fdec_q8()` / `fdec_f16()` in `src/poly/fattn.cu`)
 instead of `attend()`'s score, softmax and value kernels, which write every score to memory and read it back twice.
-One CUDA block takes 1,024 keys of a KV head's group for up to 4 tokens as flash attention on the tensor cores, so
-the cache is read once per 4 tokens, and the blocks are merged by their softmax max and sum. q8_0 and fp16 caches,
-heads of 256 values, 8 heads a group, Ampere or later NVIDIA. A token gets the same bits alone or in a window, as
+One CUDA block takes 1,024 keys of a KV head's group for up to 4 tokens (group 8) or 2 tokens (group 16) as flash
+attention on the tensor cores. The cache is read once for those tokens, and the blocks are merged by their softmax
+max and sum. q8_0 and fp16 caches, heads of 256 values, 8 or 16 heads a group, Ampere or later NVIDIA.
+A token gets the same bits alone or in a window, as
 with `attend()`. No VRAM is added. The server logs `STRATA_FDEC: decode attention through the tensor-core decode
 kernel`, or why not; Turing, HIP and other models keep the old path, and without the variable nothing changes.
 

@@ -1,0 +1,4 @@
+strata-poly: the experts' split is frozen for the engine's whole run (STRATA_FREEZE_EXPERTS): greedy answers are a function of the request alone, and the only cache change after load is the serve VRAM resize
+strata-poly: q8_0 KV cache: 544 bytes a row
+strata-poly: loaded in 1.6 s; 1204 of 12544 routed experts in VRAM (5.8 GiB), 12 CPU threads
+prompt 8440 tokens 797.2 tok/s, generated 5 tokens 29.59 tok/s (stop); experts from VRAM 11.0%, CPU experts 0.0 ms/token, router wait 0.7 ms/token, 0 experts swapped into VRAM, 0 left out, 3 of 3 guessed tokens right

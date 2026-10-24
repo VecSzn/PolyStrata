@@ -1,5 +1,5 @@
 // src/poly/fattn.hpp - a prompt batch's attention with llama.cpp's flash-attention MMA kernel (fattn_mma.cuh, MIT)
-// over a q8_0 or fp16 cache: heads of 256 values, 8 heads a group (Qwen3.6 / Cyber-Tiel's full-attention layers).
+// over a q8_0 or fp16 cache: heads of 256 values, 8 or 16 heads a group (Qwen3.6 / Ornith 122B).
 // The keys go in blocks: under q8_0 each block's K and V are dequantized to fp16 in the scratch, the kernel attends
 // to them with the causal mask computed from the positions, and the blocks' results are merged by their softmax max
 // and sum.  An fp16 cache is read where it lies, but for the last block (the batch's own rows), which is copied.
@@ -39,8 +39,8 @@ bool fdec_fits(int dim, int n_head, int kv_heads, int rows, size_t scratch_float
 /// attend() for n tokens (fewer than kStageRows) with no window, ring or `whole`, over a q8_0 cache: token t
 /// attends the rows 0 to pos + t, with the position from `at` on the card when it is given, and the launch sized
 /// for `room` rows then (a recorded launch).  The keys go in splits of 1,024 rows on the tensor cores, read once
-/// for 4 tokens, and the splits are merged; a token gets the same bits alone or with others.  scratch holds the
-/// splits' results; false, with nothing enqueued, where fdec_fits() is false.
+/// for up to 4 tokens (group 8) or 2 (group 16), and the splits are merged; a token gets the same bits alone or
+/// with others. scratch holds the splits' results; false, with nothing enqueued, where fdec_fits() is false.
 bool fdec_q8(const float* q, Kvq8 kq8, Kvq8 vq8, int64_t pos, int n, const long long* at, int room, float* out,
              int dim, int n_head, int kv_heads, float scale, float* scratch, size_t scratch_floats, void* stream);
 

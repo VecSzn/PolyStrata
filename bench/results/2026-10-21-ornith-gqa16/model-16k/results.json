@@ -1,0 +1,28 @@
+[
+  {
+    "tag": "long-r0-off",
+    "exit": 0,
+    "enabled": false,
+    "draft": true,
+    "input_tokens": 16840,
+    "output_sha256": "8e50be7fefe2be688898ac6162f5e5efa386aad263bf59341cfe3fa86412e95f",
+    "prompt_n": 16840,
+    "prompt_tps": 927.2,
+    "generated_n": 5,
+    "decode_tps": 15.85,
+    "text": "7391<|im_end|>"
+  },
+  {
+    "tag": "long-r0-on",
+    "exit": 0,
+    "enabled": true,
+    "draft": true,
+    "input_tokens": 16840,
+    "output_sha256": "8e50be7fefe2be688898ac6162f5e5efa386aad263bf59341cfe3fa86412e95f",
+    "prompt_n": 16840,
+    "prompt_tps": 1013.8,
+    "generated_n": 5,
+    "decode_tps": 12.59,
+    "text": "7391<|im_end|>"
+  }
+]

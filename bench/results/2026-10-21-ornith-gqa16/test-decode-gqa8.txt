@@ -1,0 +1,28 @@
+query heads 16, KV heads 2, group 8
+ok   q8  pos      0 rows 1: 9.16e-04 from attend() (results up to 3.85); against doubles: fdec 9.16e-04, attend 0.00e+00; same bits alone and on the card; 0.005 ms against 0.006
+ok   q8  pos      5 rows 3: 1.53e-03 from attend() (results up to 3.46); against doubles: fdec 1.41e-03, attend 5.35e-07; same bits alone and on the card; 0.008 ms against 0.014
+ok   q8  pos   1022 rows 2: 6.98e-04 from attend() (results up to 1.69); against doubles: fdec 6.98e-04, attend 7.33e-07; same bits alone and on the card; 0.030 ms against 0.018
+ok   q8  pos   1023 rows 4: 6.98e-04 from attend() (results up to 1.69); against doubles: fdec 6.99e-04, attend 8.17e-07; same bits alone and on the card; 0.049 ms against 0.034
+ok   q8  pos   1024 rows 1: 6.98e-04 from attend() (results up to 1.50); against doubles: fdec 6.98e-04, attend 7.62e-07; same bits alone and on the card; 0.029 ms against 0.015
+ok   q8  pos   2047 rows 5: 5.96e-04 from attend() (results up to 1.26); against doubles: fdec 5.96e-04, attend 8.44e-07; same bits alone and on the card; 0.079 ms against 0.084
+ok   q8  pos  30000 rows 2: 2.13e-04 from attend() (results up to 0.29); against doubles: fdec 2.13e-04, attend 2.69e-07; same bits alone and on the card; 0.056 ms against 0.520
+ok   q8  pos 120000 rows 3: 2.39e-04 from attend() (results up to 0.47); against doubles: fdec 2.39e-04, attend 5.82e-07; same bits alone and on the card; 0.409 ms against 3.721
+ok   q8  pos 140000 rows 1: 2.02e-04 from attend() (results up to 0.23); against doubles: fdec 2.02e-04, attend 1.91e-07; same bits alone and on the card; 0.412 ms against 2.278
+ok   q8  pos 140000 rows 3: 2.05e-04 from attend() (results up to 0.41); against doubles: fdec 2.06e-04, attend 1.20e-06; same bits alone and on the card; 0.452 ms against 4.388
+ok   q8  pos 170000 rows 4: 2.54e-04 from attend() (results up to 0.45); against doubles: fdec 1.71e-04, attend 2.81e-07; same bits alone and on the card; 0.571 ms against 6.197
+ok   q8  pos 170000 rows 6: 3.38e-04 from attend() (results up to 0.45); against doubles: fdec 2.22e-04, attend 4.96e-07; same bits alone and on the card; 1.085 ms against 9.396
+ok   q8  pos 170000 rows 9: 3.38e-04 from attend() (results up to 0.45); against doubles: fdec 1.71e-04, attend 3.27e-07; same bits alone and on the card; 1.644 ms against 15.224
+ok   f16 pos      0 rows 1: 0.00e+00 from attend() (results up to 3.85); against doubles: fdec 9.16e-04, attend 9.16e-04; same bits alone and on the card; 0.005 ms against 0.006
+ok   f16 pos      5 rows 3: 1.25e-03 from attend() (results up to 3.46); against doubles: fdec 1.84e-03, attend 1.27e-03; same bits alone and on the card; 0.009 ms against 0.013
+ok   f16 pos   1022 rows 2: 4.94e-04 from attend() (results up to 1.69); against doubles: fdec 6.83e-04, attend 6.45e-04; same bits alone and on the card; 0.044 ms against 0.016
+ok   f16 pos   1023 rows 4: 5.53e-04 from attend() (results up to 1.69); against doubles: fdec 7.81e-04, attend 6.01e-04; same bits alone and on the card; 0.054 ms against 0.031
+ok   f16 pos   1024 rows 1: 4.93e-04 from attend() (results up to 1.50); against doubles: fdec 6.83e-04, attend 6.01e-04; same bits alone and on the card; 0.043 ms against 0.014
+ok   f16 pos   2047 rows 5: 3.92e-04 from attend() (results up to 1.26); against doubles: fdec 9.52e-04, attend 7.48e-04; same bits alone and on the card; 0.097 ms against 0.070
+ok   f16 pos  30000 rows 2: 2.18e-04 from attend() (results up to 0.29); against doubles: fdec 4.19e-04, attend 2.48e-04; same bits alone and on the card; 0.161 ms against 0.318
+ok   f16 pos 120000 rows 3: 1.26e-04 from attend() (results up to 0.47); against doubles: fdec 1.36e-04, attend 1.63e-04; same bits alone and on the card; 0.686 ms against 2.688
+ok   f16 pos 140000 rows 1: 1.62e-04 from attend() (results up to 0.23); against doubles: fdec 3.03e-04, attend 1.50e-04; same bits alone and on the card; 0.722 ms against 1.449
+ok   f16 pos 140000 rows 3: 1.62e-04 from attend() (results up to 0.42); against doubles: fdec 3.03e-04, attend 1.50e-04; same bits alone and on the card; 0.758 ms against 3.136
+ok   f16 pos 170000 rows 4: 1.55e-04 from attend() (results up to 0.45); against doubles: fdec 2.55e-04, attend 1.25e-04; same bits alone and on the card; 0.942 ms against 4.460
+ok   f16 pos 170000 rows 6: 3.04e-04 from attend() (results up to 0.45); against doubles: fdec 2.55e-04, attend 1.94e-04; same bits alone and on the card; 1.834 ms against 6.469
+ok   f16 pos 170000 rows 9: 3.04e-04 from attend() (results up to 0.45); against doubles: fdec 2.55e-04, attend 1.25e-04; same bits alone and on the card; 2.757 ms against 10.632
+all passed
