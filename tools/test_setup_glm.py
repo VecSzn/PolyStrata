@@ -140,7 +140,7 @@ class Config(unittest.TestCase):
             self.assertTrue(setup.poly_config(cfg))
             self.assertEqual(setup.choices_from_config(p)["family"], "glm")
 
-            def build(gpu, yes, llama, vision="none", works=True):
+            def build(gpu, yes, llama, vision="none", toolkit=13, portable=False, works=True):
                 if not works:
                     raise RuntimeError("no compiler")
                 (root / setup.ENGINE_POLY_DIR).mkdir(exist_ok=True)
@@ -256,7 +256,7 @@ class Main(unittest.TestCase):
             dst.write_bytes(b"")
             setup.mark(dst)
 
-        def fake_build(gpu, yes, llama, vision="none", toolkit=13):
+        def fake_build(gpu, yes, llama, vision="none", toolkit=13, portable=False):
             self.built.append(gpu["archs"])
             self.encoder, self.toolkit = vision, toolkit
             eng = self.t / setup.ENGINE_POLY_DIR
