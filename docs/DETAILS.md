@@ -2398,3 +2398,11 @@ Runtime measurements used SM89. CUDA 13.3 compilation was checked for the SM120/
 adapter, but Blackwell runtime testing is still needed. HIP and SYCL were not built here; the CUDA library
 is excluded on those backends. This experimental opt-in changes floating-point accumulation and can change
 outputs. Prefill gains do not guarantee faster generation; some measured long-response TG runs regressed.
+
+## strata-poly: streaming CPU copies for expert staging
+
+`STRATA_POLY_STREAM_STAGE=1` uses SSE2 streaming stores when packing experts into the existing host upload
+buffers during prefill. Unset or `0` keeps the stock copies. The setting is captured at engine initialization;
+restart to change it. It can also be set in the server model's `env` map. Builds without SSE2 keep stock copies.
+This applies to the shared strata-poly staging path; the original strata engine and background expert swaps
+are unchanged. No extra host or GPU buffer is allocated, and the model file mapping is unchanged.

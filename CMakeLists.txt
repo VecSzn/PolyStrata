@@ -1985,12 +1985,14 @@ if(STRATA_BUILD_TESTS)
   add_test(NAME aux_cpus_test COMMAND aux_cpus_test)
 endif()
 
-# The opt-in lifecycle is a host-only test, including on non-CUDA builds.
+# Poly opt-in controls and staging copies have host-only tests, including on non-CUDA builds.
 if(STRATA_BUILD_TESTS)
   add_executable(poly_hip_value_split_policy_test src/poly/hip_value_split_policy_test.cpp)
   add_test(NAME poly_hip_value_split_policy_test COMMAND poly_hip_value_split_policy_test)
   add_executable(poly_gdn_mma_control_test src/poly/gdn_mma_control_test.cpp)
   add_test(NAME poly_gdn_mma_control_test COMMAND poly_gdn_mma_control_test)
+  add_executable(poly_stream_stage_test src/poly/stage_copy_test.cpp)
+  add_test(NAME poly_stream_stage_test COMMAND poly_stream_stage_test)
 endif()
 
 # Shared prepared-input GDN recurrence. Either engine may link this library;
