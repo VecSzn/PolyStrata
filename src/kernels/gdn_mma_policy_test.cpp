@@ -11,6 +11,9 @@ int main() {
         require(gdn_mma_arch(12, 0), "Blackwell SM120 dispatch");
         require(gdn_mma_arch(12, 1), "DGX Spark SM121 dispatch");
         require(gdn_mma_arch(8, 6) && gdn_mma_arch(8, 9), "SM86/89 dispatch");
+#if defined(STRATA_EXPERIMENTAL_SM60)
+        require(gdn_mma_arch(7, 0), "Volta SM70 dispatch");
+#endif
         for (int cc : {75, 80, 87, 90, 100, 103, 122, 130})
             require(!gdn_mma_arch(cc / 10, cc % 10), "unsupported architecture must fall back");
         require(gdn_mma_shape(128, 32, 16, 64, false), "first eligible row count");
