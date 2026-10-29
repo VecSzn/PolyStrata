@@ -1,4 +1,20 @@
+#include <cstddef>
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#include <emmintrin.h>
+namespace {
+size_t streaming_stores = 0;
+// Observe the helper's dispatch while still executing its real streaming stores.
+inline void counted_stream_store(__m128i* dst, __m128i value) {
+    ++streaming_stores;
+    _mm_stream_si128(dst, value);
+}
+}
+#define _mm_stream_si128 counted_stream_store
+#else
+namespace { size_t streaming_stores = 0; }
+#endif
 #include "stage_copy.hpp"
+#undef _mm_stream_si128
 
 #include <algorithm>
 #include <array>
@@ -120,6 +136,25 @@ size_t check_protected_ends() {
 } // namespace
 
 int main() {
+    // Stream every complete aligned destination cache line, with no size heuristic.
+    std::vector<unsigned char> source(100 * 1024 + 256, 0x39);
+    std::vector<unsigned char> destination(100 * 1024 + 256, 0);
+    for (size_t n : {size_t(0), size_t(1), size_t(63), size_t(64), size_t(65),
+                     size_t(127), size_t(128), size_t(129), size_t(4096),
+                     size_t(100 * 1024)}) {
+        for (size_t offset : {size_t(0), size_t(1), size_t(15), size_t(63)}) {
+            std::fill(destination.begin(), destination.end(), 0);
+            streaming_stores = 0;
+            auto* s = aligned(source);
+            auto* d = aligned(destination) + offset;
+            strata::poly::stage_copy_streaming(d, s, n);
+            const size_t head = (64 - offset) % 64;
+            const size_t lines = n > head ? (n - head) / 64 : 0;
+            const size_t expected = strata::poly::stage_copy_streaming_available() ? 4 * lines : 0;
+            check(streaming_stores == expected, n, 0, offset);
+            check(std::equal(d, d + n, s), n, 0, offset);
+        }
+    }
     constexpr std::array<size_t, 21> lengths = {
         0, 1, 15, 16, 17, 63, 64, 65, 127, 128, 129,
         4095, 4096, 4097, 4159, 4160, 4161, 4223, 4224, 4225, 65535
@@ -127,7 +162,7 @@ int main() {
     size_t offsets = 0;
     for (size_t n : lengths) offsets += check_offsets(n, 1);
     // Real expert sizes; a sparse alignment sweep keeps this host-only test fast.
-    for (size_t n : {size_t(589824), size_t(720896)}) offsets += check_offsets(n, 15);
+    for (size_t n : {size_t(303104), size_t(450560), size_t(589824), size_t(720896)}) offsets += check_offsets(n, 15);
     size_t protected_ends = 0;
 #if defined(_WIN32) || defined(__unix__) || defined(__APPLE__)
     protected_ends = check_protected_ends();
