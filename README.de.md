@@ -92,6 +92,31 @@ Was andere auf ihren eigenen Karten gemessen haben und wie du auf deinem PC mit 
 Auf dem Laptop las PolyStrata Prompts 2.7- bis 3.5-mal so schnell wie llama.cpp b11540 und schrieb 1.5- bis
 1.8-mal so schnell, mit Qwen3.6 und mit Tiel Coder ([die beiden Läufe](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp), englisch).
 
+## Wie viel RAM es belegt
+
+Seit 0.1.45-poly.7 belegt die Engine der elf Modelle weniger RAM: Sie hält die Teile der Modelldatei, die schon auf
+der Grafikkarte liegen, nicht mehr im Speicher. Auf dem Laptop belegte Qwen3.6-35B-A3B nach einem Prompt von 32,000
+Tokens mit 0.1.45-poly.6 17.9 GiB, jetzt 13.1 GiB, und es schreibt genauso schnell. Unter Linux ging es von 17.8 auf
+12.6 GiB.
+
+Um viel weniger zu belegen, füge `"--ram-experts-mib", "N"` zur `"args"`-Liste von `strata-<model>.json` hinzu
+([wo](docs/INSTALL.md#where-things-are-stored)) und starte neu. Zwischen zwei Anfragen behält die Engine dann nur die N MiB Experten, die sie zuletzt am
+meisten benutzt hat, und überlässt die anderen dem Dateicache des Systems, wo andere Programme den Speicher nehmen
+können:
+
+| Qwen3.6-35B-A3B auf dem Laptop, nach einem 32K-Prompt | Standard | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
+| --- | ---: | ---: | ---: |
+| RAM, den die Engine belegt | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
+| Schreibt, Tokens/s: nach einem kurzen Prompt / nach dem 32K-Prompt | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+
+Das ist die Engine allein nach dem Prompt. Über den Server, mit 3072 und einem kurzen Chat davor, waren es 5.2 GiB;
+gleich nach dem Start, bis zur ersten Antwort, belegt sie mehr (7.1 GiB mit 3072). Während einer Antwort belegt sie mehr, die Experten, die die Antwort liest; sie gehen danach wieder, und das
+System kann sie früher zurücknehmen, wenn ein anderes Programm den Speicher braucht. Ein weggelassener Experte wird zurückgelesen, wenn ein Token ihn braucht: aus dem Dateicache, solange das System ihn
+dort hält, sonst von der SSD, was langsamer ist. LFM2.5, dessen Experten größer sind, schreibt mit 3072 7 bis 12 %
+langsamer. Zum Lesen von Prompts braucht die Engine außerdem 350 bis 400 MiB weniger VRAM: Der Expertencache nimmt sie
+(Qwen3.6 hält 2,712 statt 2,444 Experten im VRAM), oder `--vram-reserve-mib` lässt sie anderen Programmen. Wie gemessen
+wurde: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+
 ## Was du brauchst
 
 | Modell | Grafikkarte | RAM (Größe des Installers) | Festplatte | System |

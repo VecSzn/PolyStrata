@@ -79,6 +79,25 @@ Qwen3.8-Flash-Next 用的是 [Strata](https://github.com/Niko1221/Strata) 的引
 在笔记本上跑 Qwen3.6 和 Tiel Coder，PolyStrata 读提示比 llama.cpp b11540 快 2.7 到 3.5 倍，写快 1.5 到 1.8 倍
 （[两次测试](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp)，英文）。
 
+## 占多少内存
+
+从 0.1.45-poly.7 起，这十一个模型的引擎少占你的内存：已经放进显卡的那部分模型文件，它不再留在内存里。在笔记本上，
+Qwen3.6-35B-A3B 读完 32,000 个 token 的提示后，0.1.45-poly.6 占 17.9 GiB，现在占 13.1 GiB，写的速度不变。Linux 上从
+17.8 GiB 降到 12.6 GiB。
+
+想少占得多，在 `strata-<model>.json` 的 `"args"` 列表里加上 `"--ram-experts-mib", "N"`（[在哪](docs/INSTALL.md#where-things-are-stored)），然后重启。两次请求
+之间，引擎只留最近用得最多的 N MiB 专家，其余的交给系统的文件缓存，别的程序可以把这部分内存拿去用：
+
+| Qwen3.6-35B-A3B，笔记本，读完 32K 提示后 | 默认 | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
+| --- | ---: | ---: | ---: |
+| 引擎占的内存 | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
+| 写的速度（token/秒）：短提示后 / 32K 提示后 | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+
+这是单独跑引擎、读完提示后的数。通过服务器用、设 3072、之前还聊过一句短的，是 5.2 GiB；刚启动、第一次回答结束之前会更高
+（3072 时 7.1 GiB）。回答过程中会临时多占一些（这次回答读到的专家），答完就放掉；别的程序要内存时，系统也能提前收走。没留下的专家，等哪个 token 用到时再读回来：系统还缓存着就从缓存读，不在了就从 SSD 读，会慢一些。LFM2.5 的专家更大，设
+3072 时写慢 7% 到 12%。读提示用的显存也少了 350 到 400 MiB：要么给专家缓存（Qwen3.6 显存里的专家从 2,444 个变成 2,712
+个），要么用 `--vram-reserve-mib` 留给别的程序。测法见 [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram)。
+
 ## 你需要什么
 
 | 模型 | 显卡 | 内存（默认规格） | 硬盘 | 系统 |

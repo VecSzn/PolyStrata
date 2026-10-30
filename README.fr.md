@@ -91,6 +91,31 @@ Ce que d'autres ont mesuré sur leurs cartes, et comment comparer avec llama.cpp
 Sur le portable, PolyStrata a lu les prompts 2.7 à 3.5 fois plus vite que llama.cpp b11540 et écrit 1.5 à 1.8
 fois plus vite, avec Qwen3.6 et avec Tiel Coder ([les deux mesures](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp), en anglais).
 
+## Combien de RAM il occupe
+
+Depuis 0.1.45-poly.7, le moteur des onze modèles occupe moins de RAM : il ne garde plus en mémoire les parties du
+fichier du modèle déjà placées sur la carte graphique. Sur le portable, après un prompt de 32,000 tokens,
+Qwen3.6-35B-A3B occupait 17.9 GiB avec 0.1.45-poly.6 et en occupe 13.1 maintenant, en écrivant aussi vite. Sous
+Linux, de 17.8 à 12.6 GiB.
+
+Pour en occuper beaucoup moins, ajoutez `"--ram-experts-mib", "N"` à la liste `"args"` de `strata-<model>.json`
+([où](docs/INSTALL.md#where-things-are-stored)) et redémarrez. Entre deux requêtes, le moteur ne garde alors que les N MiB d'experts qu'il a le plus
+utilisés récemment et laisse les autres au cache de fichiers du système, où d'autres programmes peuvent prendre cette
+mémoire :
+
+| Qwen3.6-35B-A3B sur le portable, après un prompt de 32K | par défaut | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
+| --- | ---: | ---: | ---: |
+| RAM occupée par le moteur | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
+| Écriture, tokens/s : après un prompt court / après celui de 32K | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+
+C'est le moteur seul après le prompt. Via le serveur, avec 3072 et une courte discussion avant, il occupait 5.2 GiB ;
+juste après son démarrage, jusqu'à sa première réponse, il occupe davantage (7.1 GiB avec 3072). Pendant une réponse il occupe davantage, les experts que la réponse lit ; ils repartent ensuite, et le système
+peut les reprendre plus tôt si un autre programme a besoin de la mémoire. Un expert laissé de côté est relu quand un token en a besoin : depuis le cache de fichiers tant que le système l'y
+garde, sinon depuis le SSD, ce qui est plus lent. LFM2.5, dont les experts sont plus gros, écrit 7 à 12 % moins vite
+avec 3072. Le moteur demande aussi 350 à 400 MiB de VRAM de moins pour lire les prompts : le cache d'experts les prend
+(Qwen3.6 garde 2,712 experts en VRAM au lieu de 2,444), ou `--vram-reserve-mib` les laisse aux autres programmes.
+Comment c'est mesuré : [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+
 ## Ce qu'il vous faut
 
 | Modèle | Carte graphique | RAM (taille de l'installeur) | Disque | Système |

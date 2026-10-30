@@ -87,6 +87,30 @@ What others measured on their own cards, and how to compare with llama.cpp on yo
 On the laptop PolyStrata read prompts 2.7 to 3.5 times as fast as llama.cpp b11540 and wrote 1.5 to 1.8 times
 as fast, with Qwen3.6 and with Tiel Coder ([the two runs](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp)).
 
+## How much RAM it keeps
+
+Since 0.1.45-poly.7 the engine of the eleven models keeps less of your RAM: it no longer holds the parts of the
+model file that are already on the graphics card. On the laptop, Qwen3.6-35B-A3B after a 32,000-token prompt held
+17.9 GiB with 0.1.45-poly.6 and holds 13.1 GiB now, and writes as fast. Under Linux it went from 17.8 to 12.6 GiB.
+
+To keep much less, add `"--ram-experts-mib", "N"` to the `"args"` list of `strata-<model>.json`
+([where](docs/INSTALL.md#where-things-are-stored)) and restart. Between requests the engine then keeps only the N MiB
+of experts it used most lately, and leaves the others to the system's file cache, where other programs can take
+that memory:
+
+| Qwen3.6-35B-A3B on the laptop, after a 32K prompt | default | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
+| --- | ---: | ---: | ---: |
+| RAM the engine holds | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
+| Writes, tokens/s: after a short prompt / after the 32K one | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+
+That is the engine alone after the prompt. Through the server, with 3072 and a short chat before it, it held 5.2 GiB;
+right after it starts, until its first answer, it holds more (7.1 GiB with 3072). While it answers it holds more, the experts the answer reads; they go when it is done, and the system can
+take them back sooner if another program needs the memory. An expert it left out is read back when a token needs it: from the file cache while the system keeps it there, from
+the SSD when it does not, which is slower. LFM2.5, whose experts are larger, writes 7 to 12% slower with 3072. The
+engine also needs 350 to 400 MiB less VRAM for reading prompts: the expert cache takes it (Qwen3.6 keeps 2,712
+experts in VRAM instead of 2,444), or `--vram-reserve-mib` leaves it to other programs.
+How it was measured: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+
 ## What you need
 
 | Model | Graphics card | RAM (the installer's size) | Disk | System |

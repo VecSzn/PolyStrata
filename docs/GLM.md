@@ -251,7 +251,7 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--serve` | | take requests from the server (the server passes this) |
 | `--max-context N` | 8192 | tokens a conversation can hold |
 | `--threads N` | all usable | CPU threads for the experts that are not in VRAM |
-| `--vram-reserve-mib N` | a thirty-second of the card, 256 to 768, or a sixteenth, 512 to 1024, kept whole, when the PC's free RAM is within 4 GiB of the model's files; else half of it after the first request | VRAM left free beside the expert cache |
+| `--vram-reserve-mib N` | a thirty-second of the card, 256 to 768, or a sixteenth, 512 to 1024, kept whole, when the PC's free RAM is within 5 GiB of the model's files; else half of it after the first request | VRAM left free beside the expert cache |
 | `--layer-split S` | the first card alone | the model's layers across the cards the engine sees: `auto` (by each card's free VRAM) or the first layer of each later card, as `20` or `20,30` ([MULTI_GPU.md](MULTI_GPU.md#the-strata-poly-models)) |
 | `--expert-profile FILE` | | expert use counts, read at the start and written back after an answer, every 10 seconds at most, and at the end |
 | `--no-gpu-experts` | | keep every routed expert on the CPU |
@@ -266,7 +266,9 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--kv-whole` | on an AMD card | give the attention caches VRAM for the whole context at load, not as the conversation grows; setup writes it for an AMD card, where ROCm keeps the VRAM the expert cache gives back ([AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta)) |
 | `--kv fmt` | fp16 | the K and V attention caches' format: `fp16` (default, unchanged); `q8_0` (ggml Q8_0 blocks: one fp16 scale a 32-value block of int8 codes: half the KV VRAM, the same answers on the tested models; `qwen35moe`'s); `int8` / `int8k` (Gemma 4's: the same rule in two arrays, so a reader takes four codes to a load; `int8k` keeps only the keys' side quantized) ([Q8_KV.md](Q8_KV.md)) |
 | `--prompt-batch N` | 1024 | prompt tokens read at a time, 1 to 4096; about 1.4 MiB of VRAM each |
-| `--stage-mib N` | 2048 | VRAM the experts outside the cache pass through while a prompt is read |
+| `--stage-mib N` | 128 on an NVIDIA card where a longer read can widen it (one card), else 2048 | VRAM the experts outside the cache pass through while a prompt is read |
+| `--stage-read-mib N` | 2048 with the 128 MiB `--stage-mib` default, else 0 | a prompt read of several batches widens the staging buffer to N MiB (at most a layer's experts) with VRAM the expert cache lends it until the answer starts; 0 = never |
+| `--ram-experts-mib N` | all of them | the experts outside VRAM kept in RAM between requests, the most used first; the rest stay in the file cache for other programs to take and are read back when a token needs them |
 | `--stage-ahead N` | 1024 | from N tokens, a batch copies those experts before the layer has chosen, as does every batch of a prompt of N tokens or more that is read several at a time; 0 = never |
 | `--cpu-share F` | as the times say | in a batch of fewer tokens than `--stage-ahead`, the share of the experts outside VRAM that the CPU computes while the others are copied: the ones the fewest tokens chose; 0 = none |
 | `--prompt-cache N` | 6 | checkpoints kept of a conversation; 0 = only a next turn is not read again |

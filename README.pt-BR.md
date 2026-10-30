@@ -90,6 +90,30 @@ O que outras pessoas mediram nas próprias placas, e como comparar com o llama.c
 No notebook, o PolyStrata leu os prompts de 2.7 a 3.5 vezes mais rápido que o llama.cpp b11540 e escreveu de
 1.5 a 1.8 vezes mais rápido, com o Qwen3.6 e com o Tiel Coder ([as duas medições](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp), em inglês).
 
+## Quanta RAM ele ocupa
+
+Desde a 0.1.45-poly.7, o motor dos onze modelos ocupa menos RAM: ele não guarda mais na memória as partes do arquivo
+do modelo que já estão na placa de vídeo. No notebook, depois de um prompt de 32,000 tokens, o Qwen3.6-35B-A3B ocupava
+17.9 GiB com a 0.1.45-poly.6 e agora ocupa 13.1 GiB, escrevendo na mesma velocidade. No Linux, foi de 17.8 para
+12.6 GiB.
+
+Para ocupar bem menos, adicione `"--ram-experts-mib", "N"` à lista `"args"` do `strata-<model>.json` ([onde](docs/INSTALL.md#where-things-are-stored)) e
+reinicie. Entre uma requisição e outra, o motor guarda só os N MiB de experts que mais usou recentemente e deixa os
+outros para o cache de arquivos do sistema, onde outros programas podem usar essa memória:
+
+| Qwen3.6-35B-A3B no notebook, depois de um prompt de 32K | padrão | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
+| --- | ---: | ---: | ---: |
+| RAM que o motor ocupa | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
+| Escreve, tokens/s: depois de um prompt curto / depois do de 32K | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+
+Esse é o motor sozinho depois do prompt. Pelo servidor, com 3072 e uma conversa curta antes, ocupava 5.2 GiB;
+logo depois de iniciar, até a primeira resposta, ocupa mais (7.1 GiB com 3072). Enquanto responde, ocupa mais, os experts que a resposta lê; eles saem quando ela termina, e o sistema pode
+pegá-los de volta antes se outro programa precisar da memória. Um expert que ficou de fora é lido de novo quando um token precisa dele: do cache de arquivos enquanto o sistema o
+mantiver lá, senão do SSD, o que é mais lento. O LFM2.5, cujos experts são maiores, escreve de 7 a 12% mais devagar
+com 3072. O motor também precisa de 350 a 400 MiB a menos de VRAM para ler prompts: o cache de experts fica com eles
+(o Qwen3.6 mantém 2,712 experts na VRAM em vez de 2,444), ou `--vram-reserve-mib` os deixa para outros programas.
+Como foi medido: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+
 ## Do que você precisa
 
 | Modelo | Placa de vídeo | RAM (tamanho do instalador) | Disco | Sistema |
