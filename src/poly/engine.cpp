@@ -37,6 +37,7 @@
 
 #ifdef __linux__
 #include <sched.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -1998,13 +1999,26 @@ void Engine::load(const Options& o) {
     }
     const int threads = opt_.threads > 0 ? opt_.threads : usable_cpus();
     mind_memory();
-    // the routed experts in the mapped files, and of them the ones the CPU reads: those the card does not have
+    // the routed experts in the mapped files, and of them the ones the CPU reads and keeps: those the card does not
+    // have, as many as Options::ram_experts_mib holds
     std::vector<std::pair<const uint8_t*, size_t>> spans, cpu;
     const auto to = [](auto& v) { return [&v](const uint8_t* p, size_t n) { v.emplace_back(p, n); }; };
-    for (const Layer& L : layers_) {
+    const std::vector<uint8_t> keep = ram_keep();
+    if (opt_.ram_experts_mib >= 0) {
+        kept_ = keep;
+        for (const Shards* sh : {gg_.get(), dg_.get()}) {
+            if (!sh) continue;
+            const auto v = sh->views();
+            for (size_t i = 0; i < v.size(); ++i)
+                if (v[i].first) views_.push_back({v[i].first, v[i].second, sh->paths()[i]});
+        }
+    }
+    for (size_t il = 0; il < layers_.size(); ++il) {
+        const Layer& L = layers_[il];
         if (!L.moe) continue;
         expert_bytes(L, 0, n_expert_, to(spans));
-        expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e]; }, to(cpu));
+        const uint8_t* k = keep.data() + il * (size_t) n_expert_;
+        expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e] && k[e]; }, to(cpu));
     }
     if (!workers_) {   // a later card's engine has the first one's
         if (opt_.stay_near) {   // before any thread that reads the experts is started
@@ -2310,8 +2324,8 @@ void Engine::load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t 
 // slot of the least used one), and a page brought back while an answer is written costs that answer: with every
 // cached expert's pages dropped at load, LFM2.5's first short chat moved 624 of its 838 cached experts out and
 // wrote at 70 tokens/s in place of 80.  So of the card's experts only the half used most lately go, the last to
-// move out (the same chat at 90 tokens/s, as with nothing dropped).  The pinned rows of a long read go too: 256
-// MiB after Qwen3.6's 32K prompt, held for the next one that long.
+// move out (the same chat at 90 tokens/s, as with nothing dropped).  The CPU's experts past the RAM budget go too,
+// and the pinned rows of a long read: 256 MiB after Qwen3.6's 32K prompt, held for the next one that long.
 void Engine::trim() {
     std::vector<std::pair<float, std::pair<int, int>>> held;   // recent use, layer and expert
     for (int il = 0; il < (int) layers_.size(); ++il)
@@ -2325,10 +2339,106 @@ void Engine::trim() {
     for (size_t i = 0; i < n; ++i)
         expert_bytes(layers_[(size_t) held[i].second.first], held[i].second.second, held[i].second.second + 1,
                      drop_pages);
+    if (opt_.ram_experts_mib >= 0) {   // and the CPU's experts past the budget
+        kept_ = ram_keep();
+        for (size_t il = 0; il < layers_.size(); ++il) {
+            const uint8_t* k = kept_.data() + il * (size_t) n_expert_;
+            const Layer& L = layers_[il];
+            if (L.moe) expert_runs(L, n_expert_, [&](int e) { return !k[e] && !L.slot[(size_t) e]; }, drop_pages);
+        }
+    }
     hfree(h_res_);
     h_res_ = nullptr;
     h_res_rows_ = 0;
     if (next_) next_->trim();
+}
+
+// n bytes of the mapped files from src into dst, read through the file cache instead of the mapping, so that the
+// pages stay out of this process's working set; false when src is in none of the files or the read fails.  A
+// thread keeps a handle to each file.  For the experts the RAM budget leaves out (Options::ram_experts_mib), which
+// a prompt batch copies to the card: through the mapping they came back into the working set a fault at a time.
+bool Engine::read_file(uint8_t* dst, const uint8_t* src, size_t n) const {
+    const FileView* v = nullptr;
+    for (const FileView& f : views_)
+        if (src >= f.base && src + n <= f.base + f.bytes) v = &f;
+    if (!v) return false;
+    const uint64_t off = (uint64_t) (src - v->base);
+#ifdef _WIN32
+    struct Handles {
+        std::map<std::string, HANDLE> h;
+        ~Handles() {
+            for (auto& [path, fh] : h) CloseHandle(fh);
+        }
+    };
+    thread_local Handles mine;
+    HANDLE& fh = mine.h[v->path];
+    if (!fh) fh = CreateFileA(v->path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (fh == INVALID_HANDLE_VALUE) return false;
+    for (size_t done = 0; done < n;) {
+        OVERLAPPED o{};
+        o.Offset = (DWORD) (off + done);
+        o.OffsetHigh = (DWORD) ((off + done) >> 32);
+        DWORD got = 0;
+        const DWORD want = (DWORD) std::min<size_t>(n - done, size_t(1) << 30);
+        if (!ReadFile(fh, dst + done, want, &got, &o) || got == 0) return false;
+        done += got;
+    }
+#else
+    struct Fds {
+        std::map<std::string, int> fd;
+        ~Fds() {
+            for (auto& [path, f] : fd)
+                if (f >= 0) ::close(f);
+        }
+    };
+    thread_local Fds mine;
+    auto it = mine.fd.find(v->path);
+    if (it == mine.fd.end()) it = mine.fd.emplace(v->path, ::open(v->path.c_str(), O_RDONLY | O_CLOEXEC)).first;
+    if (it->second < 0) return false;
+    for (size_t done = 0; done < n;) {
+        const ssize_t got = ::pread(it->second, dst + done, n - done, (off_t) (off + done));
+        if (got <= 0) return false;
+        done += (size_t) got;
+    }
+#endif
+    return true;
+}
+
+// The CPU's experts this process keeps in memory, by (layer, expert): the most used lately, then by the profile's
+// and this run's counts, as many as Options::ram_experts_mib holds; every one without a budget.  The card's are
+// none of them: one that leaves the cache before the next trim() (shrink_cache() as the attention caches grow)
+// is the CPU's from then on, and was not chosen.
+std::vector<uint8_t> Engine::ram_keep() const {
+    const size_t ne = (size_t) n_expert_;
+    std::vector<uint8_t> keep(layers_.size() * ne, 1);
+    if (opt_.ram_experts_mib < 0) return keep;
+    std::fill(keep.begin(), keep.end(), 0);
+    struct Cand {
+        float recent;
+        int64_t used;
+        size_t i;
+    };
+    std::vector<Cand> cands;
+    for (size_t il = 0; il < layers_.size(); ++il) {
+        if (!layers_[il].moe) continue;
+        for (size_t e = 0; e < ne; ++e) {
+            const size_t i = il * ne + e;
+            if (layers_[il].slot[e]) continue;
+            cands.push_back({recent_.empty() ? 0.f : recent_[i], (prior_.empty() ? 0 : prior_[i]) + use_[i], i});
+        }
+    }
+    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+        return a.recent != b.recent ? a.recent > b.recent : a.used > b.used;
+    });
+    size_t room = (size_t) opt_.ram_experts_mib << 20;
+    for (const Cand& c : cands) {
+        size_t bytes = 0;
+        expert_bytes(layers_[c.i / ne], 0, 1, [&](const uint8_t*, size_t n) { bytes += n; });
+        if (bytes > room) break;
+        room -= bytes;
+        keep[c.i] = 1;
+    }
+    return keep;
 }
 
 const Stats& Engine::stats() const {
@@ -2691,11 +2801,17 @@ void Engine::stage(const Layer& L, const int32_t* experts, int m, void* stream, 
         uint8_t* h = h_stage_[stage_turn_];
         const cudaEvent_t left = (cudaEvent_t) ev_stage_[stage_turn_];
         ck(cudaEventSynchronize(left), "expert staging");
+        // an expert the RAM budget leaves out is read from the file, not the mapping (read_file())
+        const uint8_t* kept = kept_.empty() ? nullptr : kept_.data() + (size_t) (&L - layers_.data()) * n_expert_;
         const auto copy = [&](int i) {
             const size_t j = (size_t) i / 3, e = (size_t) experts[(size_t) j0 + j];
-            if (i % 3 == 0) std::memcpy(h + j * step, L.exp_gate + e * L.gu_stride, L.gu_bytes);
-            else if (i % 3 == 1) std::memcpy(h + j * step + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
-            else std::memcpy(h + c * step + j * L.d_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
+            const auto get = [&](uint8_t* dst, const uint8_t* src, size_t n) {
+                if (kept && !kept[e] && read_file(dst, src, n)) return;
+                std::memcpy(dst, src, n);
+            };
+            if (i % 3 == 0) get(h + j * step, L.exp_gate + e * L.gu_stride, L.gu_bytes);
+            else if (i % 3 == 1) get(h + j * step + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
+            else get(h + c * step + j * L.d_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
         };
         (alone ? *stagers_ : *workers_).run((int) (3 * c), copy);
         ck(cudaMemcpyAsync(stage_ + (size_t) j0 * step, h, c * step, cudaMemcpyHostToDevice, cs(stream)),
@@ -2811,8 +2927,10 @@ void Engine::moe_rows(Layer& L, int il, int n) {
     on_cpu_.assign((size_t) n_expert_, 0);
     if (spare) {
         spare_.clear();
+        // not the ones the RAM budget leaves out: the card gets them through the staging buffer, read from the file
+        const uint8_t* kept = kept_.empty() ? nullptr : kept_.data() + (size_t) il * n_expert_;
         for (int e = 0; e < n_expert_; ++e)
-            if (count_[(size_t) e] > 0 && !L.slot[(size_t) e]) spare_.push_back(e);
+            if (count_[(size_t) e] > 0 && !L.slot[(size_t) e] && (!kept || kept[e])) spare_.push_back(e);
         std::stable_sort(spare_.begin(), spare_.end(),
                          [&](int32_t a, int32_t b) { return count_[(size_t) a] < count_[(size_t) b]; });
         n_spare = (int) spare_.size();

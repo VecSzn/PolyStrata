@@ -72,6 +72,10 @@ struct Options {
                                   ///< below 0: as the two took the time between them; 0: none
     int expert_swaps = 64;        ///< experts on their way into the cache at a time while an answer is written, each
                                   ///< to the slot of one the answer uses less; 0: the cache stays as it was loaded
+    int64_t ram_experts_mib = -1; ///< the experts outside VRAM that stay in this process's memory between requests,
+                                  ///< the most used first; the others are left to the file cache, which gives them to
+                                  ///< whatever needs the memory, and come back from it or the disk when a token routes
+                                  ///< to them.  Below 0: all of them
     bool stay_near = true;        ///< with several NUMA nodes, keep the CPU threads on the one that holds the experts
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
@@ -305,7 +309,8 @@ public:
 
     const Stats& stats() const;
     /// Between requests: of the experts the card has, the pages of the half used most lately leave this process's
-    /// working set, and the pinned memory only a long prompt needs is given back.
+    /// working set, and so do the CPU's experts past Options::ram_experts_mib; the pinned memory only a long prompt
+    /// needs is given back.
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
@@ -521,6 +526,8 @@ protected:
     void* dmalloc(size_t bytes, const char* what);
     void* hmalloc(size_t bytes, const char* what);
     void hfree(void* p);
+    std::vector<uint8_t> ram_keep() const;
+    bool read_file(uint8_t* dst, const uint8_t* src, size_t n) const;
     /// A write into VRAM, on st_.  Every one of them goes through these two or is an async call on a stream of
     /// its own: see the note on h2d() in engine.cpp.
     void h2d(void* dst, const void* src, size_t bytes);
@@ -806,6 +813,13 @@ protected:
     std::vector<Refill> refill_;   ///< empty slots of the cache the follower is to fill (grow_cache(later))
     /// the dense tensors' bytes in the mapped files, which leave the working set once they are on the card (load())
     std::vector<std::pair<const uint8_t*, size_t>> uploaded_;
+    std::vector<uint8_t> kept_;   ///< with Options::ram_experts_mib: ram_keep() as load() or trim() last made it
+    struct FileView {
+        const uint8_t* base;
+        size_t bytes;
+        std::string path;
+    };
+    std::vector<FileView> views_;   ///< the mapped files, for read_file()
     std::mutex swap_m_;
     std::condition_variable swap_cv_;
     bool swap_quit_ = false;
