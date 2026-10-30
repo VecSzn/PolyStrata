@@ -107,6 +107,9 @@ expert outside the cache), but I have not run a fault-injection test of these tw
 
 ## The image encoder on demand
 
+An encoder on the CPU (`"gpu": false` in the `"vision"` section) starts with the first picture and stops when idle by
+default, as below but without the `VRAM` commands: it takes no VRAM. `"elastic": false` keeps it running.
+
 With `"elastic": true` in the config's `"vision"` section (and `"vram_elastic": true`; without it the server says so
 and starts the encoder with the model, as before) the GPU encoder is not started with the server or with a load:
 

@@ -1685,15 +1685,19 @@ like `nvidia-smi`) to the `"vision"` section of `strata-<model>.json`: the encod
 `--vram-reserve-mib` in `"args"` to 700 as well, so the engine's cards keep that VRAM for the expert cache. The
 encoder's card needs code in the ready-made encoder (RTX 20/30/40/50).
 
-**The encoder only while there are pictures (opt-in, `"elastic": true` in the `"vision"` section, with the config's
-`"vram_elastic": true`; [VRAM_ELASTIC.md](VRAM_ELASTIC.md#the-image-encoder-on-demand)):** the GPU encoder does not start
+**The encoder only while there are pictures (the default on the CPU; on the GPU opt-in, `"elastic": true` in the
+`"vision"` section, with the config's `"vram_elastic": true`;
+[VRAM_ELASTIC.md](VRAM_ELASTIC.md#the-image-encoder-on-demand)):** an encoder on the CPU (`"gpu": false`, what setup
+writes for a card under 24 GB) starts with the first picture and stops after `"elastic_idle_s"` (default 120) without
+one; `"elastic": false` keeps it running. Qwen3.6's held 1.08 GiB of RAM and started in 1 to 2 s on the laptop
+(i7-14700HX). The GPU encoder does not start
 with the server, so the expert cache keeps all of the VRAM. The first picture's turn makes the cache keep
 `"elastic_mib"` (default 2048) free and starts the encoder there (a few seconds); later pictures use it as it is, and
 after `"elastic_idle_s"` (default 120) without a picture it stops and the cache takes the VRAM back. Measured on an R9700
 32 GB (gfx1201, Linux, UD-IQ4_XS, the BF16 encoder at up to 1,024 tokens, #2189 for HIP's virtual memory): the encoder
 took 1,339 MiB and started in 4.7 s (2.7 s the next time); a request with one picture took 8.6 s with the start and
 5.0 s on a later cold start, and 2 / 5 / 10 pictures with the encoder running took 3.8 / 5.6 / 9.0 s (~0.45 s to encode
-each, the same as on a second card). Without the key nothing changes.
+each, the same as on a second card). Without the key a GPU encoder runs as before.
 
 ### Sending a picture
 

@@ -110,13 +110,28 @@ class Elastic(unittest.TestCase):
         self.assertFalse(self.svc.vision_held)
         self.assertFalse(self.vision.up)
 
+    def test_an_encoder_on_the_cpu_starts_and_stops_without_vram(self):
+        self.vision.on_cpu = True
+        self.picture()
+        self.assertEqual(self.vision.starts, 1)
+        self.assertEqual(self.engine.calls, [])             # it takes no VRAM, so the cache is left as it is
+        self.assertFalse(self.svc.vision_held)
+        self.svc.last_image_at = 0
+        self.assertEqual(self.svc._vision_idle_down(), "down")
+        self.assertFalse(self.vision.up)
+        self.assertEqual(self.engine.calls, [])
+
     def test_the_config_keys(self):
-        v = Vision({"exe": "e", "mmproj": "m", "model": "t", "elastic": True, "elastic_mib": 3000,
+        v = Vision({"exe": "e", "mmproj": "m", "model": "t", "gpu": True, "elastic": True, "elastic_mib": 3000,
                     "elastic_idle_s": 30}, lazy=False)          # elastic: nothing starts with the server
         self.assertTrue(v.elastic and v.elastic_mib == 3000 and v.elastic_idle_s == 30 and not v.alive())
-        v = Vision({"exe": "e", "mmproj": "m", "model": "t"}, lazy=True)
+        v = Vision({"exe": "e", "mmproj": "m", "model": "t", "gpu": True}, lazy=True)
         self.assertFalse(v.elastic)
         self.assertEqual((v.elastic_mib, v.elastic_idle_s), (2048, 120.0))
+        v = Vision({"exe": "e", "mmproj": "m", "model": "t", "gpu": False}, lazy=False)
+        self.assertTrue(v.elastic and v.on_cpu and not v.alive())   # on the CPU by default
+        v = Vision({"exe": "e", "mmproj": "m", "model": "t", "elastic": False}, lazy=True)
+        self.assertFalse(v.elastic)                         # and kept running when the config says so
 
 
 if __name__ == "__main__":

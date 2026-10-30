@@ -2352,6 +2352,15 @@ class Vision:
                 pass
         return Path(tempfile.mkdtemp(prefix="strata-vision-"))
 
+    @staticmethod
+    def elastic_of(cfg: dict) -> bool:
+        """Whether the encoder starts with the first picture and stops after elastic_idle_s without one.  On the GPU
+        it is opt-in (the vision section's "elastic": true, with the config's "vram_elastic"), and while it runs the
+        engine's expert cache keeps elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down).  On the
+        CPU it is the default ("elastic": false keeps it running): Qwen3.6's encoder holds 1.08 GiB of RAM and starts
+        in 1 to 2 s."""
+        return cfg.get("elastic") is True or ("elastic" not in cfg and not cfg.get("gpu"))
+
     def __init__(self, cfg: dict, log=None, env: dict | None = None, lazy: bool = False):
         absolute = lambda p: os.path.abspath(p) if os.path.dirname(str(p)) else p   # the encoder runs in its own dir (#480)  # noqa: E731
         args = [absolute(cfg["exe"]), "--mmproj", absolute(cfg["mmproj"]), "--model", absolute(cfg["model"])]
@@ -2369,10 +2378,8 @@ class Vision:
         self.stopped = True
         self.lock = threading.Lock()
         self.cache: dict[str, tuple[Path, int]] = {}
-        # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
-        # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
-        # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
-        self.elastic = cfg.get("elastic") is True
+        self.on_cpu = not cfg.get("gpu")
+        self.elastic = self.elastic_of(cfg)
         self.elastic_mib = int(cfg.get("elastic_mib") or 2048)
         self.elastic_idle_s = float(cfg.get("elastic_idle_s") or 120)
         if not lazy and not self.elastic:
@@ -3773,11 +3780,11 @@ class Service:
         """The image turn's start for an elastic encoder that is not running (the caller holds self.fifo): the expert
         cache first keeps the encoder's elastic_mib of VRAM free on top of the reserve, then the encoder starts (load and
         warm-up, a few seconds).  If the cache cannot shrink (an engine without --vram-elastic, the resident low-RAM mode)
-        the encoder starts anyway, as a non-elastic one would."""
+        the encoder starts anyway, as a non-elastic one would.  An encoder on the CPU takes no VRAM: it just starts."""
         v = self.vision
         if not getattr(v, "elastic", False) or v.alive():
             return
-        if hasattr(self.engine, "vram") and self.loaded():
+        if not getattr(v, "on_cpu", False) and hasattr(self.engine, "vram") and self.loaded():
             try:
                 out = self.engine.vram((self._engine_reserve() or 0) + v.elastic_mib)
                 self.vision_held = True
@@ -3822,7 +3829,9 @@ class Service:
         if not getattr(v, "elastic", False):
             return
         print(f"[strata] images: the image encoder starts with the first picture and stops after {v.elastic_idle_s:g} s "
-              f"without one; while it runs the expert cache keeps {v.elastic_mib} MiB free for it", flush=True)
+              "without one; " + ("it runs on the CPU, and its RAM is free in between ('\"elastic\": false' in the vision "
+                                 "section keeps it running)" if getattr(v, "on_cpu", False) else
+                                 f"while it runs the expert cache keeps {v.elastic_mib} MiB free for it"), flush=True)
 
         def loop():
             while True:
@@ -7422,18 +7431,17 @@ def start_model(cfg: dict, tok, lazy: bool = False):
         pretty = ", ".join(f"{k}={v}" for k, v in sampling_defaults.items())
         print(f"[strata] sampling defaults from the config: {pretty}", flush=True)
     if cfg.get("vision"):
-        elastic = cfg["vision"].get("elastic") is True and cfg.get("vram_elastic") is True
-        print("the vision encoder starts with the first picture (elastic) ..." if elastic else
-              "loading the vision encoder ..." if not lazy else
-              "vision encoder unloaded; it starts with the model ...", flush=True)
         # relative paths are the config's cwd's, as for the engine below
         vcfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
                     if k in ("exe", "mmproj", "model") and isinstance(v, str) and not os.path.isabs(v) else v)
                 for k, v in cfg["vision"].items()}
-        if vcfg.get("elastic") is True and cfg.get("vram_elastic") is not True:
+        if vcfg.get("elastic") is True and vcfg.get("gpu") and cfg.get("vram_elastic") is not True:
             print('[strata] the vision section\'s "elastic" needs "vram_elastic": true (the expert cache gives the '
                   "encoder its VRAM): the encoder starts with the model instead", flush=True)
             vcfg["elastic"] = False
+        print("the vision encoder starts with the first picture (elastic) ..." if Vision.elastic_of(vcfg) else
+              "loading the vision encoder ..." if not lazy else
+              "vision encoder unloaded; it starts with the model ...", flush=True)
         vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None,
                         env=vision_env(cfg, env), lazy=lazy)
     print("model unloaded; the first request loads it ..." if lazy else

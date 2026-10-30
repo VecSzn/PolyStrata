@@ -5826,7 +5826,8 @@ class VisionArgs(unittest.TestCase):
             return Proc()
 
         with mock.patch.object(server.subprocess, "Popen", popen), mock.patch.object(server, "contain"):
-            server.Vision({"exe": "strata-vision", "mmproj": "m.gguf", "model": "t.gguf", **cfg})
+            # kept running: on the CPU an encoder starts with the first picture by default
+            server.Vision({"exe": "strata-vision", "mmproj": "m.gguf", "model": "t.gguf", "elastic": False, **cfg})
         return seen[0]
 
     def test_min_tokens_is_passed_only_when_set(self):
