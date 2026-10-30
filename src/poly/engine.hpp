@@ -310,7 +310,8 @@ public:
     const Stats& stats() const;
     /// Between requests, and once after the load: of the experts the card has, the pages of the half used most
     /// lately leave this process's working set (after the load only under Options::ram_experts_mib), and so do the
-    /// CPU's experts past Options::ram_experts_mib; the pinned memory only a long prompt needs is given back.
+    /// CPU's experts past Options::ram_experts_mib and cuBLAS's pages; the pinned memory only a long prompt needs is
+    /// given back.
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }

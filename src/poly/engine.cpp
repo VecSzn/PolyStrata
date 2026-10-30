@@ -46,6 +46,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <psapi.h>
 #endif
 
 namespace strata::poly {
@@ -248,6 +249,46 @@ void drop_pages(const uint8_t* p, size_t n) {
     VirtualUnlock((void*) a, b - a);   // pages that are not locked leave the working set (and it returns FALSE)
 #else
     madvise((void*) a, b - a, MADV_DONTNEED);   // a private mapping that is never written reads the file again
+#endif
+}
+
+// cuBLAS's libraries: loaded at start, they stayed in the working set after that (135 MiB on the laptop, 68 MiB
+// under Linux), though a request runs little of them.  Their pages leave it as drop_pages()'s do, and what a
+// request runs comes back from the file cache.  Not the engine's own image: under Linux its code went to the disk
+// with MADV_PAGEOUT and came back from it on the next request, 4 ms of a short prompt's 85.
+void drop_images() {
+#ifdef _WIN32
+    const HANDLE self = GetCurrentProcess();
+    HMODULE mods[1024];
+    DWORD got = 0;
+    if (!EnumProcessModules(self, mods, sizeof mods, &got)) return;
+    for (DWORD i = 0; i < std::min<DWORD>(got / sizeof(HMODULE), 1024); ++i) {
+        char name[MAX_PATH];
+        if (!GetModuleBaseNameA(self, mods[i], name, sizeof name) || _strnicmp(name, "cublas", 6) != 0) continue;
+        MODULEINFO mi{};
+        if (!GetModuleInformation(self, mods[i], &mi, sizeof mi)) continue;
+        const uint8_t* p = (const uint8_t*) mi.lpBaseOfDll;
+        const uint8_t* end = p + mi.SizeOfImage;
+        MEMORY_BASIC_INFORMATION r;
+        while (p < end && VirtualQuery(p, &r, sizeof r) == sizeof r) {   // one call a region: they differ in rights
+            if (r.State == MEM_COMMIT) VirtualUnlock(r.BaseAddress, r.RegionSize);
+            p = (const uint8_t*) r.BaseAddress + r.RegionSize;
+        }
+    }
+#else
+    // Their code only: it is never written, so MADV_DONTNEED leaves it in the file cache.  Their other read-only
+    // pages may be relocated private copies, which MADV_DONTNEED would throw away.
+    FILE* f = std::fopen("/proc/self/maps", "r");
+    if (!f) return;
+    char line[4352];
+    while (std::fgets(line, sizeof line, f)) {
+        unsigned long a = 0, b = 0;
+        char rights[8] = {};
+        if (std::sscanf(line, "%lx-%lx %7s", &a, &b, rights) == 3 && std::strcmp(rights, "r-xp") == 0 &&
+            std::strstr(line, "/libcublas"))
+            madvise((void*) a, b - a, MADV_DONTNEED);
+    }
+    std::fclose(f);
 #endif
 }
 
@@ -2362,6 +2403,7 @@ void Engine::trim() {
     h_res_ = nullptr;
     h_res_rows_ = 0;
     if (next_) next_->trim();
+    else drop_images();   // once, by the last card's engine
 }
 
 // n bytes of the mapped files from src into dst, read through the file cache instead of the mapping, so that the
