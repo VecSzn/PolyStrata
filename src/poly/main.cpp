@@ -906,6 +906,7 @@ int serve(Session& ss) {
                     (long long) r.resume, hits, hits + misses, (long long) r.read);
         std::fflush(stdout);
         engine.trim();
+        ss.kept.release();
         if (admit >= 0) {
             Slot& sl = slots[(size_t) admit];
             const bool goes_on = std::strcmp(r.finish, "length") == 0 && first >= 0 && admit_max > 1 &&
