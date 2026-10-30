@@ -897,6 +897,7 @@ int serve(Session& ss) {
                     r.prompt_ms, r.decode_ms, r.finish, (long long) r.guessed_right, (long long) r.guessed,
                     (long long) r.resume, hits, hits + misses, (long long) r.read);
         std::fflush(stdout);
+        engine.trim();
         if (admit >= 0) {
             Slot& sl = slots[(size_t) admit];
             const bool goes_on = std::strcmp(r.finish, "length") == 0 && first >= 0 && admit_max > 1 &&
@@ -1078,13 +1079,14 @@ void usage() {
                  "                         stays as it was loaded)\n"
                  "  --prompt-batch N       prompt tokens read at a time (default 1024); about 1.4 MiB of VRAM each\n"
                  "  --stage-mib N          VRAM the experts outside the cache pass through in a prompt batch (default\n"
-                 "                         2048, or what a layer's experts take when that is less); with less, more\n"
-                 "                         of them are copied after the layer has routed\n"
+                 "                         128 on an NVIDIA card where a longer read widens it, else 2048; never more\n"
+                 "                         than a layer's experts take); with less, more of them are copied after the\n"
+                 "                         layer has routed\n"
                  "  --stage-ahead N        from N tokens, a batch copies those experts before it routes (default 1024,\n"
                  "                         0 = never)\n"
                  "  --stage-read-mib N     a prompt read of several batches grows the staging buffer to N MiB (at\n"
                  "                         most a layer's experts) with VRAM the expert cache lends it until the\n"
-                 "                         answer starts (default 0 = never)\n"
+                 "                         answer starts (default 2048 with the 128 MiB --stage-mib default; 0 = never)\n"
                  "  --cpu-share F          under that, the share of those experts the CPU computes meanwhile, the\n"
                  "                         ones the fewest tokens chose (default: as the times say; 0 = none)\n"
                  "  --prompt-cache N       checkpoints kept of a conversation, about 150 MB of RAM each (default 6;\n"

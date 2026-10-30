@@ -54,13 +54,14 @@ struct Options {
     // A prompt batch.  More tokens a call and a larger staging buffer read a prompt faster, and both take VRAM
     // that the expert cache, and so decoding, does without.
     int prompt_batch = 1024;      ///< prompt tokens one eval() takes; the scratch is about 1.4 MiB of VRAM a token
-    int stage_mib = 2048;         ///< the buffer the experts that are not cached pass through: by default about
-                                  ///< what a layer of Q2_K experts leaves out of the cache, and never more than
-                                  ///< a layer's experts take
-    int stage_read_mib = 0;       ///< a read of several calls: the staging buffer grows to this, at most what a
+    int stage_mib = 0;            ///< the buffer the experts that are not cached pass through, never more than a
+                                  ///< layer's experts take; 0: 128 where a read can widen it (stage_read_mib) on
+                                  ///< CUDA, else 2048, about what a layer of Q2_K experts leaves out of the cache
+    int stage_read_mib = -1;      ///< a read of several calls: the staging buffer grows to this, at most what a
                                   ///< layer's experts take, with VRAM the expert cache lends it until the read is
                                   ///< done (end_read()), so that each layer's experts are copied once a read, not
-                                  ///< once a call; 0 (or no more than stage_mib): never
+                                  ///< once a call; 0 (or no more than stage_mib): never; below 0: 2048 with the
+                                  ///< 128 MiB default of stage_mib, else never
     int stage_ahead = 1024;       ///< from this many tokens, a call routes to most of a layer's experts, and the
                                   ///< ones that are not cached start their copy before the layer has routed; in a
                                   ///< read of several calls and this many tokens every call does; 0: never.  Under
@@ -303,6 +304,9 @@ public:
     void load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t first, int64_t n);
 
     const Stats& stats() const;
+    /// Between requests: of the experts the card has, the pages of the half used most lately leave this process's
+    /// working set, and the pinned memory only a long prompt needs is given back.
+    void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
     double cached_gib() const { return double(exp_at_) / double(1ull << 30) + (next_ ? next_->cached_gib() : 0); }
@@ -516,6 +520,7 @@ protected:
     int room_key(int n) const;
     void* dmalloc(size_t bytes, const char* what);
     void* hmalloc(size_t bytes, const char* what);
+    void hfree(void* p);
     /// A write into VRAM, on st_.  Every one of them goes through these two or is an async call on a stream of
     /// its own: see the note on h2d() in engine.cpp.
     void h2d(void* dst, const void* src, size_t bytes);
@@ -544,7 +549,8 @@ protected:
     void vmm_unmap(Mapped& m, size_t bytes);
     void vmm_free(Mapped& m);
     void shrink_cache(size_t bytes);
-    int grow_cache(size_t bytes);
+    int grow_cache(size_t bytes, bool later = false);
+    void fill_now();
     void widen_stage();
     void narrow_stage();
     void resize_card_cache(int mib);   ///< resize_cache() and mind_vram() for this engine's card
@@ -682,7 +688,7 @@ protected:
     size_t budget_ = 0;          ///< their VRAM and the expert cache's together, as the cache was filled
     int asked_reserve_mib_ = -1; ///< Options::vram_reserve_mib as load() got it
     int reserve_mib_ = 0;        ///< what the cache was sized to leave free
-    bool ram_tight_ = false;     ///< the machine's RAM is within 4 GiB of the model's files (fill_expert_cache())
+    bool ram_tight_ = false;     ///< the machine's RAM is within 5 GiB of the model's files (fill_expert_cache())
     int minds_ = 0;              ///< mind_vram()'s calls
     int full_cached_ = 0;        ///< the cache as load() filled it: its experts and their bytes
     size_t full_bytes_ = 0;
@@ -790,6 +796,16 @@ protected:
     size_t slot_max_ = 0;            ///< the largest expert of the cache
     void* swap_st_ = nullptr;        ///< the stream of their uploads
     std::thread follower_;
+    static constexpr int kSwapPins = 2;
+    uint8_t* swap_pin_[kSwapPins] = {};   ///< the follower's pinned buffers (follow_loop())
+    void* swap_pin_ev_[kSwapPins] = {};   ///< each one's last upload
+    struct Refill {
+        int il, e;
+        uint8_t* slot;
+    };
+    std::vector<Refill> refill_;   ///< empty slots of the cache the follower is to fill (grow_cache(later))
+    /// the dense tensors' bytes in the mapped files, which leave the working set once they are on the card (load())
+    std::vector<std::pair<const uint8_t*, size_t>> uploaded_;
     std::mutex swap_m_;
     std::condition_variable swap_cv_;
     bool swap_quit_ = false;

@@ -37,6 +37,7 @@
 
 #ifdef __linux__
 #include <sched.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #endif
 #ifdef _WIN32
@@ -190,10 +191,17 @@ void read_cached(const std::vector<std::pair<const uint8_t*, size_t>>& spans, co
 }
 #endif
 
+// A byte of every page of a span of the mapped files, read: its pages come into this process.
+void touch_pages(const uint8_t* p, size_t n) {
+    volatile uint8_t seen = 0;
+    for (size_t at = 0; at < n; at += 4096) seen = (uint8_t) (seen + p[at]);
+    if (n > 0) seen = (uint8_t) (seen + p[n - 1]);   // its last page, when it starts in one
+}
+
 // The mapped file's pages come into this process's page table as they are first read, a fault every few pages,
 // and an expert read through those faults arrives at half the speed: 21.0 against 11.0 ms a token for GLM 5.3
 // Flash's CPU experts on the two-socket Xeon, while every expert a token meets is new to the process.  So one
-// thread reads a byte of every page of the experts, once, beside whatever the engine is doing: the 100 GiB of a
+// thread reads a byte of every page of the CPU's experts, once, beside whatever the engine is doing: the 100 GiB of a
 // model that the file cache holds take it 4 s.  What the cache does not hold is read from the disk here, not
 // while a token waits.
 //
@@ -210,14 +218,58 @@ void map_pages(const std::vector<std::pair<const uint8_t*, size_t>>& spans, cons
 #else
     (void) model;
 #endif
-    constexpr size_t kPage = 4096, kLook = size_t(1) << 24;   // `quit` is looked at every 16 MiB
-    volatile uint8_t seen = 0;
-    for (const auto& s : spans) {
-        for (size_t at = 0; at < s.second; at += kPage) {
-            if (at % kLook == 0 && quit.load(std::memory_order_relaxed)) return;
-            seen = (uint8_t) (seen + s.first[at]);
+    constexpr size_t kLook = size_t(1) << 24;   // `quit` is looked at every 16 MiB
+    for (const auto& s : spans)
+        for (size_t at = 0; at < s.second; at += kLook) {
+            if (quit.load(std::memory_order_relaxed)) return;
+            touch_pages(s.first + at, std::min(kLook, s.second - at));
         }
-        if (s.second > 0) seen = (uint8_t) (seen + s.first[s.second - 1]);   // its last page, when it starts in one
+}
+
+// The whole pages of a span of the mapped files leave this process's memory, for what the card has a copy of and
+// the CPU does not read.  The file cache keeps them (the standby list on Windows, the page cache on Linux): the
+// machine counts them as available and takes them for whatever needs memory, and a read that comes after finds
+// them there without the disk.  After a 32K prompt on the laptop the engine held all 15.9 GiB of Qwen3.6's file,
+// 4.2 GiB of it dense weights and experts the card had; with those dropped, the 11.7 GiB of experts the CPU reads.
+void drop_pages(const uint8_t* p, size_t n) {
+    static const size_t page = [] {
+#ifdef _WIN32
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        return (size_t) si.dwPageSize;
+#else
+        return (size_t) sysconf(_SC_PAGESIZE);
+#endif
+    }();
+    const uintptr_t a = ((uintptr_t) p + page - 1) / page * page, b = ((uintptr_t) p + n) / page * page;
+    if (!p || b <= a) return;
+#ifdef _WIN32
+    VirtualUnlock((void*) a, b - a);   // pages that are not locked leave the working set (and it returns FALSE)
+#else
+    madvise((void*) a, b - a, MADV_DONTNEED);   // a private mapping that is never written reads the file again
+#endif
+}
+
+// Experts [e0, e1) of L in the mapped file, to f(start, bytes): their gates and ups (one span where the file keeps
+// an expert's two in one tensor), and their downs.
+template <class F> void expert_bytes(const Layer& L, int e0, int e1, F&& f) {
+    const size_t n = (size_t) (e1 - e0);
+    f(L.exp_gate + (size_t) e0 * L.gu_stride, n * L.gu_stride);
+    if (L.gu_stride == L.gu_bytes) f(L.exp_up + (size_t) e0 * L.u_stride, n * L.u_stride);
+    f(L.exp_down + (size_t) e0 * L.d_bytes, n * L.d_bytes);
+}
+
+// expert_bytes() of each run of L's experts that take() takes, a run of neighbours in one call
+template <class P, class F> void expert_runs(const Layer& L, int n_expert, P&& take, F&& f) {
+    for (int e = 0; e < n_expert;) {
+        if (!take(e)) {
+            ++e;
+            continue;
+        }
+        int g = e + 1;
+        while (g < n_expert && take(g)) ++g;
+        expert_bytes(L, e, g, f);
+        e = g;
     }
 }
 
@@ -401,7 +453,7 @@ struct Engine::Swap {
     std::atomic<int> at{kFree};
     int il = 0, e = 0;
     uint8_t* slot = nullptr;       // where it goes in VRAM: the slot of the expert it replaces
-    uint8_t* pinned = nullptr;
+    bool adds = false;             // the slot was empty (grow_cache()): the cache holds one more
     cudaEvent_t done = nullptr;    // marks its upload
 };
 
@@ -438,6 +490,8 @@ Engine::~Engine() {
     vmm_free(stage_map_);
     for (void* p : host_allocs_) cudaFreeHost(p);
     for (void* e : {ev_stage_[0], ev_stage_[1], ev_ahead_, ev_free_, ev_in_[0], ev_in_[1], ev_out_[0], ev_out_[1], ev_hr_})
+        if (e) cudaEventDestroy((cudaEvent_t) e);
+    for (void* e : swap_pin_ev_)
         if (e) cudaEventDestroy((cudaEvent_t) e);
     for (void* e : ev_row_)
         if (e) cudaEventDestroy((cudaEvent_t) e);
@@ -479,6 +533,13 @@ void* Engine::hmalloc(size_t bytes, const char* what) {
     ck(e, why.c_str());
     host_allocs_.push_back(p);
     return p;
+}
+
+// What hmalloc() gave, given back.  Null is nothing.
+void Engine::hfree(void* p) {
+    if (!p) return;
+    host_allocs_.erase(std::find(host_allocs_.begin(), host_allocs_.end(), p));
+    ck(cudaFreeHost(p), "freeing pinned memory");
 }
 
 // A write into VRAM and a run of zeros in it, both on st_.
@@ -845,6 +906,7 @@ void Engine::shrink_cache(size_t bytes) {
     size_t cut = arena_.mapped;
     for (size_t i = arena_.pieces.size(); i > 0 && arena_.mapped - cut < bytes; --i) cut -= arena_.pieces[i - 1].second;
     settle_swaps();
+    fill_now();
     ck(cudaStreamSynchronize(cs(st_)), "the expert cache");
     const size_t ne = (size_t) n_expert_, end = cut > kTail ? cut - kTail : 0;   // kTail stays past the last slot
     struct Held {
@@ -1159,6 +1221,7 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
         throw std::runtime_error(t->name + " is " + shape_of(*t) + ", expected [" + std::to_string(n_in) + ", " +
                                  std::to_string(n_out) + "]");
     const size_t bytes = home(*t).payload(*t), count = (size_t) t->elements();
+    if (dense_) uploaded_.emplace_back(home(*t).data(*t), bytes);
     if (want == kGuessMat && !fix && n_in % ggml_blck_size(GGML_TYPE_Q4_0) == 0 &&
         ggml_get_type_traits((ggml_type) t->type)->to_float) {
         const size_t row = ggml_row_size(GGML_TYPE_Q4_0, n_in), out = row * (size_t) n_out;
@@ -1231,15 +1294,18 @@ int64_t Engine::vram_free_mib() const {
 // The cache takes what is free but for a reserve.  What the engine allocates after it comes out of the reserve:
 // the recorded launches and a library's work space took 180 MiB of an 8 GB card in the first request.  Unless the
 // caller names it, the reserve is a thirty-second of the card, between 256 and 768 MiB (mind_vram() keeps what is
-// free near half of it later), or a sixteenth when the machine's RAM is within 4 GiB of the model's files
+// free near half of it later), or a sixteenth when the machine's RAM is within 5 GiB of the model's files
 // (default_reserve_mib()).  Under Windows a card that is asked for more than it has does not refuse: memory
 // moves to the system's, and an answer came at 13 tokens/s where it comes at 30.
+//
+// The line was 4 GiB while the two staging chunks held 1 GiB of pinned memory by now; they hold 128 MiB, and
+// the line moved with them, so that the same PC in the same state keeps the reserve it had.
 void Engine::fill_expert_cache() {
     if (!opt_.gpu_experts || n_moe_ == 0) return;
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
     const size_t ram = ram_available(), files = gg_->bytes() + (dg_ ? dg_->bytes() : 0);
-    ram_tight_ = ram > 0 && files + (4ULL << 30) > ram;
+    ram_tight_ = ram > 0 && files + (5ULL << 30) > ram;
     // 256 MiB at least, whatever was asked: the launches recorded later take theirs out of the reserve (mind_vram())
     reserve_mib_ = opt_.vram_reserve_mib >= 0 ? std::max(opt_.vram_reserve_mib, 256)
                                              : default_reserve_mib(total_b, ram_tight_);
@@ -1335,10 +1401,13 @@ void Engine::start_swaps() {
     cudaStream_t up = nullptr;
     ck(cudaStreamCreateWithFlags(&up, cudaStreamNonBlocking), "cudaStreamCreate");
     swap_st_ = up;
-    for (; n_swap_ < opt_.expert_swaps; ++n_swap_) {
-        Swap& s = swap_[(size_t) n_swap_];
-        s.pinned = (uint8_t*) hmalloc(slot_max_, "pinned memory");
-        ck(cudaEventCreateWithFlags(&s.done, cudaEventDisableTiming), "cudaEventCreate");
+    for (; n_swap_ < opt_.expert_swaps; ++n_swap_)
+        ck(cudaEventCreateWithFlags(&swap_[(size_t) n_swap_].done, cudaEventDisableTiming), "cudaEventCreate");
+    for (int b = 0; b < kSwapPins; ++b) {
+        swap_pin_[b] = (uint8_t*) hmalloc(slot_max_, "pinned memory");
+        cudaEvent_t ev = nullptr;
+        ck(cudaEventCreateWithFlags(&ev, cudaEventDisableTiming), "cudaEventCreate");
+        swap_pin_ev_[b] = ev;
     }
     recent_.assign(use_.size(), 0.f);
     coming_.assign(use_.size(), 0);
@@ -1369,6 +1438,7 @@ void Engine::resize_card_cache(int mib) {
     for (int j = 0; j < n_swap_; ++j) swap_[(size_t) j].at.store(Swap::kFree);
     std::fill(coming_.begin(), coming_.end(), (uint8_t) 0);
     for (Layer& L : layers_) std::fill(L.slot.begin(), L.slot.end(), nullptr);
+    refill_.clear();
     staged_il_ = -1;
     cached_ = 0;
     exp_at_ = 0;
@@ -1462,7 +1532,7 @@ void Engine::narrow_stage() {
     stage_bytes_ = stage_narrow_;
     staged_il_ = -1;
     stage_lent_ = false;
-    if (exp_ && stage_cut_ > 0) grow_cache(stage_cut_);
+    if (exp_ && stage_cut_ > 0) grow_cache(stage_cut_, true);
     stage_cut_ = 0;
 }
 
@@ -1500,11 +1570,13 @@ size_t Engine::other_rows() const {
 
 // `bytes` more VRAM at the cache's end, for the experts it lacks that are used most (use per byte, as
 // fill_expert_cache() chooses), side by side by layer.  VRAM the card does not give is not an error: the cache
-// keeps what was mapped.  Returns the experts it took.
-int Engine::grow_cache(size_t bytes) {
+// keeps what was mapped.  Returns the experts it took.  `later`: the follower uploads them while the answer is
+// written (follow()), in place of a wait here: 57 ms for the 148 experts Gemma 4 lent a read's staging buffer.
+int Engine::grow_cache(size_t bytes, bool later) {
     if (!vmm_ || !exp_) return 0;
     // As shrink_cache(): a frozen answer's cache does not change under it.
     if (freeze_experts_) return 0;
+    later = later && n_swap_ > 0;
     settle_swaps();
     ck(cudaStreamSynchronize(cs(st_)), "the expert cache");
     if (swap_st_) ck(cudaStreamSynchronize(cs(swap_st_)), "the expert cache");
@@ -1546,6 +1618,11 @@ int Engine::grow_cache(size_t bytes) {
         Layer& L = layers_[(size_t) c.il];
         uint8_t* s = exp_ + exp_at_;
         exp_at_ += L.slot_bytes;
+        if (later) {
+            refill_.push_back({c.il, c.e, s});
+            coming_[(size_t) c.il * n_expert_ + c.e] = 1;
+            continue;
+        }
         const size_t e = (size_t) c.e;
         h2d(s, L.exp_gate + e * L.gu_stride, L.gu_bytes);
         h2d(s + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
@@ -1556,6 +1633,22 @@ int Engine::grow_cache(size_t bytes) {
     staged_il_ = -1;
     held_is_budget();
     return (int) taken.size();
+}
+
+// The slots grow_cache() left to the follower that it has not asked for yet, filled here: the cache is about to
+// be cut or sized again, and an empty slot of it is lost to both.
+void Engine::fill_now() {
+    for (const Refill& r : refill_) {
+        Layer& L = layers_[(size_t) r.il];
+        const size_t e = (size_t) r.e;
+        h2d(r.slot, L.exp_gate + e * L.gu_stride, L.gu_bytes);
+        h2d(r.slot + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
+        h2d(r.slot + L.gu2(), L.exp_down + e * L.d_bytes, L.d_bytes);
+        L.slot[e] = r.slot;
+        coming_[(size_t) r.il * n_expert_ + e] = 0;
+        ++cached_;
+    }
+    refill_.clear();
 }
 
 // What a layer copies to the staging buffer ahead of its routing: the experts outside the cache, the most used
@@ -1571,12 +1664,14 @@ void Engine::plan_ahead(Layer& L, int il) {
     L.ahead.resize(std::min(L.ahead.size(), stage_bytes_ / (L.gu_step + L.d_bytes)));
 }
 
-// The follower: an asked-for expert goes from the mapped file to its pinned buffer, and from there to its slot.
-// The file may have to be read for it, which is why this is not the engine's thread.
+// The follower: an asked-for expert goes from the mapped file to a pinned buffer, and from there to its slot.
+// The file may have to be read for it, which is why this is not the engine's thread.  Two buffers take turns: an
+// expert is copied into one while the other uploads, and the upload is the quicker of the two.  (A buffer for
+// each of the 64 uploads that may be asked at once held 515 MiB of LFM2.5's RAM.)
 void Engine::follow_loop() {
     cudaSetDevice(device_);   // a thread starts on card 0
     std::unique_lock<std::mutex> lk(swap_m_);
-    for (;;) {
+    for (int b = 0;; b = (b + 1) % kSwapPins) {
         Swap* s = nullptr;
         swap_cv_.wait(lk, [&] {
             for (int j = 0; j < n_swap_ && !s; ++j)
@@ -1587,11 +1682,16 @@ void Engine::follow_loop() {
         lk.unlock();
         const Layer& L = layers_[(size_t) s->il];
         const size_t e = (size_t) s->e, gu = L.gu_bytes, gu2 = L.gu2();
-        std::memcpy(s->pinned, L.exp_gate + e * L.gu_stride, gu);
-        std::memcpy(s->pinned + gu, L.exp_up + e * L.u_stride, L.u_bytes);
-        std::memcpy(s->pinned + gu2, L.exp_down + e * L.d_bytes, L.d_bytes);
-        cudaError_t err = cudaMemcpyAsync(s->slot, s->pinned, gu2 + L.d_bytes, cudaMemcpyHostToDevice, cs(swap_st_));
+        uint8_t* const h = swap_pin_[b];
+        cudaError_t err = cudaEventSynchronize((cudaEvent_t) swap_pin_ev_[b]);   // h's last upload has left it
+        if (err == cudaSuccess) {
+            std::memcpy(h, L.exp_gate + e * L.gu_stride, gu);
+            std::memcpy(h + gu, L.exp_up + e * L.u_stride, L.u_bytes);
+            std::memcpy(h + gu2, L.exp_down + e * L.d_bytes, L.d_bytes);
+            err = cudaMemcpyAsync(s->slot, h, gu2 + L.d_bytes, cudaMemcpyHostToDevice, cs(swap_st_));
+        }
         if (err == cudaSuccess) err = cudaEventRecord(s->done, cs(swap_st_));
+        if (err == cudaSuccess) err = cudaEventRecord((cudaEvent_t) swap_pin_ev_[b], cs(swap_st_));
         lk.lock();
         if (err != cudaSuccess) {
             swap_error_ = cudaGetErrorString(err);
@@ -1629,6 +1729,8 @@ void Engine::follow(int written) {
             ck(arrived, "expert upload");
             layers_[(size_t) s.il].slot[(size_t) s.e] = s.slot;
             coming_[(size_t) s.il * ne + (size_t) s.e] = 0;
+            cached_ += s.adds;
+            s.adds = false;
             s.at.store(Swap::kFree);
             ++stats_.swapped_experts;
             staged_il_ = -1;   // the staging buffer holds what was not cached
@@ -1638,7 +1740,28 @@ void Engine::follow(int written) {
     if (written <= 0) return;
     const float keep = std::exp2(-(float) written / (float) kSwapHalf);
     for (float& r : recent_) r *= keep;
-    if (n_free == 0) return;
+    // The empty slots grow_cache() left to the uploads go first.
+    bool asked = false;
+    for (int j = 0; j < n_swap_ && !refill_.empty(); ++j) {
+        Swap& s = swap_[(size_t) j];
+        if (s.at.load() != Swap::kFree) continue;
+        const Refill r = refill_.back();
+        refill_.pop_back();
+        s.il = r.il;
+        s.e = r.e;
+        s.slot = r.slot;
+        s.adds = true;
+        s.at.store(Swap::kAsked);
+        asked = true;
+        --n_free;
+    }
+    if (n_free == 0) {
+        if (asked) {
+            { std::lock_guard<std::mutex> l(swap_m_); }
+            swap_cv_.notify_one();
+        }
+        return;
+    }
 
     // One pass over the experts lists, for each slot size, the ones that may come in, the most used first, and
     // the cached ones that may go, the least used first: as many of each as uploads are free, which is all the
@@ -1676,7 +1799,6 @@ void Engine::follow(int written) {
     // An upload goes to the size whose next pair gains most.  A cached expert that has given its slot is no
     // candidate to come in: it was used no more than the cached ones left.
     trade_at_.assign((size_t) n_trade_, 0);
-    bool asked = false;
     for (; n_free > 0; --n_free) {
         int best = -1;
         float gain = 0.f;
@@ -1719,7 +1841,7 @@ void Engine::load(const Options& o) {
     if (opt_.max_context < 16) throw std::runtime_error("the context must be at least 16 tokens");
     if (opt_.prompt_batch < 1 || opt_.prompt_batch > 4096)
         throw std::runtime_error("a prompt batch is 1 to 4096 tokens");
-    if (opt_.stage_mib < 1) throw std::runtime_error("the staging buffer must be at least 1 MiB");
+    if (opt_.stage_mib < 0) throw std::runtime_error("the staging buffer must be at least 1 MiB (0: the default)");
     if (opt_.stage_ahead < 0) throw std::runtime_error("the batch size to stage ahead from cannot be negative");
     if (opt_.expert_swaps < 0 || opt_.expert_swaps > 64)
         throw std::runtime_error("0 to 64 experts can be on their way into the cache at a time");
@@ -1839,6 +1961,9 @@ void Engine::load(const Options& o) {
     // those are done, so that everything after it - a read of what the cache holds, the first request's cover()
     // mapping the attention caches - finds what it expects.
     ck(cudaStreamSynchronize(cs(st_)), "the load");
+    // The card has the dense weights now, and the CPU does not read them again.
+    for (const auto& [p, n] : uploaded_) drop_pages(p, n);
+    uploaded_ = {};
     // A card of a split that has less free beside its layers than the reserve it keeps by default runs out of VRAM
     // in a later request, where one card alone can do nothing else.  It may be that another program held VRAM when
     // the split was made.  A larger reserve asked for (--vram-reserve-mib) only leaves the card without experts.
@@ -1873,12 +1998,13 @@ void Engine::load(const Options& o) {
     }
     const int threads = opt_.threads > 0 ? opt_.threads : usable_cpus();
     mind_memory();
-    std::vector<std::pair<const uint8_t*, size_t>> spans;   // the routed experts in the mapped files
+    // the routed experts in the mapped files, and of them the ones the CPU reads: those the card does not have
+    std::vector<std::pair<const uint8_t*, size_t>> spans, cpu;
+    const auto to = [](auto& v) { return [&v](const uint8_t* p, size_t n) { v.emplace_back(p, n); }; };
     for (const Layer& L : layers_) {
         if (!L.moe) continue;
-        spans.emplace_back(L.exp_gate, (size_t) n_expert_ * L.gu_stride);
-        if (L.gu_stride == L.gu_bytes) spans.emplace_back(L.exp_up, (size_t) n_expert_ * L.u_stride);
-        spans.emplace_back(L.exp_down, (size_t) n_expert_ * L.d_bytes);
+        expert_bytes(L, 0, n_expert_, to(spans));
+        expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e]; }, to(cpu));
     }
     if (!workers_) {   // a later card's engine has the first one's
         if (opt_.stay_near) {   // before any thread that reads the experts is started
@@ -1894,7 +2020,7 @@ void Engine::load(const Options& o) {
     reset();
     // nothing is read from the files when every expert is in VRAM
     if (!all_cached())
-        mapper_ = std::thread([this, spans = std::move(spans)] { map_pages(spans, *gg_, map_quit_); });
+        mapper_ = std::thread([this, cpu = std::move(cpu)] { map_pages(cpu, *gg_, map_quit_); });
 }
 
 void Engine::load_drafter() {
@@ -2039,13 +2165,27 @@ void Engine::alloc() {
         // One layer's experts pass through it at a time, so it never holds more than a layer has.  A model of
         // small experts has a few hundred MiB a layer, and the rest of the default would be VRAM that the
         // expert cache of a small card does without.
-        stage_bytes_ = std::max(std::min((size_t) opt_.stage_mib << 20, (size_t) n_expert_ * one_expert), one_expert);
+        //
+        // By default, where a read can widen it (VMM, one card), it is 128 MiB and a read of several batches
+        // widens it to a layer: it is the expert cache's VRAM while an answer is written.  On the laptop Gemma 4
+        // cached 1,166 experts in place of 1,013 and Qwen3.6 2,712 in place of 2,444; prompts of 3,000 to 6,000
+        // tokens read up to 2% slower.  A batch alone (up to --prompt-batch tokens) reads with the narrow one: 300
+        // and 1,000 tokens no slower.  Without the widening, 128 MiB read 6,000 tokens 20% slower.  ROCm keeps the old
+        // default: it gives back VRAM only with its addresses (vmm_unmap()), and a read's widening is untested there.
+        const bool widens = vmm_ && !split_;
+#ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
+        const bool lend = false;
+#else
+        const bool lend = widens;
+#endif
+        const int stage_mib = opt_.stage_mib > 0 ? opt_.stage_mib : lend ? 128 : 2048;
+        const int read_mib = opt_.stage_read_mib >= 0 ? opt_.stage_read_mib : opt_.stage_mib > 0 || !lend ? 0 : 2048;
+        stage_bytes_ = std::max(std::min((size_t) stage_mib << 20, (size_t) n_expert_ * one_expert), one_expert);
         chunk_bytes_ = std::max(kChunkBytes, one_expert);
         // With stage_read_mib the buffer's addresses are reserved for the larger size, and a read maps the rest.
         stage_narrow_ = stage_wide_ = stage_bytes_;
-        if (vmm_ && !split_ && opt_.stage_read_mib > 0)
-            stage_wide_ = std::max(stage_bytes_, std::min((size_t) opt_.stage_read_mib << 20,
-                                                          (size_t) n_expert_ * one_expert));
+        if (widens && read_mib > 0)
+            stage_wide_ = std::max(stage_bytes_, std::min((size_t) read_mib << 20, (size_t) n_expert_ * one_expert));
         if (stage_wide_ > stage_narrow_) {
             vmm_reserve(stage_map_, stage_wide_ + 256 + kTail);
             vmm_map(stage_map_, stage_narrow_ + 256 + kTail, SIZE_MAX, "the expert staging buffer");
@@ -2164,6 +2304,31 @@ void Engine::load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t 
     OnCard here(device_, split_);
     load_card_rows(src, from, count, first, n);
     if (next_) next_->load_rows(src + (size_t) count * card_row_bytes(), from, count, first, n);
+}
+
+// The CPU reads an expert the card has only after an answer moves it out of the cache (follow() gives away the
+// slot of the least used one), and a page brought back while an answer is written costs that answer: with every
+// cached expert's pages dropped at load, LFM2.5's first short chat moved 624 of its 838 cached experts out and
+// wrote at 70 tokens/s in place of 80.  So of the card's experts only the half used most lately go, the last to
+// move out (the same chat at 90 tokens/s, as with nothing dropped).  The pinned rows of a long read go too: 256
+// MiB after Qwen3.6's 32K prompt, held for the next one that long.
+void Engine::trim() {
+    std::vector<std::pair<float, std::pair<int, int>>> held;   // recent use, layer and expert
+    for (int il = 0; il < (int) layers_.size(); ++il)
+        if (layers_[(size_t) il].moe)
+            for (int e = 0; e < n_expert_; ++e)
+                if (layers_[(size_t) il].slot[(size_t) e])
+                    held.push_back({recent_.empty() ? 0.f : recent_[(size_t) il * n_expert_ + e], {il, e}});
+    const size_t n = held.size() / 2;
+    std::partial_sort(held.begin(), held.begin() + (ptrdiff_t) n, held.end(),
+                      [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (size_t i = 0; i < n; ++i)
+        expert_bytes(layers_[(size_t) held[i].second.first], held[i].second.second, held[i].second.second + 1,
+                     drop_pages);
+    hfree(h_res_);
+    h_res_ = nullptr;
+    h_res_rows_ = 0;
+    if (next_) next_->trim();
 }
 
 const Stats& Engine::stats() const {
@@ -3253,11 +3418,8 @@ void Engine::shift_rows(ptrdiff_t by) {
 // Pinned memory for n rows of the residual on their way to the next card.
 float* Engine::pass_rows(int n) {
     if (h_pass_rows_ < n) {
-        if (h_pass_) {
-            host_allocs_.erase(std::find(host_allocs_.begin(), host_allocs_.end(), (void*) h_pass_));
-            ck(cudaFreeHost(h_pass_), "freeing pinned memory");
-            h_pass_ = nullptr;
-        }
+        hfree(h_pass_);
+        h_pass_ = nullptr;
         h_pass_rows_ = std::max(n, rows_);
         h_pass_ = (float*) hmalloc((size_t) h_pass_rows_ * streams() * n_embd_ * sizeof(float), "pinned memory");
     }
@@ -3417,11 +3579,8 @@ bool Engine::read(const int32_t* tokens, int n, const Mark* marks, int n_marks,
     const int64_t pos0 = pos_;
     const bool host = n_calls > 2;
     if (host && h_res_rows_ < n) {   // for this read's tokens and some more, so that a longer one seldom asks again
-        if (h_res_) {
-            host_allocs_.erase(std::find(host_allocs_.begin(), host_allocs_.end(), (void*) h_res_));
-            ck(cudaFreeHost(h_res_), "freeing pinned memory");
-            h_res_ = nullptr;
-        }
+        hfree(h_res_);
+        h_res_ = nullptr;
         h_res_rows_ = std::min(read_rows_, (n + 4095) / 4096 * 4096);
         h_res_ = (float*) hmalloc((size_t) h_res_rows_ * r_bytes, "pinned memory");
     }

@@ -35,7 +35,7 @@ constexpr int kStageRows = 32;
 // of more than two calls keeps those rows in pinned host memory, 64 KiB a token for GLM and 8 for Qwen3.6: this
 // much is 8,192 tokens of GLM's and 65,536 of Qwen3.6's.
 constexpr size_t kReadBytes = size_t(512) << 20;
-constexpr size_t kChunkBytes = size_t(512) << 20;   // one upload, and each of the two pinned buffers
+constexpr size_t kChunkBytes = size_t(64) << 20;   // one upload, and each of the two pinned buffers
 // Zero bytes behind every matrix the batched kernels may multiply (Mmq::fits): they read up to a step of 256
 // columns past a row that ends inside one, which is at most 7 blocks of 34 bytes.
 constexpr size_t kTail = 256;
@@ -154,15 +154,26 @@ public:
         return it == where_.end() ? nullptr : it->second.t;
     }
     const uint8_t* data(const TensorInfo& t) const { return where_.at(t.name).file->tensor_data(t); }
+    /// Each file's mapped bytes, in the order of paths(); {nullptr, 0} for a file without tensors.
+    std::vector<std::pair<const uint8_t*, size_t>> views() const {
+        std::vector<std::pair<const uint8_t*, size_t>> out;
+        for (const auto& f : files_) {
+            if (f->tensors().empty()) {
+                out.emplace_back(nullptr, 0);
+                continue;
+            }
+            const TensorInfo& t = f->tensors()[0];
+            out.emplace_back(f->tensor_data(t) - f->data_start() - t.offset, (size_t) f->file_size());
+        }
+        return out;
+    }
     /// The file a byte of the mapped model is in, by its place in paths(), and its offset from that file's first
     /// byte; {-1, 0} when it is in none of them.
     std::pair<int, uint64_t> place(const uint8_t* p) const {
-        for (size_t i = 0; i < files_.size(); ++i) {
-            const GgufFile& f = *files_[i];
-            if (f.tensors().empty()) continue;
-            const TensorInfo& t = f.tensors()[0];
-            const uintptr_t at = (uintptr_t) p, base = (uintptr_t) (f.tensor_data(t) - f.data_start() - t.offset);
-            if (at >= base && at - base < f.file_size()) return {(int) i, (uint64_t) (at - base)};
+        const auto v = views();
+        for (size_t i = 0; i < v.size(); ++i) {
+            const uintptr_t at = (uintptr_t) p, base = (uintptr_t) v[i].first;
+            if (v[i].first && at >= base && at - base < v[i].second) return {(int) i, (uint64_t) (at - base)};
         }
         return {-1, 0};
     }
