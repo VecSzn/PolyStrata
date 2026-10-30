@@ -602,6 +602,7 @@ struct Slot {
 int serve(Session& ss) {
     Engine& engine = ss.engine;
     std::vector<Slot> slots((size_t) engine.sequences() - 1);
+    engine.trim();
     std::printf("INFO context=%d expert_slots=%d expert_cache_mib=%lld pool_workers=%d conversation_cache_mib=%lld "
                 "conversation_cache_slots=%d conversation_cache_min_free_mib=%lld vram_free_mib=%lld vram_elastic=1 "
                 "batch_slots=%d engine=" STRATA_VERSION "\n",

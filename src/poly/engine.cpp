@@ -2326,19 +2326,30 @@ void Engine::load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t 
 // wrote at 70 tokens/s in place of 80.  So of the card's experts only the half used most lately go, the last to
 // move out (the same chat at 90 tokens/s, as with nothing dropped).  The CPU's experts past the RAM budget go too,
 // and the pinned rows of a long read: 256 MiB after Qwen3.6's 32K prompt, held for the next one that long.
+// It runs once after the load as well.  Before an answer only the profile's counts order the card's experts, and
+// that half still held LFM2.5's first short chat to 61 tokens/s in place of 67, so it goes then only under the RAM
+// budget: Qwen3.6 held 5.3 GiB after the load with --ram-experts-mib 3072 in place of 7.1.
 void Engine::trim() {
-    std::vector<std::pair<float, std::pair<int, int>>> held;   // recent use, layer and expert
-    for (int il = 0; il < (int) layers_.size(); ++il)
+    struct Held {
+        float recent;
+        int64_t used;
+        int il, e;
+    };
+    std::vector<Held> held;
+    const bool answered = std::any_of(use_.begin(), use_.end(), [](int64_t u) { return u > 0; });
+    for (int il = 0; il < (int) layers_.size() && (answered || opt_.ram_experts_mib >= 0); ++il)
         if (layers_[(size_t) il].moe)
             for (int e = 0; e < n_expert_; ++e)
-                if (layers_[(size_t) il].slot[(size_t) e])
-                    held.push_back({recent_.empty() ? 0.f : recent_[(size_t) il * n_expert_ + e], {il, e}});
+                if (layers_[(size_t) il].slot[(size_t) e]) {
+                    const size_t i = (size_t) il * n_expert_ + e;
+                    held.push_back({recent_.empty() ? 0.f : recent_[i], (prior_.empty() ? 0 : prior_[i]) + use_[i],
+                                    il, e});
+                }
     const size_t n = held.size() / 2;
-    std::partial_sort(held.begin(), held.begin() + (ptrdiff_t) n, held.end(),
-                      [](const auto& a, const auto& b) { return a.first > b.first; });
-    for (size_t i = 0; i < n; ++i)
-        expert_bytes(layers_[(size_t) held[i].second.first], held[i].second.second, held[i].second.second + 1,
-                     drop_pages);
+    std::partial_sort(held.begin(), held.begin() + (ptrdiff_t) n, held.end(), [](const Held& a, const Held& b) {
+        return a.recent != b.recent ? a.recent > b.recent : a.used > b.used;
+    });
+    for (size_t i = 0; i < n; ++i) expert_bytes(layers_[(size_t) held[i].il], held[i].e, held[i].e + 1, drop_pages);
     if (opt_.ram_experts_mib >= 0) {   // and the CPU's experts past the budget
         kept_ = ram_keep();
         for (size_t il = 0; il < layers_.size(); ++il) {
