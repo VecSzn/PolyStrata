@@ -145,6 +145,20 @@ class Slots(unittest.TestCase):
         self.assertEqual(self.engine.proc.sent, [])
         self.assertFalse(Path(self.dir.name, "x.bin").exists())
 
+    def test_strata_poly_is_never_sent_a_session_command(self):
+        # issue 114: strata-poly keeps no disk sessions, and its answer to SAVE made the server end it
+        spawn = self.engine.spawn
+        self.engine.spawn = ("/opt/polystrata/engine-poly/strata-poly",) + spawn[1:]
+        try:
+            Path(self.dir.name, "p.bin").write_bytes(b"x")
+            for action in ("save", "restore"):
+                s, b = self.post(f"/slots/0?action={action}", {"filename": "p.bin"})
+                self.assertEqual(s, 501, (action, b))
+            self.assertEqual(self.engine.proc.sent, [])
+            self.assertFalse(self.engine.ended)
+        finally:
+            self.engine.spawn = spawn
+
     def test_save_writes_into_the_slot_save_path(self):
         s, b = self.post("/slots/0?action=save", {"filename": "a.bin"})
         self.assertEqual(s, 200, b)

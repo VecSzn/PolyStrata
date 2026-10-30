@@ -795,6 +795,13 @@ int serve(Session& ss) {
             std::fflush(stdout);
             continue;
         }
+        // Disk sessions are the Strata engine's.  Refused in the session protocol's own words: a bare ERR is a
+        // reply out of step there, and the server ended this engine for it (issue 114).
+        if (line.rfind("SAVE ", 0) == 0 || line.rfind("RESTORE ", 0) == 0) {
+            std::printf("SERR invalid 0 strata-poly keeps no disk sessions\n");
+            std::fflush(stdout);
+            continue;
+        }
         if (line.rfind("GEN ", 0) != 0 && line.rfind("GENI ", 0) != 0) {
             std::printf("ERR expected: GEN <max_new> <id,id,...> or GENI <max_new> image_pad=<id> <file> <id,id,...>\n");
             std::fflush(stdout);

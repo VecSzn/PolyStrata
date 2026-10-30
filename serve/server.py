@@ -822,6 +822,11 @@ class StrataEngine:
             tl = self.__dict__.setdefault("_tl", threading.local())
             tl.last = value
 
+    @property
+    def disk_sessions(self) -> bool:
+        """SAVE / RESTORE: the Strata project's engine has them, strata-poly does not (issue 114)."""
+        return Path(str(self.spawn[0])).stem.lower() not in ("strata-poly", "strata-glm")
+
     def __init__(self, exe: str, args: list[str], cwd: str | None = None, log: str | None = None,
                  env: dict | None = None, lazy: bool = False, cpus: list[int] | None = None, _attempt: int = 0):
         self.spawn = (exe, list(args), cwd, log, env, False, cpus)   # to start it again after it died (issue #27)
@@ -3665,6 +3670,10 @@ class Service:
                 waiting = False
                 if not self.loaded():
                     return error(503, "the model is not loaded")
+                # under the FIFO: a model switch replaces the engine there (issue 114: strata-poly got the command and
+                # its reply made the server end it)
+                if not getattr(self.engine, "disk_sessions", True):
+                    return error(501, "slot save/restore is not available with strata-poly, this model's engine")
                 with self.status_lock:
                     self.status.update(busy=True, phase="saving the session" if action == "save"
                                        else "restoring a session", started=time.time(), first_token=None,
