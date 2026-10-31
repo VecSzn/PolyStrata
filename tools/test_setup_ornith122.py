@@ -76,7 +76,7 @@ class PinsAndManifest(unittest.TestCase):
 
     def test_models_manifest(self):
         fam = setup.FAMILIES[FAMILY]
-        expected_models = ["UD-Q3_K_XL", "UD-Q2_K_XL", "UD-IQ3_XXS", "UD-Q4_K_XL"]
+        expected_models = ["UD-Q3_K_XL", "UD-Q2_K_XL", "UD-IQ3_XXS", "UD-Q4_K_XL", "Q8_0"]
         self.assertEqual(list(setup.family_models(FAMILY)), expected_models)
 
         # Shard counts and model file paths
@@ -84,6 +84,7 @@ class PinsAndManifest(unittest.TestCase):
         self.assertEqual(setup.model_shards(fam, "UD-Q2_K_XL"), 1)
         self.assertEqual(setup.model_shards(fam, "UD-IQ3_XXS"), 1)
         self.assertEqual(setup.model_shards(fam, "UD-Q4_K_XL"), 3)
+        self.assertEqual(setup.model_shards(fam, "Q8_0"), 4)
 
         self.assertEqual(setup.model_file(fam, "UD-Q3_K_XL", 1),
                          "UD-Q3_K_XL/Ornith-1.5-122B-UD-Q3_K_XL-00001-of-00003.gguf")
@@ -99,6 +100,10 @@ class PinsAndManifest(unittest.TestCase):
 
         self.assertEqual(setup.model_file(fam, "UD-Q4_K_XL", 1),
                          "UD-Q4_K_XL/Ornith-1.5-122B-UD-Q4_K_XL-00001-of-00003.gguf")
+
+        for i in range(1, 5):
+            self.assertEqual(setup.model_file(fam, "Q8_0", i),
+                             f"Q8_0/Ornith-1.5-122B-Q8_0-0000{i}-of-00004.gguf")
 
         for m, d in fam["models"].items():
             self.assertEqual(d["draft"], "own")
@@ -124,6 +129,14 @@ class PinsAndManifest(unittest.TestCase):
                 (49971099680, "e66952128394bb4c75554c7e10a12a8b63dd1c7f049d876a02885a946e30c1c3"),
             "Ornith-1.5-122B-UD-Q4_K_XL-00003-of-00003.gguf":
                 (29731729056, "21325ec18a9e3210eeffada0fc327a25a79171918f1d04f8f0a06b61866ac9ba"),
+            "Ornith-1.5-122B-Q8_0-00001-of-00004.gguf":
+                (10942929, "e9dbc5401757506c6bbb04dba3bf65decc6435aaf0733f1e95cc58a9332166fc"),
+            "Ornith-1.5-122B-Q8_0-00002-of-00004.gguf":
+                (49855668288, "c1ea340f63c932895417f7c2e7c4967b4b56f3e5a3f981242d0482c662aae2b8"),
+            "Ornith-1.5-122B-Q8_0-00003-of-00004.gguf":
+                (49903347168, "644c26a3d8cab405186ef545e4071b433a23c2a359e45434c822d9c48884eb4c"),
+            "Ornith-1.5-122B-Q8_0-00004-of-00004.gguf":
+                (32785752352, "43bdc1b0cb764b5531d320816fb6004245256a414bfd55f1fdb69e3db42eaa57"),
             "mmproj-F16.gguf":
                 (908724544, "39db176176a904b101f5173a4f03e785990f9279f94ab373c4fd629ae7011817"),
         }
@@ -144,6 +157,9 @@ class PinsAndManifest(unittest.TestCase):
 
         q4_bytes = sum(fam["sha256"][Path(setup.model_file(fam, "UD-Q4_K_XL", i)).name][0] for i in range(1, 4))
         self.assertAlmostEqual(q4_bytes / 1e9, fam["models"]["UD-Q4_K_XL"]["download_gb"], delta=0.05)
+
+        q8_bytes = sum(fam["sha256"][Path(setup.model_file(fam, "Q8_0", i)).name][0] for i in range(1, 5))
+        self.assertAlmostEqual(q8_bytes / 1e9, fam["models"]["Q8_0"]["download_gb"], delta=0.05)
 
         mmproj_bytes = fam["sha256"][fam["mmproj"]][0]
         self.assertAlmostEqual(mmproj_bytes / 1e9, fam["vision_gb"], delta=0.05)

@@ -209,7 +209,7 @@ FALLBACK_FAMILIES = {
                             "Q6_K": {"about": "6-bit experts (K-quant)",
                                      "download_gb": 28.5, "ram_gb": 31, "arena_gb": 26.4}}},
     "ornith122": {"title": "Ornith 1.5 122B",
-                  "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 60 GB file, ~47 GB of RAM beside a 24 GB card; 4 sizes, images",
+                  "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 60 GB file, ~47 GB of RAM beside a 24 GB card; 5 sizes, images",
                   "tag": "ornith122-", "engine": "poly", "vision": True, "experimental": True,
                   "models": {"UD-Q3_K_XL": {"about": "3-bit i-quant experts, 4-bit where they write: the daily choice",
                                             "download_gb": 59.8, "ram_gb": 47, "arena_gb": 53.3},
@@ -218,7 +218,9 @@ FALLBACK_FAMILIES = {
                              "UD-IQ3_XXS": {"about": "2- and 3-bit i-quant experts: less RAM than UD-Q3_K_XL",
                                             "download_gb": 49.5, "ram_gb": 37, "arena_gb": 43.2},
                              "UD-Q4_K_XL": {"about": "4-bit experts (Unsloth Dynamic), 5- and 6-bit where they write",
-                                            "download_gb": 79.7, "ram_gb": 66, "arena_gb": 73.0}}},
+                                            "download_gb": 79.7, "ram_gb": 66, "arena_gb": 73.0},
+                             "Q8_0": {"about": "8-bit throughout: the closest to the model as trained",
+                                      "download_gb": 132.6, "ram_gb": 119, "arena_gb": 125.8}}},
 }
 FALLBACK_CONTEXTS = [8192, 32768, 65536, 131072, 204800, 262144, 393216, 524288]
 BENCH_PROMPT = ("Write a short story (about 300 words) about a lighthouse keeper who finds a message in a bottle. "
