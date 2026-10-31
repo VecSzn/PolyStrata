@@ -500,6 +500,7 @@ struct Engine::Swap {
     int32_t from = -1;             // the pool_ slot it is copied from, held (pool_pin_) until it has arrived
     bool mapped = true;            // else read from the files
     int64_t takes = -1;            // the expert (layer * n_expert + expert) given its place in kept_, or -1
+    int64_t gets = -1;             // the expert given `from` once it has arrived, or -1
 };
 
 Engine::Engine() = default;
@@ -1819,6 +1820,15 @@ void Engine::follow(int written) {
                 pool_of_[(size_t) s.il * ne + (size_t) s.e] = -1;
                 pool_who_[v] = -1;
                 s.from = -1;
+                const int64_t g = s.gets;   // the expert the cache gave up for it, if it is still the CPU's
+                if (g >= 0 && pool_of_[(size_t) g] < 0 && !kept_[(size_t) g] &&
+                    !layers_[(size_t) g / ne].slot[(size_t) g % ne]) {
+                    pool_who_[v] = g;
+                    pool_of_[(size_t) g] = (int32_t) v;
+                    pool_tick_[v] = pool_now_;
+                    pool_queue(layers_[(size_t) g / ne], (size_t) g % ne, (int32_t) v, false);
+                }
+                s.gets = -1;
             }
             cached_ += s.adds;
             s.adds = false;
@@ -1937,6 +1947,11 @@ void Engine::follow(int written) {
         const size_t xi = (size_t) in.il * ne + (size_t) in.e, xo = (size_t) out.il * ne + (size_t) out.e;
         s->mapped = !pool_ || kept_[xi];
         s->takes = -1;
+        s->gets = -1;
+        // One that comes from a slot leaves it to the outgoing one, read into it once the upload has arrived.  With
+        // only kept_ handed over, the experts the cache gave up for slotted ones were 28% of a short chat's misses
+        // after a 32K prompt on lab-pro6000.
+        if (pool_ && s->from >= 0 && !kept_[xo]) s->gets = (int64_t) xo;
         if (pool_ && kept_[xi]) {
             kept_[xi] = 0;
             kept_[xo] = 1;
