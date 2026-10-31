@@ -1276,6 +1276,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "strata-poly: loaded in %.1f s; %d of %d routed experts in VRAM (%.1f GiB), %d CPU threads\n",
                      ms_since(t0) / 1000.0, engine.cached_experts(), engine.total_experts(), engine.cached_gib(),
                      engine.threads());
+        if (engine.ram_experts_mib() >= 0)
+            std::fprintf(stderr, "strata-poly: %lld MiB of RAM for the %.1f GiB of experts outside VRAM; the others "
+                                 "come from the file cache when a token needs them (--ram-experts-mib, -1 for all)\n",
+                         (long long) engine.ram_experts_mib(), engine.outside_gib());
         if (o.cache_bias > 0)
             std::fprintf(stderr, "strata-poly: cache bias %.2f: a token that comes a few at a time routes with %.2f "
                                  "added to the score of each expert in VRAM; the weights stay the router's own\n",

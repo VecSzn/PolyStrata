@@ -318,6 +318,10 @@ public:
     /// is given back.
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
+    /// The RAM held for the experts outside VRAM, in MiB, as load() settled Options::ram_experts_mib (-1: all of
+    /// them), and those experts' GiB.
+    int64_t ram_experts_mib() const { return opt_.ram_experts_mib; }
+    double outside_gib() const { return double(outside_bytes_) / double(1ull << 30); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
     double cached_gib() const { return double(exp_at_) / double(1ull << 30) + (next_ ? next_->cached_gib() : 0); }
     /// The cache as load() filled it, which is as large as resize_cache() makes it again.
@@ -821,6 +825,7 @@ protected:
     /// with Options::ram_experts_mib: the CPU's experts read through the mapping, whose pages stay in the working set
     /// (ram_keep(), at the load and after a long prompt); the others come from pool_
     std::vector<uint8_t> kept_;
+    size_t outside_bytes_ = 0;   ///< the routed experts the card does not have, after load()
     void rekeep();
     struct FileView {
         const uint8_t* base;
