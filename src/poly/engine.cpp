@@ -29,6 +29,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <immintrin.h>
 #include <new>
 #include <numeric>
 #include <stdexcept>
@@ -1769,6 +1770,7 @@ void Engine::follow_loop() {
                 {
                     std::lock_guard<std::mutex> l(pool_m_);
                     pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
+                    pool_n_.fetch_add((int) jobs.size(), std::memory_order_release);
                 }
                 pool_cv_.notify_all();
             }
@@ -2869,6 +2871,7 @@ void Engine::rekeep() {
     {
         std::lock_guard<std::mutex> l(pool_m_);
         pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
+        pool_n_.fetch_add((int) jobs.size(), std::memory_order_release);
     }
     pool_cv_.notify_all();
 }
@@ -3031,8 +3034,13 @@ void Engine::pool_run(const PoolJob& job) {
         pool_state_[v].store(pool_failed_[v].load(std::memory_order_relaxed) ? 2 : 0, std::memory_order_release);
 }
 
+// A read thread without a job spins 2 ms before it sleeps: an answer queues reads every layer, a fraction of a
+// millisecond apart.
 void Engine::pool_loop() {
     for (;;) {
+        const Clock::time_point t0 = Clock::now();
+        while (pool_n_.load(std::memory_order_acquire) == 0 && Clock::now() - t0 < std::chrono::milliseconds(2))
+            _mm_pause();
         PoolJob job;
         {
             std::unique_lock<std::mutex> l(pool_m_);
@@ -3041,6 +3049,7 @@ void Engine::pool_loop() {
             std::deque<PoolJob>& q = pool_jobs_.empty() ? pool_pages_ : pool_jobs_;
             job = q.front();
             q.pop_front();
+            pool_n_.fetch_sub(1, std::memory_order_relaxed);
         }
         pool_run(job);
     }
@@ -3055,6 +3064,7 @@ bool Engine::pool_help() {
         if (pool_jobs_.empty()) return false;
         job = pool_jobs_.front();
         pool_jobs_.pop_front();
+        pool_n_.fetch_sub(1, std::memory_order_relaxed);
     }
     pool_run(job);
     return true;
@@ -3085,6 +3095,7 @@ void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
         std::lock_guard<std::mutex> l(pool_m_);
         if (first) pool_jobs_.insert(pool_jobs_.begin(), jobs, jobs + n);
         else pool_jobs_.insert(pool_jobs_.end(), jobs, jobs + n);
+        pool_n_.fetch_add(n, std::memory_order_release);
     }
     pool_cv_.notify_all();
 }

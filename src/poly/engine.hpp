@@ -910,6 +910,7 @@ protected:
     std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
     void pool_queue(const Layer& L, size_t e, int32_t s, bool first);
     std::mutex pool_m_;
+    std::atomic<int> pool_n_{0};   ///< the jobs in pool_jobs_ and pool_pages_, which pool_loop() spins on
     std::condition_variable pool_cv_;
     bool pool_quit_ = false;
     std::vector<std::thread> pool_threads_;
