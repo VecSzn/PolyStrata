@@ -497,6 +497,7 @@ struct Engine::Swap {
     uint8_t* slot = nullptr;       // where it goes in VRAM: the slot of the expert it replaces
     bool adds = false;             // the slot was empty (grow_cache()): the cache holds one more
     cudaEvent_t done = nullptr;    // marks its upload
+    int32_t from = -1;             // the pool_ slot it is copied from, held (pool_pin_) until it has arrived
 };
 
 Engine::Engine() = default;
@@ -506,6 +507,12 @@ Engine::~Engine() {
     OnCard here(device_, split_);
     map_quit_.store(true);
     if (mapper_.joinable()) mapper_.join();
+    {
+        std::lock_guard<std::mutex> l(pool_m_);
+        pool_quit_ = true;
+    }
+    pool_cv_.notify_all();
+    for (std::thread& t : pool_threads_) t.join();
     if (follower_.joinable()) {
         {
             std::lock_guard<std::mutex> l(swap_m_);
@@ -1721,15 +1728,28 @@ void Engine::follow_loop() {
             return swap_quit_ || s;
         });
         if (swap_quit_) return;
+        // Under the RAM budget an expert comes from its pool_ slot, or else from the files: through the mapping its
+        // pages stayed in the working set.  A copy from RAM is many times faster than a read: with every one read,
+        // Qwen3.6's cache kept up with an answer after a 32K prompt so much more slowly that the CPU computed 14%
+        // more experts.
+        const int32_t from = s->from;
+        const bool mapped = !pool_ || kept_[(size_t) s->il * n_expert_ + (size_t) s->e];   // under swap_m_ (rekeep())
         lk.unlock();
         const Layer& L = layers_[(size_t) s->il];
         const size_t e = (size_t) s->e, gu = L.gu_bytes, gu2 = L.gu2();
         uint8_t* const h = swap_pin_[b];
         cudaError_t err = cudaEventSynchronize((cudaEvent_t) swap_pin_ev_[b]);   // h's last upload has left it
         if (err == cudaSuccess) {
-            std::memcpy(h, L.exp_gate + e * L.gu_stride, gu);
-            std::memcpy(h + gu, L.exp_up + e * L.u_stride, L.u_bytes);
-            std::memcpy(h + gu2, L.exp_down + e * L.d_bytes, L.d_bytes);
+            const auto get = [&](uint8_t* dst, const uint8_t* src, size_t n) {
+                if (mapped || !read_file(dst, src, n)) std::memcpy(dst, src, n);
+            };
+            if (from >= 0) {
+                std::memcpy(h, pool_.get() + (size_t) from * pool_slot_, gu2 + L.d_bytes);
+            } else {
+                get(h, L.exp_gate + e * L.gu_stride, gu);
+                get(h + gu, L.exp_up + e * L.u_stride, L.u_bytes);
+                get(h + gu2, L.exp_down + e * L.d_bytes, L.d_bytes);
+            }
             err = cudaMemcpyAsync(s->slot, h, gu2 + L.d_bytes, cudaMemcpyHostToDevice, cs(swap_st_));
         }
         if (err == cudaSuccess) err = cudaEventRecord(s->done, cs(swap_st_));
@@ -1771,6 +1791,15 @@ void Engine::follow(int written) {
             ck(arrived, "expert upload");
             layers_[(size_t) s.il].slot[(size_t) s.e] = s.slot;
             coming_[(size_t) s.il * ne + (size_t) s.e] = 0;
+            if (s.from >= 0) {   // the card has it now: its pool_ slot is free for another
+                const size_t v = (size_t) s.from;
+                --pool_pin_[v];
+                pool_nprot_ -= pool_prot_[v];
+                pool_prot_[v] = 0;
+                pool_of_[(size_t) s.il * ne + (size_t) s.e] = -1;
+                pool_who_[v] = -1;
+                s.from = -1;
+            }
             cached_ += s.adds;
             s.adds = false;
             s.at.store(Swap::kFree);
@@ -1782,6 +1811,14 @@ void Engine::follow(int written) {
     if (written <= 0) return;
     const float keep = std::exp2(-(float) written / (float) kSwapHalf);
     for (float& r : recent_) r *= keep;
+    const auto from_pool = [&](Swap& s) {   // the slot follow_loop() copies s from, held until s arrives
+        s.from = -1;
+        if (!pool_) return;
+        const int32_t v = pool_of_[(size_t) s.il * ne + (size_t) s.e];
+        if (v < 0 || pool_state_[(size_t) v].load(std::memory_order_acquire) != 0) return;
+        s.from = v;
+        ++pool_pin_[(size_t) v];
+    };
     // The empty slots grow_cache() left to the uploads go first.
     bool asked = false;
     for (int j = 0; j < n_swap_ && !refill_.empty(); ++j) {
@@ -1793,6 +1830,7 @@ void Engine::follow(int written) {
         s.e = r.e;
         s.slot = r.slot;
         s.adds = true;
+        from_pool(s);
         s.at.store(Swap::kAsked);
         asked = true;
         --n_free;
@@ -1868,6 +1906,7 @@ void Engine::follow(int written) {
         given = nullptr;
         staged_il_ = -1;
         coming_[(size_t) in.il * ne + (size_t) in.e] = 1;
+        from_pool(*s);
         s->at.store(Swap::kAsked);
         asked = true;
     }
@@ -2040,10 +2079,39 @@ void Engine::load(const Options& o) {
     }
     const int threads = opt_.threads > 0 ? opt_.threads : usable_cpus();
     mind_memory();
-    // the routed experts in the mapped files, and of them the ones the CPU reads and keeps: those the card does not
-    // have, as many as Options::ram_experts_mib holds
+    // the routed experts in the mapped files, and of them the ones the CPU reads through the mapping: those the
+    // card does not have, as many as Options::ram_experts_mib keeps
     std::vector<std::pair<const uint8_t*, size_t>> spans, cpu;
     const auto to = [](auto& v) { return [&v](const uint8_t* p, size_t n) { v.emplace_back(p, n); }; };
+    if (opt_.ram_experts_mib >= 0) {
+        for (const Layer& L : layers_)
+            if (L.moe) pool_slot_ = std::max(pool_slot_, (L.gu2() + L.d_bytes + 63) / 64 * 64);
+        const size_t want = ((size_t) opt_.ram_experts_mib << 20) / 4;   // a quarter of the budget; kept_ has the rest
+        const size_t slots = pool_slot_ ? std::max<size_t>(want / pool_slot_, (size_t) kCpuRows * kMaxUsed) : 0;
+        pool_bytes_ = slots * pool_slot_;
+        const size_t turn = std::min(slots, (size_t) 2 * kCpuRows * kMaxUsed);   // a call's and the next one's
+        pool_prot_max_ = slots - std::max(turn, slots / 4);
+        pool_prot_.assign(slots, 0);
+        pool_.reset(new uint8_t[pool_bytes_]);
+        pool_of_.assign(layers_.size() * (size_t) n_expert_, -1);
+        pool_who_.assign(slots, -1);
+        pool_tick_.assign(slots, 0);
+        pool_ref_.assign(slots, 0);
+        pool_pin_.assign(slots, 0);
+        prompt_use_.assign(layers_.size() * (size_t) n_expert_, 0.f);
+        pool_pending_.reset(new std::atomic<int>[slots]);
+        pool_failed_.reset(new std::atomic<uint8_t>[slots]);
+        for (size_t v = 0; v < slots; ++v) pool_pending_[v].store(0), pool_failed_[v].store(0);
+        // 8: on the laptop 4 left a call waiting for its reads 8% longer; 12 were no better than 8
+        for (int t = 0; t < 8; ++t) pool_threads_.emplace_back([this] { pool_loop(); });
+        pool_state_.reset(new std::atomic<uint8_t>[slots]);
+        for (size_t s = 0; s < slots; ++s) pool_state_[s].store(0);
+        // the next layer's top 8: the best of 0, 8, 12 and 16, and of 8 with the layer after's top 8 as well
+        prefetch_k_ = 8;
+        const size_t part = 16 * (size_t) n_expert_;   // a part's rows: up to 16
+        ahead_dev_ = (float*) dmalloc(8 * part * sizeof(float), "scratch");
+        h_ahead_ = (float*) hmalloc(8 * part * sizeof(float), "pinned memory");
+    }
     const std::vector<uint8_t> keep = ram_keep();
     if (opt_.ram_experts_mib >= 0) {
         kept_ = keep;
@@ -2369,7 +2437,8 @@ void Engine::load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t 
 // and the pinned rows of a long read: 256 MiB after Qwen3.6's 32K prompt, held for the next one that long.
 // It runs once after the load as well.  Before an answer only the profile's counts order the card's experts, and
 // that half still held LFM2.5's first short chat to 61 tokens/s in place of 67, so it goes then only under the RAM
-// budget: Qwen3.6 held 5.3 GiB after the load with --ram-experts-mib 3072 in place of 7.1.
+// budget: Qwen3.6 held 5.3 GiB after the load with --ram-experts-mib 3072 in place of 7.1.  Under the budget all of
+// the card's experts go: one the cache moves out comes to the CPU through pool_, read from the files.
 void Engine::trim() {
     struct Held {
         float recent;
@@ -2386,22 +2455,25 @@ void Engine::trim() {
                     held.push_back({recent_.empty() ? 0.f : recent_[i], (prior_.empty() ? 0 : prior_[i]) + use_[i],
                                     il, e});
                 }
-    const size_t n = held.size() / 2;
+    const size_t n = pool_ ? held.size() : held.size() / 2;
     std::partial_sort(held.begin(), held.begin() + (ptrdiff_t) n, held.end(), [](const Held& a, const Held& b) {
         return a.recent != b.recent ? a.recent > b.recent : a.used > b.used;
     });
     for (size_t i = 0; i < n; ++i) expert_bytes(layers_[(size_t) held[i].il], held[i].e, held[i].e + 1, drop_pages);
-    if (opt_.ram_experts_mib >= 0) {   // and the CPU's experts past the budget
-        kept_ = ram_keep();
+    if (pool_)   // and the CPU's outside kept_, which come from pool_; kept_'s stay for the next answer
         for (size_t il = 0; il < layers_.size(); ++il) {
-            const uint8_t* k = kept_.data() + il * (size_t) n_expert_;
             const Layer& L = layers_[il];
-            if (L.moe) expert_runs(L, n_expert_, [&](int e) { return !k[e] && !L.slot[(size_t) e]; }, drop_pages);
+            const uint8_t* k = kept_.data() + il * (size_t) n_expert_;
+            if (L.moe) expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e] && !k[e]; }, drop_pages);
         }
-    }
     hfree(h_res_);
     h_res_ = nullptr;
     h_res_rows_ = 0;
+    if (pool_ && !answered) pool_fill();
+    if (pool_) {
+        std::fill(prompt_use_.begin(), prompt_use_.end(), 0.f);
+        prompt_rows_ = 0;
+    }
     if (next_) next_->trim();
     else drop_images();   // once, by the last card's engine
 }
@@ -2455,43 +2527,6 @@ bool Engine::read_file(uint8_t* dst, const uint8_t* src, size_t n) const {
     }
 #endif
     return true;
-}
-
-// The CPU's experts this process keeps in memory, by (layer, expert): the most used lately, then by the profile's
-// and this run's counts, as many as Options::ram_experts_mib holds; every one without a budget.  The card's are
-// none of them: one that leaves the cache before the next trim() (shrink_cache() as the attention caches grow)
-// is the CPU's from then on, and was not chosen.
-std::vector<uint8_t> Engine::ram_keep() const {
-    const size_t ne = (size_t) n_expert_;
-    std::vector<uint8_t> keep(layers_.size() * ne, 1);
-    if (opt_.ram_experts_mib < 0) return keep;
-    std::fill(keep.begin(), keep.end(), 0);
-    struct Cand {
-        float recent;
-        int64_t used;
-        size_t i;
-    };
-    std::vector<Cand> cands;
-    for (size_t il = 0; il < layers_.size(); ++il) {
-        if (!layers_[il].moe) continue;
-        for (size_t e = 0; e < ne; ++e) {
-            const size_t i = il * ne + e;
-            if (layers_[il].slot[e]) continue;
-            cands.push_back({recent_.empty() ? 0.f : recent_[i], (prior_.empty() ? 0 : prior_[i]) + use_[i], i});
-        }
-    }
-    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
-        return a.recent != b.recent ? a.recent > b.recent : a.used > b.used;
-    });
-    size_t room = (size_t) opt_.ram_experts_mib << 20;
-    for (const Cand& c : cands) {
-        size_t bytes = 0;
-        expert_bytes(layers_[c.i / ne], 0, 1, [&](const uint8_t*, size_t n) { bytes += n; });
-        if (bytes > room) break;
-        room -= bytes;
-        keep[c.i] = 1;
-    }
-    return keep;
 }
 
 const Stats& Engine::stats() const {
@@ -2614,12 +2649,351 @@ int Engine::card_rows() const { return block_guess_ ? std::max(kSumRows, opt_.wi
 void Engine::moe_router(const Layer& L, int n) {
     router_scores(L, n);
     copy2(rl_, h_rl_, n * n_expert_, xn_, h_x_, n * n_embd_, st_);
+    if (prefetch_k_ <= 0 || block_pass_ || n > 16) return;
+    size_t part = 0;
+    for (size_t q = 0; q < 8; ++q)
+        if (ev_ == ev_row_[q]) part = q;
+    const size_t ne = (size_t) n_expert_;
+    // the next MoE layer's router on this layer's input, for pool_ahead()
+    int j = (int) (&L - layers_.data()) + 1;
+    while (j < n_layer_ && !layers_[(size_t) j].moe) ++j;
+    if (j >= n_layer_) return;
+    float* d = ahead_dev_ + part * 16 * ne;
+    lin(layers_[(size_t) j].gate_inp, xn_, d, n, xq_);
+    ck(cudaMemcpyAsync(h_ahead_ + part * 16 * ne, d, (size_t) n * ne * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+       "read ahead");
+}
+
+// Layer j's likeliest prefetch_k_ experts of each of n tokens, as moe_router() guessed them before ev_: those the CPU
+// would read from the files get a slot now, and pool_threads_ read them while this layer is computed.  A slot read
+// ahead is held through the calls up to its layer's (a window's halves are a call each): held for the next call
+// alone, it could go to the other half's misses before its own half came to it.
+void Engine::pool_ahead(int j, int n, size_t part, int k) {
+    const Layer& L = layers_[(size_t) j];
+    const size_t ne = (size_t) n_expert_;
+    k = std::min(k, 16);
+    bool full = false;
+    for (int r = 0; r < n && !full; ++r) {
+        // the k best in one pass: a sort of all of them was a fifth of a millisecond a token on the laptop
+        const float* g = h_ahead_ + part * 16 * ne + (size_t) r * ne;
+        int32_t top[16];
+        float best[16];
+        int m = 0;
+        for (int e = 0; e < (int) ne; ++e) {
+            const float s = g[e];
+            if (m == k && s <= best[k - 1]) continue;
+            int at = m < k ? m++ : k - 1;
+            for (; at > 0 && best[at - 1] < s; --at) best[at] = best[at - 1], top[at] = top[at - 1];
+            best[at] = s;
+            top[at] = e;
+        }
+        for (int q = 0; q < m; ++q) {
+            const size_t e = (size_t) top[q], x = (size_t) j * ne + e;
+            if (L.slot[e] || kept_[x] || pool_of_[x] >= 0) continue;
+            const size_t v = pool_victim();
+            if (v == SIZE_MAX) {   // no slot to spare; what was queued is still read
+                full = true;
+                break;
+            }
+            if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
+            pool_who_[v] = (int64_t) x;
+            pool_of_[x] = (int32_t) v;
+            pool_tick_[v] = pool_now_ + 4;
+            pool_queue(L, e, (int32_t) v, false);
+        }
+    }
+}
+
+int Engine::first_moe_layer() const {
+    int il = 0;
+    while (il < n_layer_ && !layers_[(size_t) il].moe) ++il;
+    return il;
+}
+
+// The CPU's experts this process keeps in its working set, by (layer, expert): the most used lately, then by the
+// profile's and this run's counts, as many as Options::ram_experts_mib holds past pool_; every one without a budget.
+// The card's are none of them.
+std::vector<uint8_t> Engine::ram_keep(const std::vector<float>* lately) const {
+    const size_t ne = (size_t) n_expert_;
+    std::vector<uint8_t> keep(layers_.size() * ne, 1);
+    if (opt_.ram_experts_mib < 0) return keep;
+    std::fill(keep.begin(), keep.end(), 0);
+    struct Cand {
+        float recent;
+        int64_t used;
+        size_t i;
+    };
+    std::vector<Cand> cands;
+    for (size_t il = 0; il < layers_.size(); ++il) {
+        if (!layers_[il].moe) continue;
+        for (size_t e = 0; e < ne; ++e) {
+            const size_t i = il * ne + e;
+            if (layers_[il].slot[e]) continue;
+            cands.push_back({lately ? (*lately)[i] : recent_.empty() ? 0.f : recent_[i],
+                             (prior_.empty() ? 0 : prior_[i]) + use_[i], i});
+        }
+    }
+    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+        return a.recent != b.recent ? a.recent > b.recent : a.used > b.used;
+    });
+    size_t room = (size_t) opt_.ram_experts_mib << 20;
+    room -= std::min(room, pool_bytes_);
+    for (const Cand& c : cands) {
+        size_t bytes = 0;
+        expert_bytes(layers_[c.i / ne], 0, 1, [&](const uint8_t*, size_t n) { bytes += n; });
+        if (bytes > room) break;
+        room -= bytes;
+        keep[c.i] = 1;
+    }
+    return keep;
+}
+
+// After a long prompt (with pool_reseed()): kept_ by the prompt's own uses, then the counts.  The pages of the
+// experts that leave it go, and those that come in are read into the working set now, on every CPU thread: one at a
+// time, by the answer's calls, a fault every page cost them twice what a read into a slot costs.
+void Engine::rekeep() {
+    std::vector<uint8_t> was = ram_keep(&prompt_use_);
+    {
+        std::lock_guard<std::mutex> l(swap_m_);   // the follower looks at it (follow_loop())
+        kept_.swap(was);
+    }
+    std::vector<std::pair<const uint8_t*, size_t>> in;
+    const auto to = [&](const uint8_t* p, size_t n) { in.emplace_back(p, n); };
+    for (size_t il = 0; il < layers_.size(); ++il) {
+        const Layer& L = layers_[il];
+        if (!L.moe) continue;
+        const uint8_t* a = was.data() + il * (size_t) n_expert_;
+        const uint8_t* b = kept_.data() + il * (size_t) n_expert_;
+        expert_runs(L, n_expert_, [&](int e) { return a[e] && !b[e] && !L.slot[(size_t) e]; }, drop_pages);
+        expert_runs(L, n_expert_, [&](int e) { return !a[e] && b[e] && !L.slot[(size_t) e]; }, to);
+    }
+    workers_->run((int) in.size(), [&](int t) { touch_pages(in[(size_t) t].first, in[(size_t) t].second); });
+}
+
+// After the load: the slots take the experts the profile has used most of those outside kept_ and the card, read
+// on every CPU thread, so that the first answer finds them.
+void Engine::pool_fill() {
+    const size_t ne = (size_t) n_expert_, slots = pool_who_.size();
+    std::vector<std::pair<int64_t, size_t>> cands;
+    for (size_t il = 0; il < layers_.size(); ++il)
+        if (layers_[il].moe)
+            for (size_t e = 0; e < ne; ++e)
+                if (!layers_[il].slot[e] && !kept_[il * ne + e])
+                    cands.push_back({prior_.empty() ? 0 : prior_[il * ne + e], il * ne + e});
+    std::sort(cands.rbegin(), cands.rend());
+    struct Fill {
+        size_t x;
+        PoolRead r;
+    };
+    std::vector<Fill> fills;
+    for (size_t k = 0; k < cands.size() && k < slots; ++k) {
+        const size_t x = cands[k].second;
+        if (pool_who_[k] >= 0) pool_of_[(size_t) pool_who_[k]] = -1;
+        pool_who_[k] = (int64_t) x;
+        pool_of_[x] = (int32_t) k;
+        pool_prot_[k] = k < pool_prot_max_;   // the profile's most used start held
+        fills.push_back({x, {x % ne, (int32_t) k, false}});
+    }
+    pool_nprot_ = (size_t) std::count(pool_prot_.begin(), pool_prot_.end(), 1);
+    workers_->run((int) fills.size(), [&](int t) { pool_read(layers_[fills[(size_t) t].x / ne], fills[(size_t) t].r); });
+    for (const Fill& f : fills)
+        if (!f.r.ok) {
+            pool_of_[f.x] = -1;
+            pool_who_[(size_t) f.r.s] = -1;
+        }
+}
+
+// After a prompt of 4,096 tokens or more, at the answer's first call: the held part of the slots (pool_prot_max_)
+// takes the experts the prompt used most, read on every CPU thread; the slots of experts it used less give way.
+// The answer to a new document routes to its experts, not to the last answer's: after a 32K prompt the slots
+// missed 4.5 experts a token, and waiting for them was the CPU's whole extra time.
+void Engine::pool_reseed() {
+    prompt_rows_ = 0;
+    const size_t ne = (size_t) n_expert_, slots = pool_who_.size();
+    std::vector<std::pair<float, size_t>> cands;
+    for (size_t il = 0; il < layers_.size(); ++il)
+        if (layers_[il].moe)
+            for (size_t e = 0; e < ne; ++e)
+                if (!layers_[il].slot[e] && !kept_[il * ne + e] && prompt_use_[il * ne + e] > 0.f)
+                    cands.push_back({prompt_use_[il * ne + e], il * ne + e});
+    std::fill(prompt_use_.begin(), prompt_use_.end(), 0.f);
+    const size_t want = std::min(cands.size(), pool_prot_max_);
+    std::partial_sort(cands.begin(), cands.begin() + (ptrdiff_t) want, cands.end(), std::greater<>());
+    std::vector<uint8_t> wanted(layers_.size() * ne, 0);
+    for (size_t k = 0; k < want; ++k) wanted[cands[k].second] = 1;
+    std::vector<size_t> free;   // the slots that may take them, the last one first
+    for (size_t v = slots; v-- > 0;)
+        if (!pool_pin_[v] && pool_state_[v].load(std::memory_order_acquire) != 1 &&
+            (pool_who_[v] < 0 || !wanted[(size_t) pool_who_[v]]))
+            free.push_back(v);
+    struct Fill {
+        size_t x;
+        PoolRead r;
+    };
+    std::vector<Fill> fills;
+    for (size_t k = 0; k < want; ++k) {
+        const size_t x = cands[k].second;
+        if (pool_of_[x] >= 0) {
+            pool_prot_[(size_t) pool_of_[x]] = 1;
+            continue;
+        }
+        if (free.empty()) break;
+        const size_t v = free.back();
+        free.pop_back();
+        if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
+        pool_who_[v] = (int64_t) x;
+        pool_of_[x] = (int32_t) v;
+        pool_prot_[v] = 1;
+        pool_tick_[v] = pool_ref_[v] = 0;
+        fills.push_back({x, {x % ne, (int32_t) v, false}});
+    }
+    workers_->run((int) fills.size(), [&](int t) { pool_read(layers_[fills[(size_t) t].x / ne], fills[(size_t) t].r); });
+    for (const Fill& f : fills)
+        if (!f.r.ok) {
+            pool_of_[f.x] = -1;
+            pool_who_[(size_t) f.r.s] = -1;
+            pool_prot_[(size_t) f.r.s] = 0;
+        }
+    pool_nprot_ = (size_t) std::count(pool_prot_.begin(), pool_prot_.end(), 1);
+}
+
+// The slot the next expert takes: the hand of a clock goes past those this call or the next one holds, that are
+// being read or that an upload copies, and past the held ones (pool_prot_), clearing the mark of those used since
+// it last came by and putting the others back on trial while too many are held.  It takes the first trial slot.
+// A search of every slot for the least lately used one was a few million comparisons a step on the thread that
+// computes the CPU's experts.  SIZE_MAX: none after three rounds.
+size_t Engine::pool_victim() {
+    const size_t slots = pool_who_.size();
+    for (size_t k = 0; k < 3 * slots; ++k) {
+        const size_t v = pool_hand_++ % slots;
+        if (pool_tick_[v] >= pool_now_ || pool_pin_[v] || pool_state_[v].load(std::memory_order_acquire) == 1)
+            continue;
+        if (pool_prot_[v]) {
+            if (pool_ref_[v]) {
+                pool_ref_[v] = 0;
+            } else if (pool_nprot_ > pool_prot_max_) {
+                pool_prot_[v] = 0;
+                --pool_nprot_;
+            }
+            continue;
+        }
+        return v;
+    }
+    return SIZE_MAX;
+}
+
+void Engine::pool_run(const PoolJob& job) {
+    const size_t v = (size_t) job.s;
+    if (!read_file(job.dst, job.src, job.n)) pool_failed_[v].store(1, std::memory_order_relaxed);
+    if (pool_pending_[v].fetch_sub(1, std::memory_order_acq_rel) == 1)   // its last piece
+        pool_state_[v].store(pool_failed_[v].load(std::memory_order_relaxed) ? 2 : 0, std::memory_order_release);
+}
+
+void Engine::pool_loop() {
+    for (;;) {
+        PoolJob job;
+        {
+            std::unique_lock<std::mutex> l(pool_m_);
+            pool_cv_.wait(l, [&] { return pool_quit_ || !pool_jobs_.empty(); });
+            if (pool_quit_) return;
+            job = pool_jobs_.front();
+            pool_jobs_.pop_front();
+        }
+        pool_run(job);
+    }
+}
+
+// A thread that waits for a read takes the first piece queued (those of the reads a call waits for are first);
+// false when none is.  Spinning, the CPU's threads left a call's few late experts to the read threads alone.
+bool Engine::pool_help() {
+    PoolJob job;
+    {
+        std::lock_guard<std::mutex> l(pool_m_);
+        if (pool_jobs_.empty()) return false;
+        job = pool_jobs_.front();
+        pool_jobs_.pop_front();
+    }
+    pool_run(job);
+    return true;
+}
+
+// Expert e of L into slot s by the read threads, in pieces of 256 KiB: ahead of what is queued with `first`, for a
+// call that is about to compute it, and then in pieces of 64 KiB, which the threads that wait for it share.
+void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
+    constexpr int kMost = 64;
+    uint8_t* p = pool_.get() + (size_t) s * pool_slot_;
+    const std::pair<uint8_t*, const uint8_t*> part[3] = {{p, L.exp_gate + e * L.gu_stride},
+                                                         {p + L.gu_bytes, L.exp_up + e * L.u_stride},
+                                                         {p + L.gu2(), L.exp_down + e * L.d_bytes}};
+    const size_t bytes[3] = {L.gu_bytes, L.u_bytes, L.d_bytes};
+    // pieces of the larger experts grow so that each matrix takes at most a third of jobs
+    const size_t most = (std::max({bytes[0], bytes[1], bytes[2]}) + kMost / 3 - 1) / (kMost / 3);
+    const size_t piece = std::max(size_t(first ? 64 : 256) << 10, (most + 4095) / 4096 * 4096);
+    PoolJob jobs[kMost];
+    int n = 0;
+    for (int k = 0; k < 3; ++k)
+        for (size_t at = 0; at < bytes[k]; at += piece)
+            jobs[n++] = {part[k].first + at, part[k].second + at, std::min(piece, bytes[k] - at), s};
+    pool_failed_[(size_t) s].store(0, std::memory_order_relaxed);
+    pool_pending_[(size_t) s].store(n, std::memory_order_relaxed);
+    pool_state_[(size_t) s].store(1, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> l(pool_m_);
+        if (first) pool_jobs_.insert(pool_jobs_.begin(), jobs, jobs + n);
+        else pool_jobs_.insert(pool_jobs_.end(), jobs, jobs + n);
+    }
+    pool_cv_.notify_all();
 }
 
 // One token's router scores with Options::cache_bias added to the ones of the experts in VRAM.
 const float* Engine::biased(const Layer& L, const float* scores) {
     for (int e = 0; e < n_expert_; ++e) bias_rl_[(size_t) e] = scores[e] + (L.slot[(size_t) e] ? opt_.cache_bias : 0.f);
     return bias_rl_.data();
+}
+
+// The call's experts from pool_'s slots.  One not there takes the slot pool_victim() gives and goes on
+// pool_reads_, which moe() hands the read threads ahead of everything else.
+void Engine::pool_take(const Layer& L, int il, CpuExpert* host, int n) {
+    const size_t ne = (size_t) n_expert_;
+    ++pool_now_;
+    pool_reads_.clear();
+    for (int i = 0; i < n; ++i) {
+        const size_t e = (size_t) (host[i].gate - L.exp_gate) / L.gu_stride;
+        if (kept_[(size_t) il * ne + e]) continue;   // through the mapping
+        int32_t& s = pool_of_[(size_t) il * ne + e];
+        if (s >= 0 && !pool_prot_[(size_t) s]) {   // used after it was read: held
+            pool_prot_[(size_t) s] = 1;
+            ++pool_nprot_;
+        }
+        if (s < 0) {
+            const size_t v = pool_victim();
+            if (v == SIZE_MAX) continue;   // every slot held by this call or the next: the mapping, then
+            if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
+            pool_who_[v] = (int64_t) ((size_t) il * ne + e);
+            s = (int32_t) v;
+            pool_reads_.push_back({e, s, false});
+        }
+        pool_tick_[(size_t) s] = pool_now_;
+        pool_ref_[(size_t) s] = 1;
+        uint8_t* p = pool_.get() + (size_t) s * pool_slot_;
+        host[i].gate = p;
+        host[i].up = p + L.gu_bytes;
+        host[i].down = p + L.gu2();
+    }
+}
+
+// Expert e of layer il's bytes in its pool_ slot, or nullptr: none, or still being read.
+const uint8_t* Engine::pool_has(int il, int e) const {
+    const int32_t v = pool_ ? pool_of_[(size_t) il * n_expert_ + (size_t) e] : -1;
+    if (v < 0 || pool_state_[(size_t) v].load(std::memory_order_acquire) != 0) return nullptr;
+    return pool_.get() + (size_t) v * pool_slot_;
+}
+
+void Engine::pool_read(const Layer& L, PoolRead& r) {
+    uint8_t* p = pool_.get() + (size_t) r.s * pool_slot_;
+    r.ok = read_file(p, L.exp_gate + r.e * L.gu_stride, L.gu_bytes) &&
+           read_file(p + L.gu_bytes, L.exp_up + r.e * L.u_stride, L.u_bytes) &&
+           read_file(p + L.gu2(), L.exp_down + r.e * L.d_bytes, L.d_bytes);
 }
 
 // The routed experts of tokens that come a few at a time.  moe_router() is on its way, with ev_ behind it.  True
@@ -2631,6 +3005,18 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
     ck(cudaEventSynchronize((cudaEvent_t) ev_), "router");
     stats_.route_wait_ms += ms_since(t0);
     if (block_pass_) route_block(il, h_rl_, n);
+    if (pool_ && prompt_rows_ >= 4096 && !block_pass_) {
+        rekeep();
+        pool_reseed();
+    }
+    if (prefetch_k_ > 0 && !block_pass_ && n <= 16) {   // as moe_router() asked for it
+        size_t part = 0;
+        for (size_t q = 0; q < 8; ++q)
+            if (ev_ == ev_row_[q]) part = q;
+        int j = il + 1;
+        while (j < n_layer_ && !layers_[(size_t) j].moe) ++j;
+        if (j < n_layer_) pool_ahead(j, n, part, prefetch_k_);
+    }
 
     const float limit = clamp_exp_[(size_t) il];
     const size_t xq_row = kernels::native_q8_1_bytes(n_embd_);
@@ -2708,6 +3094,7 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
             }
             n_host = kept;
         }
+        if (pool_) pool_take(L, il, host, n_host);
         stats_.gpu_experts += n_cached;
         stats_.cpu_experts += n_host;
         // The launches cost this thread more than they cost the card, so each one less counts.  The cached experts
@@ -2777,9 +3164,41 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
         }
         any_host = true;
         t0 = Clock::now();
+        const std::function<void()>* meanwhile = n_cached > 0 || (first && at == 0) ? &launch : nullptr;
+        // The experts still being read (missed now, or read ahead and not there yet) are computed last, by
+        // cpu_experts(), and the others meanwhile: read before them, a call's reads held its whole CPU part up.
+        uint8_t late[kCpuRows * kMaxUsed];
+        bool any_late = false;
+        for (const PoolRead& r : pool_reads_) pool_queue(L, r.e, r.s, true);
+        for (int i = 0; i < n_host && pool_; ++i) {
+            const size_t off = (size_t) (host[i].gate - pool_.get());
+            late[i] = off < pool_bytes_ && pool_state_[off / pool_slot_].load(std::memory_order_acquire) != 0;
+            any_late = any_late || late[i];
+        }
+        // A read that failed is made once more by one of the waiting threads, then through the mapping.
+        const std::function<void(int)> wait = [&](int j) {
+            const size_t v = (size_t) (host[j].gate - pool_.get()) / pool_slot_;
+            uint8_t st;
+            while ((st = pool_state_[v].load(std::memory_order_acquire)) != 0) {
+                if (st == 2 && pool_state_[v].compare_exchange_strong(st, 3)) {
+                    const size_t x = (size_t) pool_who_[v], e = x % (size_t) n_expert_;
+                    PoolRead r{e, (int32_t) v, false};
+                    pool_read(L, r);
+                    if (!r.ok) {
+                        uint8_t* p = pool_.get() + v * pool_slot_;
+                        std::memcpy(p, L.exp_gate + e * L.gu_stride, L.gu_bytes);
+                        std::memcpy(p + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
+                        std::memcpy(p + L.gu2(), L.exp_down + e * L.d_bytes, L.d_bytes);
+                    }
+                    pool_state_[v].store(0, std::memory_order_release);
+                    break;
+                }
+                if (!pool_help()) std::this_thread::yield();
+            }
+        };
         cpu_experts(*workers_, host, n_host, m, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_,
-                    h_x_ + (size_t) at * e_row, limit, gelu_, cpu,
-                    n_cached > 0 || (first && at == 0) ? &launch : nullptr);
+                    h_x_ + (size_t) at * e_row, limit, gelu_, cpu, meanwhile, any_late ? late : nullptr, &wait);
+        pool_reads_.clear();
         stats_.cpu_ms += ms_since(t0);
     }
     return any_host;
@@ -2854,17 +3273,20 @@ void Engine::stage(const Layer& L, const int32_t* experts, int m, void* stream, 
         uint8_t* h = h_stage_[stage_turn_];
         const cudaEvent_t left = (cudaEvent_t) ev_stage_[stage_turn_];
         ck(cudaEventSynchronize(left), "expert staging");
-        // an expert the RAM budget leaves out is read from the file, not the mapping (read_file())
-        const uint8_t* kept = kept_.empty() ? nullptr : kept_.data() + (size_t) (&L - layers_.data()) * n_expert_;
+        // Under the RAM budget an expert outside kept_ comes from its pool_ slot, or else from the file, not the
+        // mapping (read_file()).  Nothing takes a slot while a prompt batch is read.
+        const int il = (int) (&L - layers_.data());
         const auto copy = [&](int i) {
             const size_t j = (size_t) i / 3, e = (size_t) experts[(size_t) j0 + j];
-            const auto get = [&](uint8_t* dst, const uint8_t* src, size_t n) {
-                if (kept && !kept[e] && read_file(dst, src, n)) return;
-                std::memcpy(dst, src, n);
+            const uint8_t* in = pool_has(il, (int) e);
+            const bool mapped = !pool_ || kept_[(size_t) il * n_expert_ + e];
+            const auto get = [&](uint8_t* dst, const uint8_t* src, size_t n, size_t at) {
+                if (in) std::memcpy(dst, in + at, n);
+                else if (mapped || !read_file(dst, src, n)) std::memcpy(dst, src, n);
             };
-            if (i % 3 == 0) get(h + j * step, L.exp_gate + e * L.gu_stride, L.gu_bytes);
-            else if (i % 3 == 1) get(h + j * step + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
-            else get(h + c * step + j * L.d_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
+            if (i % 3 == 0) get(h + j * step, L.exp_gate + e * L.gu_stride, L.gu_bytes, 0);
+            else if (i % 3 == 1) get(h + j * step + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes, L.gu_bytes);
+            else get(h + c * step + j * L.d_bytes, L.exp_down + e * L.d_bytes, L.d_bytes, L.gu2());
         };
         (alone ? *stagers_ : *workers_).run((int) (3 * c), copy);
         ck(cudaMemcpyAsync(stage_ + (size_t) j0 * step, h, c * step, cudaMemcpyHostToDevice, cs(stream)),
@@ -2972,7 +3394,9 @@ void Engine::moe_rows(Layer& L, int il, int n) {
     for (int i = 0; i < rr; ++i) {
         ++count_[(size_t) ids_[(size_t) i]];
         ++use_[(size_t) il * n_expert_ + (size_t) ids_[(size_t) i]];
+        if (pool_) prompt_use_[(size_t) il * n_expert_ + (size_t) ids_[(size_t) i]] += 1.f;
     }
+    if (pool_ && il == first_moe_layer()) prompt_rows_ += n;
     // The CPU computes some of the routed experts outside VRAM while the others are copied: the ones the fewest
     // tokens chose, whose copy costs as much as any other's and which cost the CPU about as much as their tokens.
     int n_spare = 0, n_cpu = 0;
@@ -2980,10 +3404,11 @@ void Engine::moe_rows(Layer& L, int il, int n) {
     on_cpu_.assign((size_t) n_expert_, 0);
     if (spare) {
         spare_.clear();
-        // not the ones the RAM budget leaves out: the card gets them through the staging buffer, read from the file
+        // under the RAM budget, the ones in kept_ or pool_ only: the card gets the others through the staging buffer
         const uint8_t* kept = kept_.empty() ? nullptr : kept_.data() + (size_t) il * n_expert_;
         for (int e = 0; e < n_expert_; ++e)
-            if (count_[(size_t) e] > 0 && !L.slot[(size_t) e] && (!kept || kept[e])) spare_.push_back(e);
+            if (count_[(size_t) e] > 0 && !L.slot[(size_t) e] && (!pool_ || kept[e] || pool_has(il, e)))
+                spare_.push_back(e);
         std::stable_sort(spare_.begin(), spare_.end(),
                          [&](int32_t a, int32_t b) { return count_[(size_t) a] < count_[(size_t) b]; });
         n_spare = (int) spare_.size();
@@ -3025,8 +3450,11 @@ void Engine::moe_rows(Layer& L, int il, int n) {
     for (int i = 0; i < rr; ++i) {
         const size_t e = (size_t) ids_[(size_t) i];
         if (on_cpu_[e]) {   // by token, as cpu_experts() takes them, and nothing of it in the card's sum
-            host_.push_back({L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes,
-                             w[i], i / n_used_});
+            if (const uint8_t* p = pool_has(il, (int) e))
+                host_.push_back({p, p + L.gu_bytes, p + L.gu2(), w[i], i / n_used_});
+            else
+                host_.push_back({L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes,
+                                 w[i], i / n_used_});
             w[i] = 0.f;
             continue;
         }

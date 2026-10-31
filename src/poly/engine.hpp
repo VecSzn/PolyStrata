@@ -16,13 +16,16 @@
 
 #include "cpu_experts.hpp"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -72,10 +75,10 @@ struct Options {
                                   ///< below 0: as the two took the time between them; 0: none
     int expert_swaps = 64;        ///< experts on their way into the cache at a time while an answer is written, each
                                   ///< to the slot of one the answer uses less; 0: the cache stays as it was loaded
-    int64_t ram_experts_mib = -1; ///< the experts outside VRAM that stay in this process's memory between requests,
-                                  ///< the most used first; the others are left to the file cache, which gives them to
-                                  ///< whatever needs the memory, and come back from it or the disk when a token routes
-                                  ///< to them.  Below 0: all of them
+    int64_t ram_experts_mib = -1; ///< the memory this process holds for the experts outside VRAM, answer or not:
+                                  ///< the ones used most lately are read into it from the files; the others are left
+                                  ///< to the file cache, which gives them to whatever needs the memory, and come back
+                                  ///< from it or the disk when a token routes to them.  Below 0: all of them
     bool stay_near = true;        ///< with several NUMA nodes, keep the CPU threads on the one that holds the experts
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
@@ -310,8 +313,8 @@ public:
     const Stats& stats() const;
     /// Between requests, and once after the load: of the experts the card has, the pages of the half used most
     /// lately leave this process's working set (after the load only under Options::ram_experts_mib), and so do the
-    /// CPU's experts past Options::ram_experts_mib and cuBLAS's pages; the pinned memory only a long prompt needs is
-    /// given back.
+    /// CPU's experts' under Options::ram_experts_mib and cuBLAS's pages; the pinned memory only a long prompt needs
+    /// is given back.
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
@@ -527,7 +530,7 @@ protected:
     void* dmalloc(size_t bytes, const char* what);
     void* hmalloc(size_t bytes, const char* what);
     void hfree(void* p);
-    std::vector<uint8_t> ram_keep() const;
+    std::vector<uint8_t> ram_keep(const std::vector<float>* lately = nullptr) const;
     bool read_file(uint8_t* dst, const uint8_t* src, size_t n) const;
     /// A write into VRAM, on st_.  Every one of them goes through these two or is an async call on a stream of
     /// its own: see the note on h2d() in engine.cpp.
@@ -814,13 +817,80 @@ protected:
     std::vector<Refill> refill_;   ///< empty slots of the cache the follower is to fill (grow_cache(later))
     /// the dense tensors' bytes in the mapped files, which leave the working set once they are on the card (load())
     std::vector<std::pair<const uint8_t*, size_t>> uploaded_;
-    std::vector<uint8_t> kept_;   ///< with Options::ram_experts_mib: ram_keep() as load() or trim() last made it
+    /// with Options::ram_experts_mib: the CPU's experts read through the mapping, whose pages stay in the working set
+    /// (ram_keep(), at the load and after a long prompt); the others come from pool_
+    std::vector<uint8_t> kept_;
+    void rekeep();
     struct FileView {
         const uint8_t* base;
         size_t bytes;
         std::string path;
     };
     std::vector<FileView> views_;   ///< the mapped files, for read_file()
+    // With Options::ram_experts_mib, the experts outside kept_ that an answer gives the CPU: read from the files into
+    // slots of this memory (gate | up | down, as a card's slot).  Through the mapping they stayed in the working set
+    // until trim(), and a long answer brought nearly all back.  kept_ and the slots fill the budget from the load
+    // on, so the working set stays where the load left it.
+    std::unique_ptr<uint8_t[]> pool_;
+    size_t pool_slot_ = 0;              ///< a slot's bytes: the largest expert's, in whole cache lines
+    size_t pool_bytes_ = 0;             ///< of Options::ram_experts_mib, what the slots take; kept_ has the rest
+    std::vector<uint8_t> pool_pin_;     ///< per slot: an upload to the card copies it (follow_loop())
+    const uint8_t* pool_has(int il, int e) const;
+    std::vector<int32_t> pool_of_;      ///< per (layer, expert): its slot, or -1
+    std::vector<int64_t> pool_who_;     ///< per slot: layer * n_expert + expert, or -1
+    std::vector<uint64_t> pool_tick_;   ///< per slot: the call that used it last
+    std::vector<uint8_t> pool_ref_;     ///< per slot: used since pool_victim()'s hand came by
+    // An expert read into a slot (missed, or read ahead) is on trial until a later call uses it, which holds it
+    // (pool_prot_).  The clock takes the trial slots it comes to, and passes the held ones that were used since
+    // it last came by; one that was not goes back on trial while more than pool_prot_max_ are held.  With every
+    // slot alike, the reads ahead that went unused (a third of them) pushed out experts later tokens used.
+    std::vector<uint8_t> pool_prot_;
+    size_t pool_nprot_ = 0, pool_prot_max_ = 0;
+    size_t pool_hand_ = 0;
+    size_t pool_victim();
+    uint64_t pool_now_ = 0;
+    struct PoolRead {
+        size_t e;
+        int32_t s;
+        bool ok;
+    };
+    std::vector<PoolRead> pool_reads_;   ///< pool_take()'s experts to read into their slots now
+    void pool_take(const Layer& L, int il, CpuExpert* host, int n);
+    void pool_read(const Layer& L, PoolRead& r);
+    void pool_fill();
+    int first_moe_layer() const;
+    // The prompt's own uses of each expert since trim() (moe_rows()), and its rows: after a long one, the answer's
+    // first call has the slots take the experts it used most (pool_reseed()).
+    std::vector<float> prompt_use_;
+    int64_t prompt_rows_ = 0;
+    void pool_reseed();
+    // Read ahead: moe_router() also scores the next MoE layer's router on this layer's input (on the card, copied to
+    // h_ahead_ before ev_, a part of a window apiece, as ev_row_; a head recorded as a graph copies it too), and
+    // moe() hands that layer's likeliest experts that the CPU would read from the files to pool_threads_ before
+    // this layer's are computed.
+    // A slot being read is pool_state_ 1 (2: the read failed); its layer's call waits for it.
+    int prefetch_k_ = 0;   ///< the next MoE layer's guessed top k
+    float* ahead_dev_ = nullptr;
+    float* h_ahead_ = nullptr;
+    std::unique_ptr<std::atomic<uint8_t>[]> pool_state_;
+    struct PoolJob {   ///< a piece of an expert's read into its slot
+        uint8_t* dst;
+        const uint8_t* src;
+        size_t n;
+        int32_t s;
+    };
+    std::deque<PoolJob> pool_jobs_;
+    std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
+    std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
+    void pool_queue(const Layer& L, size_t e, int32_t s, bool first);
+    std::mutex pool_m_;
+    std::condition_variable pool_cv_;
+    bool pool_quit_ = false;
+    std::vector<std::thread> pool_threads_;
+    void pool_ahead(int j, int n, size_t part, int k);
+    void pool_loop();
+    void pool_run(const PoolJob& job);
+    bool pool_help();
     std::mutex swap_m_;
     std::condition_variable swap_cv_;
     bool swap_quit_ = false;

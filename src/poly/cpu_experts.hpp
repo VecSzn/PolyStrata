@@ -67,8 +67,11 @@ bool cpu_expert_types_ok(int gu_type, int d_type, int n_embd, int n_ff, std::str
 /// once for all of them: reading it is most of the work.  A token's result is the one it has in a call of its own.
 /// `meanwhile`, when given, is run once by one of the threads, beside the first products.  It must not throw.
 /// u_type is up's type: gate's in every file but the few that quantize the two apart.
+/// `late`, when given, marks the experts whose weights are still being read: their products come after the others',
+/// and `wait(j)` is called before experts[j]'s are read.  The sums are as without them.
 void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, int gu_type, int u_type, int d_type,
                  int n_embd, int n_ff, const float* x, float limit, bool gelu, float* out,
-                 const std::function<void()>* meanwhile = nullptr);
+                 const std::function<void()>* meanwhile = nullptr, const uint8_t* late = nullptr,
+                 const std::function<void(int)>* wait = nullptr);
 
 }  // namespace strata::poly
