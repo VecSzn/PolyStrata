@@ -2410,3 +2410,12 @@ buffers during prefill. Unset or `0` keeps the stock copies. The setting is capt
 restart to change it. It can also be set in the server model's `env` map. Builds without SSE2 keep stock copies.
 This applies to the shared strata-poly staging path; the original strata engine and background expert swaps
 are unchanged. No extra host or GPU buffer is allocated, and the model file mapping is unchanged.
+
+### Expert upload group size (strata-poly)
+
+`STRATA_POLY_CHUNK_STAGE_MIB=<MiB>` sets the target group size when packing experts for prompt uploads,
+so an upload can start while workers pack the next group. Tune the size for your model and hardware.
+Unset or 0 keeps stock grouping. Targets are integers from 1 to 512; invalid values warn once at
+initialization and fall back to stock staging. The setting is read at initialization and can also be supplied
+through the model's `env` map. Groups contain whole experts and fit the existing pinned buffer; experts
+larger than the target retain stock grouping.

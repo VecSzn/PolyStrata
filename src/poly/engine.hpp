@@ -775,6 +775,7 @@ protected:
     double ahead_ms_ = 0, route_ms_ = 0;          ///< what that layer's copy ahead took, and the card to its routing
     bool shared_ahead_ = false;                   ///< read() runs several calls: each copies ahead, whatever its size
     size_t stage_bytes_ = 0, chunk_bytes_ = 0;
+    size_t stage_chunk_target_ = 0;               ///< upload target in bytes; zero keeps stock grouping
     Mapped stage_map_;                            ///< stage_'s VRAM when it can grow for a read (stage_read_mib)
     size_t stage_narrow_ = 0, stage_wide_ = 0;    ///< stage_bytes_ outside a read and inside one
     bool stage_lent_ = false;                     ///< the expert cache has lent the buffer VRAM (widen_stage())

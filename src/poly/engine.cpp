@@ -12,6 +12,7 @@
 #include "mmq.hpp"
 #include "qwen35.hpp"
 #include "runtime.hpp"
+#include "stage_chunk.hpp"
 #include "strata/poly/kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
 
@@ -2010,6 +2011,10 @@ void Engine::load(const Options& o) {
     // CPU instead (the cache holds it, but the split is the first token's).  What it buys: greedy answers that
     // repeat bit for bit, which is what a test, a benchmark of quality or a comparison with another engine needs.
     freeze_experts_ = freeze_experts_asked_ = std::getenv("STRATA_FREEZE_EXPERTS") != nullptr;
+    stage_chunk_target_ = stage_chunk_target(std::getenv("STRATA_POLY_CHUNK_STAGE_MIB"));
+    if (stage_chunk_target_)
+        std::fprintf(stderr, "strata-poly: STRATA_POLY_CHUNK_STAGE_MIB: %zu MiB expert upload target\n",
+                     stage_chunk_target_ >> 20);
     if (freeze_experts_)
         std::fprintf(stderr, "strata-poly: the experts' split is frozen for the engine's whole run "
                              "(STRATA_FREEZE_EXPERTS): greedy answers are a function of the request alone, "
@@ -3419,7 +3424,7 @@ bool Engine::moe_card(Layer& L, int il, int n) {
 void Engine::stage(const Layer& L, const int32_t* experts, int m, void* stream, bool alone) {
     staged_il_ = -1;   // whatever the buffer held
     const size_t step = L.gu_step, down_at = pad((size_t) m * step);
-    const int per = (int) (chunk_bytes_ / (step + L.d_bytes));
+    const int per = (int) stage_chunk_experts(chunk_bytes_, step + L.d_bytes, stage_chunk_target_);
     for (int j0 = 0; j0 < m; j0 += per) {
         const size_t c = (size_t) std::min(per, m - j0);
         stage_turn_ ^= 1;
