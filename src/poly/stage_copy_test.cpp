@@ -1,4 +1,12 @@
 #include <cstddef>
+// stage_copy.hpp's own headers first: on MSVC they bring in <intrin.h>, whose _mm_stream_si128 the macro below
+// would rename
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #include <emmintrin.h>
 namespace {
