@@ -38,6 +38,10 @@ leaves out.
 | [DRojasLey](https://github.com/VecSzn/PolyStrata/issues/98) | RX 7800 XT 16 GB (gfx1101) | Ryzen 7 5700X; 31.3 GB; Ubuntu 24.04.5, ROCm from AMD's wheels | Tiel Coder 35B-A3B UD-Q3_K_XL, main at 7b700758, `tools/strata_bench.py` | 128K, `--kv-whole`, `--kv q8_0`, `--vram-reserve-mib 4096` | on, 67% to 79% of the guesses kept | 86 in a short chat (80 to 102), 67 after a 32K prompt | 885 at 4K, 873 at 16K, 661 at 32K | the first report of Tiel Coder on an RX 7800 XT |
 | [Csavoldi](https://github.com/VecSzn/PolyStrata/issues/88) | 2x Tesla V100-PCIE-32GB (sm_70), the layers split over both | Xeon E5-2682 v4; 47 GB; Linux | Qwen3.6-35B-A3B UD-Q3_K_M, main at 7b700758 built with CUDA 12.9.1 and `-DSTRATA_EXPERIMENTAL_SM60=ON`, `tools/strata_bench.py` | 32K | not stated | 157.5 in a short chat (135 to 196), 134.2 in an agent session | 2,615 at 4K, 2,778 at 16K | the first report of strata-poly on a Volta card |
 | [GodrezJr2](https://github.com/VecSzn/PolyStrata/issues/107) | RTX 4060 Laptop 8 GB | Core i9-14900HX, 8 threads for the experts; 31.7 GB; Windows 11 | Qwen3.6-35B-A3B UD-Q3_K_M, 0.1.45-poly.4's ready-made engine, a 117,977-token prompt and 64-token answers | 128K, `--kv q8_0`, `--tail-skip 6` | not stated | 32.1 after the long prompt; 51.0 with `STRATA_FDEC=1` | 814; 1,318 with `STRATA_FATTN=1` | the two switches at 118K, which DETAILS.md measured only on an RTX 3070: 1.62x reading, 1.60x writing; both together 1,308 / 51.4 |
+| [brocasm](https://github.com/VecSzn/PolyStrata/issues/115) | RX 7900 XTX 24 GB (gfx1100) | Ryzen 7 5700X; 31.2 GiB; CachyOS Linux, the HIP backend | Clover-35B-A3B-Preview Q4_K_M, 0.1.45-poly.6 (20d839db), `tools/strata_bench.py` | 128K, `--kv-whole` | not stated | 123 in a short chat (116 to 126), 112 in an agent session | 3,990 at 4K, 3,021 at 16K | |
+| [LionelColaso](https://github.com/VecSzn/PolyStrata/pull/111) | GTX 1650 4 GB | Core i5-9300H; 23.9 GiB; Windows 11 | Clover-35B-A3B-Preview APEX-I-NanoPlus, 0.1.45-poly.6 (20d839d), `tools/strata_bench.py` | 32K | 13 of 33 guesses kept | 11.6 in a short chat (10.6 to 13.7), 9.4 in an agent session | 136 at 4K, 110 at 16K | |
+| [LionelColaso](https://github.com/VecSzn/PolyStrata/pull/111) | GTX 1650 4 GB | Core i5-9300H; 23.9 GiB; Windows 11 | MiniCPM-V 4.7 35B-A3B mix_q3gud_im, 0.1.45-poly.6 (20d839d), `tools/strata_bench.py` | 32K | 26 of 60 guesses kept | 17.8 in a short chat (15.6 to 20.6), 15.0 in an agent session | 147 at 4K, 116 at 16K | the Clover row above, on the same PC |
+| [HexhamAllstar](https://github.com/VecSzn/PolyStrata/pull/113) | RTX 3080 10 GB | Ryzen 7 5700X3D; 63.9 GiB; Windows 11 | Tiel Coder 35B-A3B UD-Q4_K_XL, 0.1.45, `tools/strata_bench.py` | 64K | on, 73% of the guesses kept | 77 in a short chat (66 to 85), 80 in an agent session | 1,420 at 4K, 2,527 at 16K | |
 
 Setup offers Tiel Coder now (`--family tiel`), and not the HauhauCS file. How to give setup such a file is in the
 [FAQ](FAQ.md#can-i-run-a-fine-tune-or-another-model-with-the-same-architecture).
@@ -64,6 +68,11 @@ compares **v0.1.45-poly.2 and v0.1.45-poly.4** at 28 and 52 GiB container memory
 It includes 28 official suites, frozen expert-profile seeds, exact native HIP build hashes and four retained LFM
 agent-request failures. The earlier report stays intact; the new limits compare available capacity on the upgraded
 machine rather than recreating its old physical RAM.
+
+The official suite on a [GTX 1650 4 GB with Clover APEX-I-NanoPlus](../bench/results/2026-10-30-community-gtx-1650-clover-35b-a3b-preview-apex-i-nanoplus/README.md)
+and [with MiniCPM-V mix_q3gud_im](../bench/results/2026-10-30-community-gtx-1650-minicpm-v-4-7-35b-a3b-mix-q3gud-im/README.md),
+and on an [RTX 3080 10 GB with Tiel Coder UD-Q4_K_XL](../bench/results/2026-10-30-community-rtx-3080-tiel-coder-35b-a3b-ud-q4-k-xl/README.md),
+all three with v0.1.45-poly.6 and per-request data; their rows are in the table above.
 
 ### Comparing with llama.cpp
 
