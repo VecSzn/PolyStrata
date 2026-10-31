@@ -96,22 +96,32 @@ Desde 0.1.45-poly.7, el motor de los once modelos ocupa menos RAM: ya no guarda 
 modelo que ya están en la tarjeta gráfica. En el portátil, tras un prompt de 32,000 tokens, Qwen3.6-35B-A3B ocupaba
 17.9 GiB con 0.1.45-poly.6 y ahora ocupa 13.1 GiB, y escribe igual de rápido. En Linux pasó de 17.8 a 12.6 GiB.
 
-Para ocupar mucho menos, añade `"--ram-experts-mib", "N"` a la lista `"args"` de `strata-<model>.json` ([dónde](docs/INSTALL.md#where-things-are-stored))
-y reinicia. Entre una petición y otra, el motor guarda solo los N MiB de expertos que más ha usado últimamente y deja
-los demás a la caché de archivos del sistema, donde otros programas pueden usar esa memoria:
+Para ocupar menos, añade `"--ram-experts-mib", "6144"` a la lista `"args"` de `strata-<model>.json`
+([dónde](docs/INSTALL.md#where-things-are-stored)) y reinicia. El motor guarda entonces esos MiB de RAM para los
+expertos que quedan fuera de la VRAM, también mientras responde, y lo dice al arrancar. Los demás se quedan en la
+caché de archivos del sistema, donde tus otros programas pueden usar esa memoria, y se leen de ahí cuando un token
+los necesita. Viene apagado porque escribe más lento, y seguimos trabajando en ello. En el portátil (RTX 4070 Laptop
+8 GB, 32 GB de RAM, Windows 11), Qwen3.6-35B-A3B UD-Q3_K_M:
 
-| Qwen3.6-35B-A3B en el portátil, tras un prompt de 32K | por defecto | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
-| --- | ---: | ---: | ---: |
-| RAM que ocupa el motor | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
-| Escribe, tokens/s: tras un prompt corto / tras el de 32K | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+| | por defecto | `--ram-experts-mib 6144` |
+| --- | ---: | ---: |
+| RAM que ocupa el motor tras cargar | 11.7 GiB | **6.5 GiB** |
+| como máximo al escribir: chat corto / tras un prompt de 32K | 14.3 / 14.0 GiB | **6.7 / 7.3 GiB** |
+| entre peticiones | 12.8 GiB | **7.1 GiB** |
+| Escribe, tokens/s: el primer chat corto | 71.6 | 69.4 (3 % más lento) |
+| tras el prompt de 32K | 65.4 | 63.7 (3 % más lento) |
+| un chat corto después | 84.2 | 72.9 (13 % más lento) |
+| una respuesta larga (1,024 tokens de un chat corto) | 90.6 | 78.3 (14 % más lento) |
 
-Es el motor solo después del prompt. A través del servidor, con 3072 y un chat corto antes, ocupaba 5.2 GiB; justo
-después de arrancar, hasta su primera respuesta, ocupa más (7.1 GiB con 3072). Mientras responde ocupa más, los expertos que lee la respuesta; se liberan al terminar, y el sistema puede
-recuperarlos antes si otro programa necesita la memoria. Un experto que no se guardó se vuelve a leer cuando un token lo necesita: de la caché de archivos mientras el sistema
-lo conserve, y si no, del SSD, que es más lento. LFM2.5, cuyos expertos son más grandes, escribe entre un 7 y un 12 %
-más lento con 3072. El motor también necesita entre 350 y 400 MiB menos de VRAM para leer prompts: se los queda la
-caché de expertos (Qwen3.6 guarda 2,712 expertos en VRAM en vez de 2,444), o `--vram-reserve-mib` los deja a otros
-programas. Cómo se midió: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+En esta medida otros programas ocupaban parte de la VRAM, así que las dos columnas escriben más lento que con la
+tarjeta libre. En otras dos medidas escribió entre un 6 y un 8 % más lento tras el prompt de 32K y entre un 8 y un
+10 % en el chat siguiente. En Linux (una RTX PRO 6000 limitada a unos 8 GB) ocupó de 7.0 a 7.7 GiB en vez de 12.3 a
+14.3 y escribió entre un 7 y un 14 % más lento. Con la caché de expertos fija, como se comprueba una versión, las
+respuestas son iguales token a token.
+
+El motor también necesita entre 350 y 400 MiB menos de VRAM para leer prompts: se los queda la caché de expertos
+(Qwen3.6 guarda 2,712 expertos en VRAM en vez de 2,444), o `--vram-reserve-mib` los deja a otros programas. Cómo
+funciona y cómo se midió: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
 
 ## Qué necesitas
 

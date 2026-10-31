@@ -93,23 +93,31 @@ Since 0.1.45-poly.7 the engine of the eleven models keeps less of your RAM: it n
 model file that are already on the graphics card. On the laptop, Qwen3.6-35B-A3B after a 32,000-token prompt held
 17.9 GiB with 0.1.45-poly.6 and holds 13.1 GiB now, and writes as fast. Under Linux it went from 17.8 to 12.6 GiB.
 
-To keep much less, add `"--ram-experts-mib", "N"` to the `"args"` list of `strata-<model>.json`
-([where](docs/INSTALL.md#where-things-are-stored)) and restart. Between requests the engine then keeps only the N MiB
-of experts it used most lately, and leaves the others to the system's file cache, where other programs can take
-that memory:
+To hold less, add `"--ram-experts-mib", "6144"` to the `"args"` list of `strata-<model>.json`
+([where](docs/INSTALL.md#where-things-are-stored)) and restart. The engine then holds that many MiB of RAM for the
+experts that stay outside VRAM, while it answers too, and says so when it starts. The others stay in the system's
+file cache, where your other programs can take that memory, and are read from it when a token needs them. It is off
+by default because it writes slower, and we are still working on that. On the laptop (RTX 4070 Laptop 8 GB, 32 GB
+of RAM, Windows 11), Qwen3.6-35B-A3B UD-Q3_K_M:
 
-| Qwen3.6-35B-A3B on the laptop, after a 32K prompt | default | `--ram-experts-mib 3072` | `--ram-experts-mib 1024` |
-| --- | ---: | ---: | ---: |
-| RAM the engine holds | 13.1 GiB | **4.9 GiB** | **3.0 GiB** |
-| Writes, tokens/s: after a short prompt / after the 32K one | 83.5 / 77.9 | 83.1 / 75.1 | 81.2 / 70.3 |
+| | default | `--ram-experts-mib 6144` |
+| --- | ---: | ---: |
+| RAM the engine holds after it loads | 11.7 GiB | **6.5 GiB** |
+| at most while it writes: short chat / after a 32K prompt | 14.3 / 14.0 GiB | **6.7 / 7.3 GiB** |
+| between requests | 12.8 GiB | **7.1 GiB** |
+| Writes, tokens/s: the first short chat | 71.6 | 69.4 (3% slower) |
+| after the 32K prompt | 65.4 | 63.7 (3% slower) |
+| a short chat after that | 84.2 | 72.9 (13% slower) |
+| a long answer (1,024 tokens of a short chat) | 90.6 | 78.3 (14% slower) |
 
-That is the engine alone after the prompt. Through the server, with 3072 and a short chat before it, it held 5.2 GiB;
-right after it starts, until its first answer, it holds more (7.1 GiB with 3072). While it answers it holds more, the experts the answer reads; they go when it is done, and the system can
-take them back sooner if another program needs the memory. An expert it left out is read back when a token needs it: from the file cache while the system keeps it there, from
-the SSD when it does not, which is slower. LFM2.5, whose experts are larger, writes 7 to 12% slower with 3072. The
-engine also needs 350 to 400 MiB less VRAM for reading prompts: the expert cache takes it (Qwen3.6 keeps 2,712
+Other programs held part of the card's VRAM in this run, so both columns write slower than with the card free. In
+two other runs it wrote 6 to 8% slower after the 32K prompt and 8 to 10% slower in the chat after it. Under Linux
+(an RTX PRO 6000 held to about 8 GB) it held 7.0 to 7.7 GiB instead of 12.3 to 14.3 and wrote 7 to 14% slower. With
+the expert cache held still, as a release is checked, the answers are the same token for token.
+
+The engine also needs 350 to 400 MiB less VRAM for reading prompts: the expert cache takes it (Qwen3.6 keeps 2,712
 experts in VRAM instead of 2,444), or `--vram-reserve-mib` leaves it to other programs.
-How it was measured: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+How it works and how it was measured: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
 
 ## What you need
 
