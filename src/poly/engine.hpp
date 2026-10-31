@@ -933,6 +933,7 @@ protected:
     uint64_t images_set_ = 0;            ///< counts images(): what was derived from an earlier list is stale
     std::vector<int64_t> use_, prior_;   ///< routed count per (layer, expert): this run, and the profile's
     Stats stats_;
+    bool stream_stage_ = false;         ///< opt-in streaming CPU stores into the existing expert upload buffers
 };
 
 }  // namespace strata::poly

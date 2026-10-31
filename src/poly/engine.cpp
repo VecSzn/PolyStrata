@@ -1,6 +1,7 @@
 // src/poly/engine.cpp - see the header.  What every architecture shares: the files, the weights' way to VRAM, the
 // routed experts (the cache, the CPU, a prompt batch), the sequence's state, and the calls that feed tokens.
 #include "engine.hpp"
+#include "stage_copy.hpp"
 
 #include "deepseek4.hpp"
 #include "gemma4.hpp"
@@ -1988,6 +1989,12 @@ void Engine::load(const Options& o) {
     if (!(opt_.cache_bias >= 0.f && opt_.cache_bias <= 16.f))
         throw std::runtime_error("--cache-bias is added to a router score: 0 (off) up to 16");
     if (opt_.dump || std::min(opt_.prompt_batch, opt_.max_context) == 1) opt_.window = 1;
+    const char* stream_stage = std::getenv("STRATA_POLY_STREAM_STAGE");
+    const bool requested_stream_stage = stream_stage && std::atoi(stream_stage) == 1;
+    stream_stage_ = requested_stream_stage && stage_copy_streaming_available();
+    if (requested_stream_stage)
+        std::fprintf(stderr, "strata-poly: STRATA_POLY_STREAM_STAGE: %s\n",
+                     stream_stage_ ? "streaming CPU stores for expert staging" : "unsupported CPU build; stock copies");
     gg_ = std::make_unique<Shards>(opt_.model);
     if (!opt_.draft_model.empty() && opt_.draft && opt_.window != 1) dg_ = std::make_unique<Shards>(opt_.draft_model);
     load_geometry();
@@ -3431,13 +3438,17 @@ void Engine::stage(const Layer& L, const int32_t* experts, int m, void* stream, 
         // Under the RAM budget an expert outside kept_ comes from its pool_ slot, or else from the file, not the
         // mapping (read_file()).  Nothing takes a slot while a prompt batch is read.
         const int il = (int) (&L - layers_.data());
+        const auto put = [&](void* dst, const void* src, size_t bytes) {
+            if (stream_stage_) stage_copy_streaming(dst, src, bytes);
+            else std::memcpy(dst, src, bytes);
+        };
         const auto copy = [&](int i) {
             const size_t j = (size_t) i / 3, e = (size_t) experts[(size_t) j0 + j];
             const uint8_t* in = pool_has(il, (int) e);
             const bool mapped = !pool_ || kept_[(size_t) il * n_expert_ + e];
             const auto get = [&](uint8_t* dst, const uint8_t* src, size_t n, size_t at) {
-                if (in) std::memcpy(dst, in + at, n);
-                else if (mapped || !read_file(dst, src, n)) std::memcpy(dst, src, n);
+                if (in) put(dst, in + at, n);
+                else if (mapped || !read_file(dst, src, n)) put(dst, src, n);
             };
             if (i % 3 == 0) get(h + j * step, L.exp_gate + e * L.gu_stride, L.gu_bytes, 0);
             else if (i % 3 == 1) get(h + j * step + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes, L.gu_bytes);

@@ -1991,6 +1991,8 @@ if(STRATA_BUILD_TESTS)
   add_test(NAME poly_hip_value_split_policy_test COMMAND poly_hip_value_split_policy_test)
   add_executable(poly_gdn_mma_control_test src/poly/gdn_mma_control_test.cpp)
   add_test(NAME poly_gdn_mma_control_test COMMAND poly_gdn_mma_control_test)
+  add_executable(poly_stream_stage_test src/poly/stage_copy_test.cpp)
+  add_test(NAME poly_stream_stage_test COMMAND poly_stream_stage_test)
 endif()
 
 # Shared prepared-input GDN recurrence. Either engine may link this library;
