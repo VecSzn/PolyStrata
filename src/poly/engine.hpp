@@ -833,8 +833,23 @@ protected:
     // until trim(), and a long answer brought nearly all back.  kept_ and the slots fill the budget from the load
     // on, so the working set stays where the load left it.
     std::unique_ptr<uint8_t[]> pool_;
-    size_t pool_slot_ = 0;              ///< a slot's bytes: the largest expert's, in whole cache lines
-    size_t pool_bytes_ = 0;             ///< of Options::ram_experts_mib, what the slots take; kept_ has the rest
+    // The slots come in a size for each size of expert, side by side, each size with its share of the budget and a
+    // clock of its own.  Every slot the size of the largest one, Qwen3.6's 6 GiB held 3263 of its experts where
+    // their own sizes held 4625: one of its 41 layers has experts of 1.88 MiB, 37 of 1.30.
+    struct PoolSize {
+        size_t bytes;   ///< a slot's, in whole cache lines
+        size_t at;      ///< where the first one starts in pool_
+        size_t first;   ///< its number
+        size_t n;
+        size_t hand;    ///< pool_victim()'s, within these
+        size_t nprot;   ///< of these, held (pool_prot_)
+        size_t prot_max;
+    };
+    std::vector<PoolSize> pool_sizes_;
+    std::vector<uint8_t> pool_size_of_;   ///< per layer: its experts' place in pool_sizes_
+    size_t pool_bytes_ = 0;               ///< of Options::ram_experts_mib, what the slots take; kept_ has the rest
+    uint8_t* pool_at(size_t v) const;
+    size_t pool_slot_of(int il, const uint8_t* p) const;
     std::vector<uint8_t> pool_pin_;     ///< per slot: an upload to the card copies it (follow_loop())
     const uint8_t* pool_has(int il, int e) const;
     std::vector<int32_t> pool_of_;      ///< per (layer, expert): its slot, or -1
@@ -843,12 +858,13 @@ protected:
     std::vector<uint8_t> pool_ref_;     ///< per slot: used since pool_victim()'s hand came by
     // An expert read into a slot (missed, or read ahead) is on trial until a later call uses it, which holds it
     // (pool_prot_).  The clock takes the trial slots it comes to, and passes the held ones that were used since
-    // it last came by; one that was not goes back on trial while more than pool_prot_max_ are held.  With every
-    // slot alike, the reads ahead that went unused (a third of them) pushed out experts later tokens used.
+    // it last came by; one that was not goes back on trial while more than prot_max of its size are held.  With every
+    // slot alike, the reads ahead that went unused (a third of them) pushed out experts later tokens used.  One clock
+    // whose reads ahead come in unmarked missed half as often with all the budget in slots, but the file cache kept a
+    // second copy of what the slots held and pushed out what they did not: the laptop read 7.5 GiB from its disk in
+    // an answer's 35 seconds, where kept_'s pages through the mapping are the file cache's own.
     std::vector<uint8_t> pool_prot_;
-    size_t pool_nprot_ = 0, pool_prot_max_ = 0;
-    size_t pool_hand_ = 0;
-    size_t pool_victim();
+    size_t pool_victim(int il);
     uint64_t pool_now_ = 0;
     struct PoolRead {
         size_t e;

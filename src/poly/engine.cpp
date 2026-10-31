@@ -1748,7 +1748,7 @@ void Engine::follow_loop() {
                 if (mapped || !read_file(dst, src, n)) std::memcpy(dst, src, n);
             };
             if (from >= 0) {
-                std::memcpy(h, pool_.get() + (size_t) from * pool_slot_, gu2 + L.d_bytes);
+                std::memcpy(h, pool_at((size_t) from), gu2 + L.d_bytes);
             } else {
                 get(h, L.exp_gate + e * L.gu_stride, gu);
                 get(h + gu, L.exp_up + e * L.u_stride, L.u_bytes);
@@ -1815,14 +1815,16 @@ void Engine::follow(int written) {
             if (s.from >= 0) {   // the card has it now: its pool_ slot is free for another
                 const size_t v = (size_t) s.from;
                 --pool_pin_[v];
-                pool_nprot_ -= pool_prot_[v];
+                pool_sizes_[pool_size_of_[(size_t) s.il]].nprot -= pool_prot_[v];
                 pool_prot_[v] = 0;
                 pool_of_[(size_t) s.il * ne + (size_t) s.e] = -1;
                 pool_who_[v] = -1;
                 s.from = -1;
-                const int64_t g = s.gets;   // the expert the cache gave up for it, if it is still the CPU's
+                // the expert the cache gave up for it, if it is still the CPU's and of the slot's size
+                const int64_t g = s.gets;
                 if (g >= 0 && pool_of_[(size_t) g] < 0 && !kept_[(size_t) g] &&
-                    !layers_[(size_t) g / ne].slot[(size_t) g % ne]) {
+                    !layers_[(size_t) g / ne].slot[(size_t) g % ne] &&
+                    pool_size_of_[(size_t) g / ne] == pool_size_of_[(size_t) s.il]) {
                     pool_who_[v] = g;
                     pool_of_[(size_t) g] = (int32_t) v;
                     pool_tick_[v] = pool_now_;
@@ -2147,19 +2149,44 @@ void Engine::load(const Options& o) {
         opt_.ram_experts_mib = bytes > ((size_t) kAuto << 20) && bytes <= ((size_t) 2 * kAuto << 20) ? kAuto : -1;
     }
     if (opt_.ram_experts_mib >= 0) {
-        for (const Layer& L : layers_)
-            if (L.moe) pool_slot_ = std::max(pool_slot_, (L.gu2() + L.d_bytes + 63) / 64 * 64);
+        // each size of slot takes the share of the budget its experts outside VRAM have of all of those
+        pool_size_of_.assign(layers_.size(), 0);
+        std::vector<size_t> outside;   // by size
+        for (size_t il = 0; il < layers_.size(); ++il) {
+            const Layer& L = layers_[il];
+            if (!L.moe) continue;
+            const size_t b = (L.gu2() + L.d_bytes + 63) / 64 * 64;
+            size_t c = 0;
+            while (c < pool_sizes_.size() && pool_sizes_[c].bytes != b) ++c;
+            if (c == pool_sizes_.size()) {
+                pool_sizes_.push_back({b, 0, 0, 0, 0});
+                outside.push_back(0);
+            }
+            pool_size_of_[il] = (uint8_t) c;
+            for (int e = 0; e < n_expert_; ++e) outside[c] += L.slot[(size_t) e] ? 0 : b;
+        }
         const size_t want = ((size_t) opt_.ram_experts_mib << 20) / 4;   // a quarter of the budget; kept_ has the rest
-        const size_t slots = pool_slot_ ? std::max<size_t>(want / pool_slot_, (size_t) kCpuRows * kMaxUsed) : 0;
-        pool_bytes_ = slots * pool_slot_;
-        const size_t turn = std::min(slots, (size_t) 2 * kCpuRows * kMaxUsed);   // a call's and the next one's
-        pool_prot_max_ = slots - std::max(turn, slots / 4);
-        pool_prot_.assign(slots, 0);
+        size_t all = 0, slots = 0;
+        for (size_t b : outside) all += b;
+        for (size_t c = 0; c < pool_sizes_.size(); ++c) {
+            // a call's experts are of one layer, so one size; one that finds every slot of its size held by this
+            // call and the next goes through the mapping (pool_take())
+            PoolSize& z = pool_sizes_[c];
+            const double part = all ? (double) outside[c] / (double) all : 0.0;
+            z.n = std::max<size_t>((size_t) ((double) want * part) / z.bytes, 64);
+            const size_t turn = std::min(z.n, (size_t) 2 * kCpuRows * kMaxUsed);   // a call's and the next one's
+            z.prot_max = z.n - std::max(turn, z.n / 4);
+            z.first = slots;
+            z.at = pool_bytes_;
+            slots += z.n;
+            pool_bytes_ += z.n * z.bytes;
+        }
         pool_.reset(new uint8_t[pool_bytes_]);
         pool_of_.assign(layers_.size() * (size_t) n_expert_, -1);
         pool_who_.assign(slots, -1);
         pool_tick_.assign(slots, 0);
         pool_ref_.assign(slots, 0);
+        pool_prot_.assign(slots, 0);
         pool_pin_.assign(slots, 0);
         prompt_use_.assign(layers_.size() * (size_t) n_expert_, 0.f);
         pool_pending_.reset(new std::atomic<int>[slots]);
@@ -2753,7 +2780,7 @@ void Engine::pool_ahead(int j, int n, size_t part, int k) {
         for (int q = 0; q < m; ++q) {
             const size_t e = (size_t) top[q], x = (size_t) j * ne + e;
             if (L.slot[e] || kept_[x] || pool_of_[x] >= 0) continue;
-            const size_t v = pool_victim();
+            const size_t v = pool_victim(j);
             if (v == SIZE_MAX) {   // no slot to spare; what was queued is still read
                 full = true;
                 break;
@@ -2846,7 +2873,7 @@ void Engine::rekeep() {
 // After the load: the slots take the experts the profile has used most of those outside kept_ and the card, read
 // on every CPU thread, so that the first answer finds them.
 void Engine::pool_fill() {
-    const size_t ne = (size_t) n_expert_, slots = pool_who_.size();
+    const size_t ne = (size_t) n_expert_;
     std::vector<std::pair<int64_t, size_t>> cands;
     for (size_t il = 0; il < layers_.size(); ++il)
         if (layers_[il].moe)
@@ -2859,30 +2886,38 @@ void Engine::pool_fill() {
         PoolRead r;
     };
     std::vector<Fill> fills;
-    for (size_t k = 0; k < cands.size() && k < slots; ++k) {
-        const size_t x = cands[k].second;
+    std::vector<size_t> next;   // by size: the next slot to fill
+    for (const PoolSize& z : pool_sizes_) next.push_back(z.first);
+    for (const auto& cand : cands) {
+        const size_t x = cand.second, c = pool_size_of_[x / ne], k = next[c];
+        PoolSize& z = pool_sizes_[c];
+        if (k == z.first + z.n) continue;
+        ++next[c];
         if (pool_who_[k] >= 0) pool_of_[(size_t) pool_who_[k]] = -1;
         pool_who_[k] = (int64_t) x;
         pool_of_[x] = (int32_t) k;
-        pool_prot_[k] = k < pool_prot_max_;   // the profile's most used start held
+        pool_prot_[k] = k - z.first < z.prot_max;   // the profile's most used start held
         fills.push_back({x, {x % ne, (int32_t) k, false}});
     }
-    pool_nprot_ = (size_t) std::count(pool_prot_.begin(), pool_prot_.end(), 1);
     workers_->run((int) fills.size(), [&](int t) { pool_read(layers_[fills[(size_t) t].x / ne], fills[(size_t) t].r); });
     for (const Fill& f : fills)
         if (!f.r.ok) {
             pool_of_[f.x] = -1;
             pool_who_[(size_t) f.r.s] = -1;
+            pool_prot_[(size_t) f.r.s] = 0;
         }
+    for (PoolSize& z : pool_sizes_)
+        z.nprot = (size_t) std::count(pool_prot_.begin() + (ptrdiff_t) z.first,
+                                      pool_prot_.begin() + (ptrdiff_t) (z.first + z.n), 1);
 }
 
-// After a prompt of 4,096 tokens or more, at the answer's first call: the held part of the slots (pool_prot_max_)
+// After a prompt of 4,096 tokens or more, at the answer's first call: the held part of each size of slot (prot_max)
 // takes the experts the prompt used most, read on every CPU thread; the slots of experts it used less give way.
 // The answer to a new document routes to its experts, not to the last answer's: after a 32K prompt the slots
 // missed 4.5 experts a token, and waiting for them was the CPU's whole extra time.
 void Engine::pool_reseed() {
     prompt_rows_ = 0;
-    const size_t ne = (size_t) n_expert_, slots = pool_who_.size();
+    const size_t ne = (size_t) n_expert_;
     std::vector<std::pair<float, size_t>> cands;
     for (size_t il = 0; il < layers_.size(); ++il)
         if (layers_[il].moe)
@@ -2890,29 +2925,39 @@ void Engine::pool_reseed() {
                 if (!layers_[il].slot[e] && !kept_[il * ne + e] && prompt_use_[il * ne + e] > 0.f)
                     cands.push_back({prompt_use_[il * ne + e], il * ne + e});
     std::fill(prompt_use_.begin(), prompt_use_.end(), 0.f);
-    const size_t want = std::min(cands.size(), pool_prot_max_);
+    size_t held = 0;
+    for (const PoolSize& z : pool_sizes_) held += z.prot_max;
+    const size_t want = std::min(cands.size(), held);
     std::partial_sort(cands.begin(), cands.begin() + (ptrdiff_t) want, cands.end(), std::greater<>());
     std::vector<uint8_t> wanted(layers_.size() * ne, 0);
     for (size_t k = 0; k < want; ++k) wanted[cands[k].second] = 1;
-    std::vector<size_t> free;   // the slots that may take them, the last one first
-    for (size_t v = slots; v-- > 0;)
-        if (!pool_pin_[v] && pool_state_[v].load(std::memory_order_acquire) != 1 &&
-            (pool_who_[v] < 0 || !wanted[(size_t) pool_who_[v]]))
-            free.push_back(v);
+    // by size: the slots that may take them, the last one first, and how many more may be held
+    std::vector<std::vector<size_t>> free(pool_sizes_.size());
+    std::vector<size_t> room;
+    for (size_t c = 0; c < pool_sizes_.size(); ++c) {
+        const PoolSize& z = pool_sizes_[c];
+        room.push_back(z.prot_max);
+        for (size_t v = z.first + z.n; v-- > z.first;)
+            if (!pool_pin_[v] && pool_state_[v].load(std::memory_order_acquire) != 1 &&
+                (pool_who_[v] < 0 || !wanted[(size_t) pool_who_[v]]))
+                free[c].push_back(v);
+    }
     struct Fill {
         size_t x;
         PoolRead r;
     };
     std::vector<Fill> fills;
     for (size_t k = 0; k < want; ++k) {
-        const size_t x = cands[k].second;
+        const size_t x = cands[k].second, c = pool_size_of_[x / ne];
+        if (room[c] == 0) continue;
+        --room[c];
         if (pool_of_[x] >= 0) {
             pool_prot_[(size_t) pool_of_[x]] = 1;
             continue;
         }
-        if (free.empty()) break;
-        const size_t v = free.back();
-        free.pop_back();
+        if (free[c].empty()) continue;
+        const size_t v = free[c].back();
+        free[c].pop_back();
         if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
         pool_who_[v] = (int64_t) x;
         pool_of_[x] = (int32_t) v;
@@ -2927,26 +2972,42 @@ void Engine::pool_reseed() {
             pool_who_[(size_t) f.r.s] = -1;
             pool_prot_[(size_t) f.r.s] = 0;
         }
-    pool_nprot_ = (size_t) std::count(pool_prot_.begin(), pool_prot_.end(), 1);
+    for (PoolSize& z : pool_sizes_)
+        z.nprot = (size_t) std::count(pool_prot_.begin() + (ptrdiff_t) z.first,
+                                      pool_prot_.begin() + (ptrdiff_t) (z.first + z.n), 1);
 }
 
-// The slot the next expert takes: the hand of a clock goes past those this call or the next one holds, that are
-// being read or that an upload copies, and past the held ones (pool_prot_), clearing the mark of those used since
-// it last came by and putting the others back on trial while too many are held.  It takes the first trial slot.
-// A search of every slot for the least lately used one was a few million comparisons a step on the thread that
-// computes the CPU's experts.  SIZE_MAX: none after three rounds.
-size_t Engine::pool_victim() {
-    const size_t slots = pool_who_.size();
-    for (size_t k = 0; k < 3 * slots; ++k) {
-        const size_t v = pool_hand_++ % slots;
+uint8_t* Engine::pool_at(size_t v) const {
+    size_t c = 0;
+    while (v >= pool_sizes_[c].first + pool_sizes_[c].n) ++c;
+    return pool_.get() + pool_sizes_[c].at + (v - pool_sizes_[c].first) * pool_sizes_[c].bytes;
+}
+
+// The slot of layer il's size that p is in, or SIZE_MAX: p is in the mapping.
+size_t Engine::pool_slot_of(int il, const uint8_t* p) const {
+    const PoolSize& z = pool_sizes_[pool_size_of_[(size_t) il]];
+    const uintptr_t a = (uintptr_t) pool_.get() + z.at, q = (uintptr_t) p;
+    if (q < a || q >= a + z.n * z.bytes) return SIZE_MAX;
+    return z.first + (size_t) (q - a) / z.bytes;
+}
+
+// The slot of layer il's size that the next expert takes: the hand of that size's clock goes past those this call or
+// the next one holds, that are being read or that an upload copies, and past the held ones (pool_prot_), clearing
+// the mark of those used since it last came by and putting the others back on trial while too many are held.  It
+// takes the first trial slot.  A search of every slot for the least lately used one was a few million comparisons a
+// step on the thread that computes the CPU's experts.  SIZE_MAX: none after three rounds.
+size_t Engine::pool_victim(int il) {
+    PoolSize& z = pool_sizes_[pool_size_of_[(size_t) il]];
+    for (size_t k = 0; k < 3 * z.n; ++k) {
+        const size_t v = z.first + z.hand++ % z.n;
         if (pool_tick_[v] >= pool_now_ || pool_pin_[v] || pool_state_[v].load(std::memory_order_acquire) == 1)
             continue;
         if (pool_prot_[v]) {
             if (pool_ref_[v]) {
                 pool_ref_[v] = 0;
-            } else if (pool_nprot_ > pool_prot_max_) {
+            } else if (z.nprot > z.prot_max) {
                 pool_prot_[v] = 0;
-                --pool_nprot_;
+                --z.nprot;
             }
             continue;
         }
@@ -3000,7 +3061,7 @@ bool Engine::pool_help() {
 // call that is about to compute it, and then in pieces of 64 KiB, which the threads that wait for it share.
 void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
     constexpr int kMost = 64;
-    uint8_t* p = pool_.get() + (size_t) s * pool_slot_;
+    uint8_t* p = pool_at((size_t) s);
     const std::pair<uint8_t*, const uint8_t*> part[3] = {{p, L.exp_gate + e * L.gu_stride},
                                                          {p + L.gu_bytes, L.exp_up + e * L.u_stride},
                                                          {p + L.gu2(), L.exp_down + e * L.d_bytes}};
@@ -3042,10 +3103,10 @@ void Engine::pool_take(const Layer& L, int il, CpuExpert* host, int n) {
         int32_t& s = pool_of_[(size_t) il * ne + e];
         if (s >= 0 && !pool_prot_[(size_t) s]) {   // used after it was read: held
             pool_prot_[(size_t) s] = 1;
-            ++pool_nprot_;
+            ++pool_sizes_[pool_size_of_[(size_t) il]].nprot;
         }
         if (s < 0) {
-            const size_t v = pool_victim();
+            const size_t v = pool_victim(il);
             if (v == SIZE_MAX) continue;   // every slot held by this call or the next: the mapping, then
             if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
             pool_who_[v] = (int64_t) ((size_t) il * ne + e);
@@ -3054,7 +3115,7 @@ void Engine::pool_take(const Layer& L, int il, CpuExpert* host, int n) {
         }
         pool_tick_[(size_t) s] = pool_now_;
         pool_ref_[(size_t) s] = 1;
-        uint8_t* p = pool_.get() + (size_t) s * pool_slot_;
+        uint8_t* p = pool_at((size_t) s);
         host[i].gate = p;
         host[i].up = p + L.gu_bytes;
         host[i].down = p + L.gu2();
@@ -3065,11 +3126,11 @@ void Engine::pool_take(const Layer& L, int il, CpuExpert* host, int n) {
 const uint8_t* Engine::pool_has(int il, int e) const {
     const int32_t v = pool_ ? pool_of_[(size_t) il * n_expert_ + (size_t) e] : -1;
     if (v < 0 || pool_state_[(size_t) v].load(std::memory_order_acquire) != 0) return nullptr;
-    return pool_.get() + (size_t) v * pool_slot_;
+    return pool_at((size_t) v);
 }
 
 void Engine::pool_read(const Layer& L, PoolRead& r) {
-    uint8_t* p = pool_.get() + (size_t) r.s * pool_slot_;
+    uint8_t* p = pool_at((size_t) r.s);
     r.ok = read_file(p, L.exp_gate + r.e * L.gu_stride, L.gu_bytes) &&
            read_file(p + L.gu_bytes, L.exp_up + r.e * L.u_stride, L.u_bytes) &&
            read_file(p + L.gu2(), L.exp_down + r.e * L.d_bytes, L.d_bytes);
@@ -3250,13 +3311,13 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
         bool any_late = false;
         for (const PoolRead& r : pool_reads_) pool_queue(L, r.e, r.s, true);
         for (int i = 0; i < n_host && pool_; ++i) {
-            const size_t off = (size_t) (host[i].gate - pool_.get());
-            late[i] = off < pool_bytes_ && pool_state_[off / pool_slot_].load(std::memory_order_acquire) != 0;
+            const size_t v = pool_slot_of(il, host[i].gate);
+            late[i] = v != SIZE_MAX && pool_state_[v].load(std::memory_order_acquire) != 0;
             any_late = any_late || late[i];
         }
         // A read that failed is made once more by one of the waiting threads, then through the mapping.
         const std::function<void(int)> wait = [&](int j) {
-            const size_t v = (size_t) (host[j].gate - pool_.get()) / pool_slot_;
+            const size_t v = pool_slot_of(il, host[j].gate);
             uint8_t st;
             while ((st = pool_state_[v].load(std::memory_order_acquire)) != 0) {
                 if (st == 2 && pool_state_[v].compare_exchange_strong(st, 3)) {
@@ -3264,7 +3325,7 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                     PoolRead r{e, (int32_t) v, false};
                     pool_read(L, r);
                     if (!r.ok) {
-                        uint8_t* p = pool_.get() + v * pool_slot_;
+                        uint8_t* p = pool_at(v);
                         std::memcpy(p, L.exp_gate + e * L.gu_stride, L.gu_bytes);
                         std::memcpy(p + L.gu_bytes, L.exp_up + e * L.u_stride, L.u_bytes);
                         std::memcpy(p + L.gu2(), L.exp_down + e * L.d_bytes, L.d_bytes);
