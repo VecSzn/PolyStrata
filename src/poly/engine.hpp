@@ -874,12 +874,13 @@ protected:
     float* ahead_dev_ = nullptr;
     float* h_ahead_ = nullptr;
     std::unique_ptr<std::atomic<uint8_t>[]> pool_state_;
-    struct PoolJob {   ///< a piece of an expert's read into its slot
+    struct PoolJob {   ///< a piece of an expert's read into its slot, or with s = kTouch / kDrop pages of the mapping
         uint8_t* dst;
         const uint8_t* src;
         size_t n;
         int32_t s;
     };
+    static constexpr int32_t kTouch = -1, kDrop = -2;
     std::deque<PoolJob> pool_jobs_;
     std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
     std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed

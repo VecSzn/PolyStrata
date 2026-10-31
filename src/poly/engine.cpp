@@ -498,6 +498,8 @@ struct Engine::Swap {
     bool adds = false;             // the slot was empty (grow_cache()): the cache holds one more
     cudaEvent_t done = nullptr;    // marks its upload
     int32_t from = -1;             // the pool_ slot it is copied from, held (pool_pin_) until it has arrived
+    bool mapped = true;            // else read from the files
+    int64_t takes = -1;            // the expert (layer * n_expert + expert) given its place in kept_, or -1
 };
 
 Engine::Engine() = default;
@@ -1733,7 +1735,8 @@ void Engine::follow_loop() {
         // Qwen3.6's cache kept up with an answer after a 32K prompt so much more slowly that the CPU computed 14%
         // more experts.
         const int32_t from = s->from;
-        const bool mapped = !pool_ || kept_[(size_t) s->il * n_expert_ + (size_t) s->e];   // under swap_m_ (rekeep())
+        const bool mapped = s->mapped;
+        const int64_t takes = s->takes;
         lk.unlock();
         const Layer& L = layers_[(size_t) s->il];
         const size_t e = (size_t) s->e, gu = L.gu_bytes, gu2 = L.gu2();
@@ -1751,6 +1754,23 @@ void Engine::follow_loop() {
                 get(h + gu2, L.exp_down + e * L.d_bytes, L.d_bytes);
             }
             err = cudaMemcpyAsync(s->slot, h, gu2 + L.d_bytes, cudaMemcpyHostToDevice, cs(swap_st_));
+            if (takes >= 0) {
+                // Its pages are copied: they go, and those of the expert that takes its place come, by the read
+                // threads.  Here they held the uploads up while the cache was busiest, in the first answer.
+                const Layer& T = layers_[(size_t) takes / (size_t) n_expert_];
+                const int te = (int) (takes % n_expert_);
+                std::vector<PoolJob> jobs;
+                const auto as = [&](int32_t k) {
+                    return [&jobs, k](const uint8_t* p, size_t n) { jobs.push_back({nullptr, p, n, k}); };
+                };
+                expert_bytes(L, (int) e, (int) e + 1, as(kDrop));
+                expert_bytes(T, te, te + 1, as(kTouch));
+                {
+                    std::lock_guard<std::mutex> l(pool_m_);
+                    pool_jobs_.insert(pool_jobs_.end(), jobs.begin(), jobs.end());
+                }
+                pool_cv_.notify_all();
+            }
         }
         if (err == cudaSuccess) err = cudaEventRecord(s->done, cs(swap_st_));
         if (err == cudaSuccess) err = cudaEventRecord((cudaEvent_t) swap_pin_ev_[b], cs(swap_st_));
@@ -1831,6 +1851,8 @@ void Engine::follow(int written) {
         s.slot = r.slot;
         s.adds = true;
         from_pool(s);
+        s.mapped = !pool_ || kept_[(size_t) s.il * ne + (size_t) s.e];
+        s.takes = -1;
         s.at.store(Swap::kAsked);
         asked = true;
         --n_free;
@@ -1907,6 +1929,19 @@ void Engine::follow(int written) {
         staged_il_ = -1;
         coming_[(size_t) in.il * ne + (size_t) in.e] = 1;
         from_pool(*s);
+        // Under the RAM budget the expert the cache gives up is the CPU's from now on.  The one that comes in leaves
+        // kept_, and the one that goes out takes its place there, of the same size: the follower drops the first
+        // one's pages once it has copied them and reads the other's in.  Left out of kept_ and the slots, an expert
+        // the cache gave up was read from the files by the call that met it: the first answer after the load missed
+        // 194 experts with every other one in RAM.
+        const size_t xi = (size_t) in.il * ne + (size_t) in.e, xo = (size_t) out.il * ne + (size_t) out.e;
+        s->mapped = !pool_ || kept_[xi];
+        s->takes = -1;
+        if (pool_ && kept_[xi]) {
+            kept_[xi] = 0;
+            kept_[xo] = 1;
+            s->takes = (int64_t) xo;
+        }
         s->at.store(Swap::kAsked);
         asked = true;
     }
@@ -2896,6 +2931,11 @@ size_t Engine::pool_victim() {
 }
 
 void Engine::pool_run(const PoolJob& job) {
+    if (job.s < 0) {   // the pages of an expert that changed places in kept_ (follow_loop()): read in, or let go
+        if (job.s == kTouch) touch_pages(job.src, job.n);
+        else drop_pages(job.src, job.n);
+        return;
+    }
     const size_t v = (size_t) job.s;
     if (!read_file(job.dst, job.src, job.n)) pool_failed_[v].store(1, std::memory_order_relaxed);
     if (pool_pending_[v].fetch_sub(1, std::memory_order_acq_rel) == 1)   // its last piece
