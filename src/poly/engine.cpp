@@ -2755,43 +2755,45 @@ void Engine::moe_router(const Layer& L, int n) {
 }
 
 // Layer j's likeliest prefetch_k_ experts of each of n tokens, as moe_router() guessed them before ev_: those the CPU
-// would read from the files get a slot now, and pool_threads_ read them while this layer is computed.  A slot read
-// ahead is held through the calls up to its layer's (a window's halves are a call each): held for the next call
-// alone, it could go to the other half's misses before its own half came to it.
+// would read from the files get a slot now, and pool_threads_ read them while this layer is computed, every token's
+// best guess first, then every token's second, and so on.  A slot read ahead is held through the calls up to its
+// layer's (a window's halves are a call each): held for the next call alone, it could go to the other half's misses
+// before its own half came to it.  It is on trial: one its layer does not use goes when the clock comes to it.
 void Engine::pool_ahead(int j, int n, size_t part, int k) {
     const Layer& L = layers_[(size_t) j];
     const size_t ne = (size_t) n_expert_;
     k = std::min(k, 16);
-    bool full = false;
-    for (int r = 0; r < n && !full; ++r) {
+    n = std::min(n, 16);
+    int32_t top[16][16];
+    int m[16];
+    for (int r = 0; r < n; ++r) {
         // the k best in one pass: a sort of all of them was a fifth of a millisecond a token on the laptop
         const float* g = h_ahead_ + part * 16 * ne + (size_t) r * ne;
-        int32_t top[16];
+        int32_t* t = top[r];
         float best[16];
-        int m = 0;
+        m[r] = 0;
         for (int e = 0; e < (int) ne; ++e) {
             const float s = g[e];
-            if (m == k && s <= best[k - 1]) continue;
-            int at = m < k ? m++ : k - 1;
-            for (; at > 0 && best[at - 1] < s; --at) best[at] = best[at - 1], top[at] = top[at - 1];
+            if (m[r] == k && s <= best[k - 1]) continue;
+            int at = m[r] < k ? m[r]++ : k - 1;
+            for (; at > 0 && best[at - 1] < s; --at) best[at] = best[at - 1], t[at] = t[at - 1];
             best[at] = s;
-            top[at] = e;
+            t[at] = e;
         }
-        for (int q = 0; q < m; ++q) {
-            const size_t e = (size_t) top[q], x = (size_t) j * ne + e;
+    }
+    for (int q = 0; q < k; ++q)
+        for (int r = 0; r < n; ++r) {
+            if (q >= m[r]) continue;
+            const size_t e = (size_t) top[r][q], x = (size_t) j * ne + e;
             if (L.slot[e] || kept_[x] || pool_of_[x] >= 0) continue;
             const size_t v = pool_victim(j);
-            if (v == SIZE_MAX) {   // no slot to spare; what was queued is still read
-                full = true;
-                break;
-            }
+            if (v == SIZE_MAX) return;   // no slot to spare; what was queued is still read
             if (pool_who_[v] >= 0) pool_of_[(size_t) pool_who_[v]] = -1;
             pool_who_[v] = (int64_t) x;
             pool_of_[x] = (int32_t) v;
             pool_tick_[v] = pool_now_ + 4;
             pool_queue(L, e, (int32_t) v, false);
         }
-    }
 }
 
 int Engine::first_moe_layer() const {
