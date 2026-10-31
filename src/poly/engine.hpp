@@ -882,6 +882,9 @@ protected:
     };
     static constexpr int32_t kTouch = -1, kDrop = -2;
     std::deque<PoolJob> pool_jobs_;
+    /// kTouch / kDrop jobs, taken when pool_jobs_ is empty: in the first answer after the load the cache traded
+    /// 2,700 experts, and their page work ahead of the reads held the reads a call waited for up
+    std::deque<PoolJob> pool_pages_;
     std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
     std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
     void pool_queue(const Layer& L, size_t e, int32_t s, bool first);

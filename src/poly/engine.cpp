@@ -1767,7 +1767,7 @@ void Engine::follow_loop() {
                 expert_bytes(T, te, te + 1, as(kTouch));
                 {
                     std::lock_guard<std::mutex> l(pool_m_);
-                    pool_jobs_.insert(pool_jobs_.end(), jobs.begin(), jobs.end());
+                    pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
                 }
                 pool_cv_.notify_all();
             }
@@ -2947,10 +2947,11 @@ void Engine::pool_loop() {
         PoolJob job;
         {
             std::unique_lock<std::mutex> l(pool_m_);
-            pool_cv_.wait(l, [&] { return pool_quit_ || !pool_jobs_.empty(); });
+            pool_cv_.wait(l, [&] { return pool_quit_ || !pool_jobs_.empty() || !pool_pages_.empty(); });
             if (pool_quit_) return;
-            job = pool_jobs_.front();
-            pool_jobs_.pop_front();
+            std::deque<PoolJob>& q = pool_jobs_.empty() ? pool_pages_ : pool_jobs_;
+            job = q.front();
+            q.pop_front();
         }
         pool_run(job);
     }
