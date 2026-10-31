@@ -805,7 +805,7 @@ FAMILIES = {
                            "mmproj-model-f16.gguf":
                            (1119575840, "bff3b688e14c300eca273092c37c50a0ddfcc2054e079af1a0480edeed5d20f1")}},
     "ornith122": {"title": "Ornith 1.5 122B", "by": "ornith-ai; quantized by Unsloth",
-                  "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 60 GB file, ~47 GB of RAM beside a 24 GB card; 4 sizes, images",
+                  "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 60 GB file, ~47 GB of RAM beside a 24 GB card; 5 sizes, images",
                   "hf": hf("unsloth/Ornith-1.5-122B-GGUF"), "file": "Ornith-1.5-122B-{q}.gguf",
                   "shards": 1, "tag": "ornith122-", "name": "ornith-1.5-122b", "engine": "poly",
                   "vision": True, "experimental": True, "windows": True, "ran_on_gb": 16,
@@ -830,7 +830,12 @@ FAMILIES = {
                                             "download_gb": 79.7, "ram_gb": 66, "arena_gb": 73.0,
                                             "vram_beside_gb": 8.5, "shards": 3,
                                             "file": "UD-Q4_K_XL/Ornith-1.5-122B-UD-Q4_K_XL-0000{i}-of-00003.gguf",
-                                            "draft": "own"}},
+                                            "draft": "own"},
+                             "Q8_0": {"about": "8-bit throughout: the closest to the model as trained",
+                                      "download_gb": 132.6, "ram_gb": 119, "arena_gb": 125.8,
+                                      "vram_beside_gb": 8.5, "shards": 4,
+                                      "file": "Q8_0/Ornith-1.5-122B-Q8_0-0000{i}-of-00004.gguf",
+                                      "draft": "own"}},
                   "sha256": {"Ornith-1.5-122B-UD-Q3_K_XL-00001-of-00003.gguf":
                              (10942929, "d8a23c487741fdac7026e10013fa8e320502cf01048a2333b2db8ba2a9f74fe5"),
                              "Ornith-1.5-122B-UD-Q3_K_XL-00002-of-00003.gguf":
@@ -847,6 +852,14 @@ FAMILIES = {
                              (49971099680, "e66952128394bb4c75554c7e10a12a8b63dd1c7f049d876a02885a946e30c1c3"),
                              "Ornith-1.5-122B-UD-Q4_K_XL-00003-of-00003.gguf":
                              (29731729056, "21325ec18a9e3210eeffada0fc327a25a79171918f1d04f8f0a06b61866ac9ba"),
+                             "Ornith-1.5-122B-Q8_0-00001-of-00004.gguf":
+                             (10942929, "e9dbc5401757506c6bbb04dba3bf65decc6435aaf0733f1e95cc58a9332166fc"),
+                             "Ornith-1.5-122B-Q8_0-00002-of-00004.gguf":
+                             (49855668288, "c1ea340f63c932895417f7c2e7c4967b4b56f3e5a3f981242d0482c662aae2b8"),
+                             "Ornith-1.5-122B-Q8_0-00003-of-00004.gguf":
+                             (49903347168, "644c26a3d8cab405186ef545e4071b433a23c2a359e45434c822d9c48884eb4c"),
+                             "Ornith-1.5-122B-Q8_0-00004-of-00004.gguf":
+                             (32785752352, "43bdc1b0cb764b5531d320816fb6004245256a414bfd55f1fdb69e3db42eaa57"),
                              "mmproj-F16.gguf":
                              (908724544, "39db176176a904b101f5173a4f03e785990f9279f94ab373c4fd629ae7011817")}},
 }

@@ -12,7 +12,7 @@ Ornith 1.5 is a hybrid mixture-of-experts model created by Ornith AI. PolyStrata
   256 routed experts (8 active per token) plus 1 shared expert. Quantized by mudler into single-file APEX GGUFs of
   14.4 to 23.7 GB.
 - **Ornith 1.5 122B**: 122 billion total parameters, about 14 billion active per token across 48 trunk layers and
-  256 routed experts (8 active per token) plus 1 shared expert. Quantized by Unsloth into GGUF files of 44.5 to 79.7 GB.
+  256 routed experts (8 active per token) plus 1 shared expert. Quantized by Unsloth into GGUF files of 44.5 to 132.6 GB.
 
 Both models include multi-token prediction (MTP): a speculative draft block embedded directly inside the model file
 that guesses the next token ahead, increasing generation speed without needing an auxiliary draft model file.
@@ -86,7 +86,7 @@ For **Ornith 1.5 122B**:
 - System RAM:
   - Beside a 24 GB card: about 47 GB of free RAM for `UD-Q3_K_XL` (32 GB for `UD-Q2_K_XL`).
   - Beside a 16 GB card: about 55 GB of free RAM for `UD-Q3_K_XL` (41 GB for `UD-Q2_K_XL`).
-- Disk space: 50 to 90 GB on a fast SSD.
+- Disk space: 50 to 140 GB on a fast SSD.
 
 ## Available quantizations
 
@@ -98,11 +98,12 @@ Files for Ornith 1.5 122B are pinned to revision `3842d003341507c216295c6f28dfcd
 | **UD-Q3_K_XL** | 3 | 59.8 GB | ~47 GB | The daily choice: highest quality under 60 GB |
 | **UD-Q2_K_XL** | 1 | 44.5 GB | ~32 GB | The least-RAM choice: single file, fits 32 GB PCs |
 | **UD-IQ3_XXS** | 1 | 49.5 GB | ~37 GB | Compact i-matrix quantization: single file |
-| **UD-Q4_K_XL** | 3 | 79.7 GB | ~66 GB | Maximum quality: needs 64 GB+ RAM |
+| **UD-Q4_K_XL** | 3 | 79.7 GB | ~66 GB | 4-bit Unsloth Dynamic: needs 64 GB+ RAM |
+| **Q8_0** | 4 | 132.6 GB | ~119 GB | 8-bit throughout: the closest to the model as trained, needs 128 GB+ RAM |
 | **mmproj-F16.gguf** | 1 | 0.9 GB | — | Vision multimodal projector (optional, `--vision yes`) |
 
-Quantizations larger than 50 GB (`UD-Q3_K_XL` and `UD-Q4_K_XL`) are split into 3 shards. Shard 1 is a 10.9 MB metadata
-and tokenizer header with 0 weight tensors; shards 2 and 3 carry the quantized model weights. Setup handles downloading,
+Quantizations larger than 50 GB are split across multiple files (`UD-Q3_K_XL` and `UD-Q4_K_XL` into 3 shards, `Q8_0` into 4 shards). Shard 1 is a 10.9 MB metadata
+and tokenizer header with 0 weight tensors; the remaining shards carry the quantized model weights. Setup handles downloading,
 verifying and configuring all shards automatically.
 
 ## Install and run
