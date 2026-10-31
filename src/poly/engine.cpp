@@ -2797,25 +2797,35 @@ std::vector<uint8_t> Engine::ram_keep(const std::vector<float>* lately) const {
 }
 
 // After a long prompt (with pool_reseed()): kept_ by the prompt's own uses, then the counts.  The pages of the
-// experts that leave it go, and those that come in are read into the working set now, on every CPU thread: one at a
-// time, by the answer's calls, a fault every page cost them twice what a read into a slot costs.
+// experts that leave it go, and those that come in are read into the working set, by the read threads.
 void Engine::rekeep() {
     std::vector<uint8_t> was = ram_keep(&prompt_use_);
     {
         std::lock_guard<std::mutex> l(swap_m_);   // the follower looks at it (follow_loop())
         kept_.swap(was);
     }
-    std::vector<std::pair<const uint8_t*, size_t>> in;
-    const auto to = [&](const uint8_t* p, size_t n) { in.emplace_back(p, n); };
+    // The page work goes to the read threads behind their reads, in pieces of 4 MiB, and the answer starts at once:
+    // its first call waited for it.  An expert of the new kept_ that a call meets first is faulted in by it.
+    static constexpr size_t kPiece = size_t(4) << 20;
+    std::vector<PoolJob> jobs;
+    const auto as = [&jobs](int32_t k) {
+        return [&jobs, k](const uint8_t* p, size_t n) {
+            for (size_t at = 0; at < n; at += kPiece) jobs.push_back({nullptr, p + at, std::min(kPiece, n - at), k});
+        };
+    };
     for (size_t il = 0; il < layers_.size(); ++il) {
         const Layer& L = layers_[il];
         if (!L.moe) continue;
         const uint8_t* a = was.data() + il * (size_t) n_expert_;
         const uint8_t* b = kept_.data() + il * (size_t) n_expert_;
-        expert_runs(L, n_expert_, [&](int e) { return a[e] && !b[e] && !L.slot[(size_t) e]; }, drop_pages);
-        expert_runs(L, n_expert_, [&](int e) { return !a[e] && b[e] && !L.slot[(size_t) e]; }, to);
+        expert_runs(L, n_expert_, [&](int e) { return a[e] && !b[e] && !L.slot[(size_t) e]; }, as(kDrop));
+        expert_runs(L, n_expert_, [&](int e) { return !a[e] && b[e] && !L.slot[(size_t) e]; }, as(kTouch));
     }
-    workers_->run((int) in.size(), [&](int t) { touch_pages(in[(size_t) t].first, in[(size_t) t].second); });
+    {
+        std::lock_guard<std::mutex> l(pool_m_);
+        pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
+    }
+    pool_cv_.notify_all();
 }
 
 // After the load: the slots take the experts the profile has used most of those outside kept_ and the card, read
