@@ -6680,7 +6680,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         fail(f"{title} has no {a.model} model file", "choose one of: " + ", ".join(names))
     vram = gpu["vram_gb"]
     if multi:   # each card has its layers' dense weights; its own scratch and staging buffer cost ~2 GB a card more
-        vram = sum(gpu_info(i)["vram_gb"] for i in multi) - 2.0 * (len(multi) - 1)
+        cards = {g["index"]: g for g in (amd_gpus() if hip else gpus())}
+        vram = sum(cards[i]["vram_gb"] for i in multi) - 2.0 * (len(multi) - 1)
     model = a.model or poly_default(sizes, ram, vram)
     if not a.model and len(names) > 1:
         say()
