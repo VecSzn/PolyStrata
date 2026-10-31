@@ -2149,15 +2149,6 @@ void Engine::load(const Options& o) {
         if (L.moe)
             expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e]; },
                         [&](const uint8_t*, size_t n) { outside_bytes_ += n; });
-    if (opt_.ram_experts_mib == -2) {
-        // Not given: 6 GiB for the experts outside VRAM when they pass that, up to twice that.  Qwen3.6 UD-Q3_K_M's
-        // 10.8 GiB there already wrote 13 to 22% slower than with all of them on an 8.9 GB card; with more the
-        // slots miss more, and DeepSeek V4 Flash's 80 GB would read most of a token's experts from the files.
-        // Those keep them all.
-        constexpr int64_t kAuto = 6144;
-        const size_t bytes = outside_bytes_;
-        opt_.ram_experts_mib = bytes > ((size_t) kAuto << 20) && bytes <= ((size_t) 2 * kAuto << 20) ? kAuto : -1;
-    }
     if (opt_.ram_experts_mib >= 0) {
         // each size of slot takes the share of the budget its experts outside VRAM have of all of those
         pool_size_of_.assign(layers_.size(), 0);
