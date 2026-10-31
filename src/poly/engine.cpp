@@ -3061,7 +3061,8 @@ bool Engine::pool_help() {
 }
 
 // Expert e of L into slot s by the read threads, in pieces of 256 KiB: ahead of what is queued with `first`, for a
-// call that is about to compute it, and then in pieces of 64 KiB, which the threads that wait for it share.
+// call that is about to compute it.  The threads that wait for it share its pieces; in pieces of 64 KiB a piece took
+// 89 to 109 us on the laptop while the others read (one of 256 KiB 143 to 154), and the call waited longer.
 void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
     constexpr int kMost = 64;
     uint8_t* p = pool_at((size_t) s);
@@ -3071,7 +3072,7 @@ void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
     const size_t bytes[3] = {L.gu_bytes, L.u_bytes, L.d_bytes};
     // pieces of the larger experts grow so that each matrix takes at most a third of jobs
     const size_t most = (std::max({bytes[0], bytes[1], bytes[2]}) + kMost / 3 - 1) / (kMost / 3);
-    const size_t piece = std::max(size_t(first ? 64 : 256) << 10, (most + 4095) / 4096 * 4096);
+    const size_t piece = std::max(size_t(256) << 10, (most + 4095) / 4096 * 4096);
     PoolJob jobs[kMost];
     int n = 0;
     for (int k = 0; k < 3; ++k)
