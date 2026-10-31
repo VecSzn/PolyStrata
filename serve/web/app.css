@@ -205,3 +205,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .swipe-count { font-size: 11px; opacity: 0.7; padding: 0 4px; align-self: center; }
 .st-msg__meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .st-msg__meta [data-msg-regen]:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Editing user messages */
+.edit-box { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; min-height: 2.5em; }
+.edit-actions { display: flex; gap: 6px; margin-top: 6px; }
