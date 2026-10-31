@@ -677,9 +677,10 @@ class PolyHipWindows(unittest.TestCase):
     def test_the_windows_engine_is_dispatched_from_the_amd_build(self):
         seen = {}
         with mock.patch.object(setup, "WIN", True), \
-                mock.patch.object(setup, "build_engine_poly_hip_win", lambda gpu, llama: seen.update(gpu=gpu)):
-            setup.build_engine_poly_hip({"arch": "gfx1201"}, Path("llama.cpp"))
-        self.assertEqual(seen["gpu"], {"arch": "gfx1201"})
+                mock.patch.object(setup, "build_engine_poly_hip_win",
+                                  lambda gpu, llama, portable=False: seen.update(gpu=gpu, portable=portable)):
+            setup.build_engine_poly_hip({"arch": "gfx1201"}, Path("llama.cpp"), True)
+        self.assertEqual(seen, {"gpu": {"arch": "gfx1201"}, "portable": True})
 
     def test_the_check_line_names_amd_on_windows(self):
         d = setup.FAMILIES["tiel"]["models"]["UD-Q3_K_XL"]
@@ -688,7 +689,7 @@ class PolyHipWindows(unittest.TestCase):
         self.assertIn("measured on one AMD card on Windows", line)
         self.assertIn("fits by setup's estimate", line)
 
-    def build(self, root, bundled):
+    def build(self, root, bundled, portable=False):
         """The Windows HIP build's compile with cmake mocked: returns (the cmake args, the BUILD.json)."""
         built = []
 
@@ -705,7 +706,7 @@ class PolyHipWindows(unittest.TestCase):
                 mock.patch.object(setup, "hipblaslt_version", lambda dirs: None), \
                 mock.patch.object(setup, "source_version", lambda: "0.1.45"), \
                 mock.patch.object(setup, "hip_runtime_beside_exe", lambda eng: None):
-            got = setup.build_engine_poly_hip_win({"arch": "gfx1201"}, root / "llama.cpp")
+            got = setup.build_engine_poly_hip_win({"arch": "gfx1201"}, root / "llama.cpp", portable)
         self.assertEqual(got, root / setup.ENGINE_POLY_DIR)
         return built[0][1], json.loads((root / setup.ENGINE_POLY_DIR / "BUILD.json").read_text(encoding="utf-8"))
 
@@ -720,6 +721,15 @@ class PolyHipWindows(unittest.TestCase):
             self.assertNotIn("-DSTRATA_NATIVE_EXPERTS=ON", defs)   # ON by default
             self.assertEqual(meta["lib_dirs"], [str(bundled)])     # the ready-made engine's ROCm: not on the disk twice
             self.assertFalse((root / setup.ENGINE_POLY_DIR / "rocm").exists())
+
+    def test_max_compatibility_uses_the_portable_build_and_changes_rebuild(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            defs, meta = self.build(root, root / "engine" / "rocm" / "bin", portable=True)
+            self.assertIn("-DSTRATA_PORTABLE=ON", defs)
+            self.assertTrue(meta["portable"])
+            defs, _ = self.build(root, root / "engine" / "rocm" / "bin")
+            self.assertIn("-DSTRATA_PORTABLE=OFF", defs)
 
     def test_without_a_ready_made_engine_the_wheels_own_rocm_is_used(self):
         with tempfile.TemporaryDirectory() as t:
