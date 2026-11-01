@@ -4604,7 +4604,7 @@ def build_engine(gpu, vision, yes, llama, toolkit=None) -> Path:
     if not vision_ok:
         say("  Compiling the image encoder" + (" with CUDA (10-20 minutes, once) ..." if vision == "gpu" else " ..."))
         defs = [f"-DLLAMA_DIR={get_llama_cpp(vision=True)}", f"-DSTRATA_VISION_CUDA={'ON' if vision == 'gpu' else 'OFF'}",
-                "-DSTRATA_PORTABLE=OFF", *host_compiler_defs(vision == "gpu")]
+                "-DSTRATA_PORTABLE=OFF", *host_compiler_defs(vision == "gpu")]   # native, like the engine
         if vision == "gpu":
             defs += [f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}", f"-DCMAKE_CUDA_COMPILER={nvcc}",
                      *toolkit_root_defs(nvcc)]

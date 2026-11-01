@@ -797,7 +797,7 @@ class HipWindowsBuild(unittest.TestCase):
         with mock.patch.object(setup, "WIN", True), \
                 mock.patch.object(setup, "build_engine_hip_win",
                                   lambda gpu, llama: seen.update(gpu=gpu)):
-            setup.build_engine_hip({"arch": "gfx1201"}, Path("llama.cpp"), "none", True)
+            setup.build_engine_hip({"arch": "gfx1201"}, Path("llama.cpp"), "none")
         self.assertEqual(seen, {"gpu": {"arch": "gfx1201"}})
 
     def step(self, root, build, local, ready_made=False):
