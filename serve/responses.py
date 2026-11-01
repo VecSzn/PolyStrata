@@ -663,15 +663,16 @@ class Assembler:
             "input_tokens": prompt, "input_tokens_details": {"cached_tokens": min(done.get("reused") or 0, prompt)},
             "output_tokens": n, "output_tokens_details": {"reasoning_tokens": done.get("reasoning_tokens", 0)},
             "total_tokens": prompt + n}
-        if done.get("timings"):
-            self.response["timings"] = done["timings"]                # llama.cpp's names: the speed its clients show
         if length:
             self.response["status"] = "incomplete"
             self.response["incomplete_details"] = {"reason": "max_output_tokens"}
             return out + [self.event("response.incomplete", response=self.snapshot())]
         self.response["status"] = "completed"
         self.response["completed_at"] = int(time.time())
-        return out + [self.event("response.completed", response=self.snapshot())]
+        e = self.event("response.completed", response=self.snapshot())
+        if done.get("timings"):
+            e["timings"] = done["timings"]                # top-level llama.cpp's names: the speed its clients show
+        return out + [e]
 
     def failed(self, message: str, code: str = "server_error") -> dict:
         """response.failed: an error after the stream started (the HTTP status is already sent)."""
