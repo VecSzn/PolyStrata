@@ -663,6 +663,8 @@ class Assembler:
             "input_tokens": prompt, "input_tokens_details": {"cached_tokens": min(done.get("reused") or 0, prompt)},
             "output_tokens": n, "output_tokens_details": {"reasoning_tokens": done.get("reasoning_tokens", 0)},
             "total_tokens": prompt + n}
+        if done.get("timings"):
+            self.response["timings"] = done["timings"]                # llama.cpp's names: the speed its clients show
         if length:
             self.response["status"] = "incomplete"
             self.response["incomplete_details"] = {"reason": "max_output_tokens"}
