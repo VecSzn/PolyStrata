@@ -1,0 +1,34 @@
+{
+  "exe": "<baseline>/upstream/engine-poly/strata-poly",
+  "args": [
+    "--model",
+    "<installation>/data/models/minicpmv-mix_q3gud_im/MiniCPM-V-4_7-35B-A3B-mix_q3gud_im.gguf",
+    "--max-context",
+    "65536",
+    "--expert-profile",
+    "<experiment>/official/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/out/expert-profile.txt",
+    "--conversation-cache-mib",
+    "0",
+    "--kv-whole",
+    "--threads",
+    "8",
+    "--vram-reserve-mib",
+    "1024"
+  ],
+  "cwd": "<baseline>/upstream",
+  "tokenizer": "<installation>/data/packs/minicpmv-mix_q3gud_im/tokenizer",
+  "model_name": "minicpm-v-4.7-35b-a3b-mix_q3gud_im",
+  "display_name": "MiniCPM-V 4.7 35B-A3B mix_q3gud_im",
+  "log": "<experiment>/official/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/out/engine.log",
+  "lib_dirs": [
+    "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+    "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+  ],
+  "port": 8080,
+  "gpu": 0,
+  "gpus_asked": true,
+  "host": "127.0.0.1",
+  "open_browser": false,
+  "reasoning_budget_tokens": 512,
+  "benchmark_mtp": 0
+}

@@ -1188,9 +1188,10 @@ class OutputParser:
         self.noise = DSML_BLOCK if call_format == "dsml" else ()
         # Gemma opens its reasoning itself, as a channel, and ends it with a token of its own; the others' reasoning
         # is opened by the prompt and ends with </think>.  `opened`: this prompt ended on Gemma's opening (its
-        # template writes it after a tool's answer), so the reply starts inside the reasoning
+        # template writes it after a tool's answer), so the reply starts inside the reasoning.  GLM's calls come
+        # with <think> either way: GLM's template opens it in the prompt (`opened`), Flint writes it itself.
         self.think_open, self.think_end = ("<|channel>thought\n", "<channel|>") if call_format == "gemma" \
-            else ("", THINK_END)
+            else ("<think>", THINK_END) if call_format == "glm" else ("", THINK_END)
         # #537 tells a quoted </think> by the line break the end has after it.  GLM's and Gemma's answers follow
         # their end tag at once ('say "Paris."</think>Paris'), so there every end tag ends the reasoning
         self.quotes_end = call_format == "function"
@@ -1786,7 +1787,7 @@ class OutputParser:
             self.buf = ""
             self._reset_scan()
             return out
-        if self.state == "reasoning" and self.buf == THINK_END:   # the output ends on a held `</think>`: its end
+        if self.state == "reasoning" and self.buf == self.think_end:   # the output ends on a held end: its end
             self.buf, self.state = "", "content"
         if self.buf:
             # an unfinished call inside the reasoning (#804) is reasoning text, never a call

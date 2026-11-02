@@ -1,0 +1,5 @@
+* -text
+results.json whitespace=cr-at-eol
+*.txt whitespace=cr-at-eol
+profile-*.txt linguist-generated=true
+tail-skip/initial-profile.txt linguist-generated=true

@@ -1,0 +1,23 @@
+{
+ "arm": "H-dsh-shape",
+ "turns": [
+  {
+   "turn": "1 with system+tools",
+   "prompt_n": 111318,
+   "prompt_tok_s": 1373.1,
+   "decode_tok_s": 41.0,
+   "wall_s": 82.4,
+   "tool_calls": 0,
+   "answer": "This is a comprehensive technical documentation page for **PolyStrata**, a"
+  },
+  {
+   "turn": "2 after a tool result",
+   "prompt_n": 8001,
+   "prompt_tok_s": 859.6,
+   "decode_tok_s": 48.3,
+   "cached": 103424,
+   "wall_s": 10.4
+  }
+ ],
+ "api_key": "<API_KEY>"
+}

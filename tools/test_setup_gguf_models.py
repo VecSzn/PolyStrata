@@ -34,7 +34,8 @@ MORE = {
     "ornith": [("APEX-I-MINI", "Ornith-1.5-35B-A3B-APEX-MTP-I-Mini.gguf", 14366220832),
                ("APEX-I-QUALITY", "Ornith-1.5-35B-A3B-APEX-MTP-I-Quality.gguf", 23718411808)],
     "gemma4": [("UD-Q2_K_XL", "gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf", 10546934240),
-               ("UD-Q4_K_M", "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf", 16947541728)],
+               ("UD-Q4_K_M", "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf", 16947541728),
+               ("QAT-UD-Q4_K_XL", "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", 14249047104)],
     "tiel": [("UD-IQ3_XXS", "Tiel-Coder-35B-A3B-MTP-UD-IQ3_XXS.gguf", 13600579424),
              ("UD-Q4_K_XL", "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL.gguf", 22749880160)],
 }
@@ -53,9 +54,12 @@ class Pins(unittest.TestCase):
                 self.assertEqual((setup.model_file(fam, size, 1), setup.model_shards(fam, size)), (file, 1))
                 d = fam["models"][size]
                 more = [Path(d["draft_model"]).name] if d.get("draft_model") else []
+                sha = {**fam["sha256"], **d.get("sha256", {})}             # a size of another repository's own files
                 self.assertEqual(fam["sha256"][file][0], n)
-                self.assertAlmostEqual(sum(fam["sha256"][f][0] for f in [file, *more]) / 1e9, d["download_gb"],
-                                       delta=0.05)
+                self.assertAlmostEqual(sum(sha[f][0] for f in [file, *more]) / 1e9, d["download_gb"], delta=0.05)
+                if "hf" in d:                                                # its draft and image encoder are its own
+                    self.assertEqual(sorted(d["sha256"]), sorted([*more, fam["mmproj"]]), size)
+                    self.assertIn(d["hf"].split("/resolve/")[0], d["mmproj_hf"])
                 self.assertLess(d["arena_gb"], d["download_gb"])        # the experts are part of the file
                 self.assertEqual(d["ram_gb"], round(setup.poly_ram_need(d, 8.0)), size)
             # the image encoder is pinned too; it is downloaded when images are wanted, so it has its own size
@@ -207,6 +211,24 @@ class Main(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("and its image encoder 2.4 GB", out)
         self.assertIn("--vision cpu keeps the image encoder off the card", out)
+
+    def test_a_size_from_another_repository(self):
+        """Gemma 4's QAT file: its repository's draft model and image encoder, checked against that size's hashes."""
+        fam, size = setup.FAMILIES["gemma4"], "QAT-UD-Q4_K_XL"
+        d = fam["models"][size]
+        draft = Path(d["draft_model"]).name
+        self.downloads, self.verified = [], []
+        code, out, cfg = self.main(["--model", size, "--vision", "yes"], family="gemma4", ram=64.0, vram=31.84)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.downloads, [d["hf"] + d["file"], d["hf"] + d["draft_model"], d["mmproj_hf"] + fam["mmproj"]])
+        self.assertEqual(self.verified, [(d["file"], *fam["sha256"][d["file"]]), (draft, *d["sha256"][draft]),
+                                         (fam["mmproj"], *d["sha256"][fam["mmproj"]])])
+        self.assertNotEqual(d["sha256"][draft], fam["sha256"][draft])      # same names, other files
+        folder = self.t / "models" / (fam["tag"] + size)
+        args = cfg["args"]
+        self.assertEqual(Path(args[args.index("--model") + 1]), folder / d["file"])
+        self.assertEqual(Path(args[args.index("--draft-model") + 1]), folder / draft)
+        self.assertEqual(Path(cfg["vision"]["mmproj"]), folder / fam["mmproj"])
 
     def test_images_are_asked_about(self):
         code, out, cfg = self.main(family="qwen36", ram=64.0, vram=24.0, answers={"Do you want images": "y"})

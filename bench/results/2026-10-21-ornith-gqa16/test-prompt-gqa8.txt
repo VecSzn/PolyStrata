@@ -1,0 +1,22 @@
+query heads 16, KV heads 2, group 8
+ok   q8  pos      0 rows   16 scratch  64.0 MiB: 1.88e-03 from attend_batch (mean 1.3e-04, results up to 4.18); against doubles: fattn 2.23e-03, attend_batch 1.80e-03; 0.04 ms against 28.27
+ok   q8  pos      0 rows   64 scratch  64.0 MiB: 2.68e-03 from attend_batch (mean 1.2e-04, results up to 4.18); against doubles: fattn 1.73e-03, attend_batch 1.73e-03; 0.02 ms against 6.20
+ok   q8  pos      0 rows 1024 scratch  64.0 MiB: 1.10e-02 from attend_batch (mean 1.4e-04, results up to 4.18); against doubles: fattn 2.14e-03, attend_batch 9.14e-04; 0.24 ms against 1.03
+ok   q8  pos      5 rows   37 scratch  64.0 MiB: 2.23e-03 from attend_batch (mean 1.2e-04, results up to 4.11); against doubles: fattn 2.54e-03, attend_batch 1.54e-03; 0.02 ms against 0.11
+ok   q8  pos   1000 rows  517 scratch  64.0 MiB: 1.02e-02 from attend_batch (mean 1.6e-04, results up to 3.89); against doubles: fattn 4.85e-03, attend_batch 8.95e-04; 0.28 ms against 0.84
+ok   q8  pos   4095 rows 1024 scratch  64.0 MiB: 1.98e-02 from attend_batch (mean 2.0e-04, results up to 3.93); against doubles: fattn 3.86e-03, attend_batch 6.76e-04; 1.46 ms against 4.09
+ok   q8  pos  30000 rows 1024 scratch  64.0 MiB: 1.58e-02 from attend_batch (mean 2.1e-04, results up to 2.70); against doubles: fattn 3.70e-03, attend_batch 3.11e-04; 9.39 ms against 22.99
+ok   q8  pos  30000 rows 1024 scratch  24.3 MiB: 5.37e-03 from attend_batch (mean 1.0e-04, results up to 2.70); against doubles: fattn 1.37e-03, attend_batch 3.11e-04; 10.21 ms against 23.05
+ok   q8  pos  30001 rows  100 scratch   1.9 MiB: 1.17e-03 from attend_batch (mean 2.4e-05, results up to 2.01); against doubles: fattn 6.33e-04, attend_batch 3.81e-04; 4.18 ms against 8.41
+ok   q8  pos 120000 rows 1024 scratch  64.0 MiB: 6.49e-03 from attend_batch (mean 1.4e-04, results up to 2.26); against doubles: fattn 3.11e-03, attend_batch 4.15e-04; 36.45 ms against 89.77
+ok   f16 pos      0 rows   16 scratch  64.0 MiB: 1.88e-03 from attend_batch (mean 1.3e-04, results up to 4.18); against doubles: fattn 1.37e-03, attend_batch 9.99e-04; 0.02 ms against 0.07
+ok   f16 pos      0 rows   64 scratch  64.0 MiB: 2.68e-03 from attend_batch (mean 1.2e-04, results up to 4.18); against doubles: fattn 1.66e-03, attend_batch 1.68e-03; 0.02 ms against 0.03
+ok   f16 pos      0 rows 1024 scratch  64.0 MiB: 1.10e-02 from attend_batch (mean 1.4e-04, results up to 4.18); against doubles: fattn 1.98e-03, attend_batch 6.25e-04; 0.23 ms against 0.64
+ok   f16 pos      5 rows   37 scratch  64.0 MiB: 2.23e-03 from attend_batch (mean 1.2e-04, results up to 4.11); against doubles: fattn 2.13e-03, attend_batch 1.24e-03; 0.02 ms against 0.08
+ok   f16 pos   1000 rows  517 scratch  64.0 MiB: 9.47e-03 from attend_batch (mean 1.4e-04, results up to 3.89); against doubles: fattn 5.09e-03, attend_batch 8.15e-04; 0.28 ms against 0.65
+ok   f16 pos   4095 rows 1024 scratch  64.0 MiB: 1.95e-02 from attend_batch (mean 1.8e-04, results up to 3.93); against doubles: fattn 3.90e-03, attend_batch 4.75e-04; 1.57 ms against 3.98
+ok   f16 pos  30000 rows 1024 scratch  64.0 MiB: 1.72e-02 from attend_batch (mean 2.5e-04, results up to 2.70); against doubles: fattn 4.96e-03, attend_batch 2.50e-04; 9.06 ms against 22.24
+ok   f16 pos  30000 rows 1024 scratch  24.3 MiB: 1.72e-02 from attend_batch (mean 2.5e-04, results up to 2.70); against doubles: fattn 4.96e-03, attend_batch 2.50e-04; 9.06 ms against 22.28
+ok   f16 pos  30001 rows  100 scratch   1.9 MiB: 1.42e-02 from attend_batch (mean 2.6e-04, results up to 2.01); against doubles: fattn 7.59e-03, attend_batch 2.48e-04; 1.36 ms against 2.34
+ok   f16 pos 120000 rows 1024 scratch  64.0 MiB: 1.69e-02 from attend_batch (mean 2.9e-04, results up to 2.26); against doubles: fattn 5.37e-03, attend_batch 3.46e-04; 34.56 ms against 86.79
+all passed

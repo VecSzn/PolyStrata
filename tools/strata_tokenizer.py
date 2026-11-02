@@ -101,9 +101,38 @@ DEEPSEEK3_SEQUENCE = (
     r"|\s+",
 )
 
+# The `flint` pre-tokenizer (Flint 40B-A2.5B), llama.cpp's LLAMA_VOCAB_PRE_TYPE_FLINT: the same three steps as
+# DeepSeek's, the last one cutting a word where its capitals end (a run of capitals with the small letters after
+# it, or capitals alone), with English contractions kept on the word.
+FLINT_SEQUENCE = (
+    r"\p{N}{1,3}",
+    r"[一-龥぀-ゟ゠-ヿ]+",
+    r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+"
+    r"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?"
+    r"|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*"
+    r"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])?"
+    r"| ?[\p{P}\p{S}]+[\r\n]*"
+    r"|\s*[\r\n]+"
+    r"|\s+(?!\S)"
+    r"|\s+",
+)
+
+# The `kolibri1` pre-tokenizer (Kolibri 1), from llama.cpp's LLAMA_VOCAB_PRE_TYPE_QWEN2: the patch that adds the
+# architecture gives its pre-tokenizer that type ("same split regex as qwen2"), so the letters are cut without the
+# combining marks that Qwen 3's pattern keeps with them.
+QWEN2_PATTERN = (
+    r"(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])"
+    r"|[^\r\n\p{L}\p{N}]?\p{L}+"
+    r"|\p{N}"
+    r"| ?[^\s\p{L}\p{N}]+[\r\n]*"
+    r"|\s*[\r\n]+"
+    r"|\s+(?!\S)"
+    r"|\s+"
+)
+
 PRE_PATTERNS = {"glm4": GLM4_PATTERN, "glm5": GLM4_PATTERN,   # every other name: QWEN35_PATTERN, as before
-                "gemma4": GEMMA4_PATTERN, "lfm2": GLM4_PATTERN}
-PRE_SEQUENCES = {"joyai-llm": DEEPSEEK3_SEQUENCE, "deepseek-v3": DEEPSEEK3_SEQUENCE}
+                "gemma4": GEMMA4_PATTERN, "lfm2": GLM4_PATTERN, "kolibri1": QWEN2_PATTERN}
+PRE_SEQUENCES = {"joyai-llm": DEEPSEEK3_SEQUENCE, "deepseek-v3": DEEPSEEK3_SEQUENCE, "flint": FLINT_SEQUENCE}
 IGNORE_MERGES = ("glm4", "glm5", "lfm2")
 RAW = ("gemma4",)                      # vocabularies of UTF-8 pieces
 MODELS = {"gpt2": None, "gemma4": "gemma4"}   # tokenizer.ggml.model -> the pre-tokenizer it implies, if any
@@ -569,11 +598,12 @@ def extract(gguf_path, out_dir) -> dict:
                               else "llama.cpp src/llama-vocab.cpp (LLAMA_VOCAB_PRE_TYPE_DEEPSEEK3_LLM)"
                               if tk.pre_sequence
                               else "llama.cpp src/llama-vocab.cpp (LLAMA_VOCAB_PRE_TYPE_CHATGLM4)" if tk.ignore_merges
+                              else "llama.cpp src/llama-vocab.cpp (LLAMA_VOCAB_PRE_TYPE_QWEN2)"
+                              if tk.pre_pattern == QWEN2_PATTERN
                               else ".ref/llama.cpp src/llama-vocab.cpp L396 (LLAMA_VOCAB_PRE_TYPE_QWEN35)",
         "ignore_merges": tk.ignore_merges,
     }
-    (out / "vocab.json").write_text(json.dumps(tk.ids, ensure_ascii=False), encoding="utf-8")
-    merges = ["%s %s" % k for k, _ in sorted(tk.ranks.items(), key=lambda kv: kv[1])]
+    merges =["%s %s" % k for k, _ in sorted(tk.ranks.items(), key=lambda kv: kv[1])]
     if tk.raw:      # its pieces can hold a newline, which a line a merge cannot
         (out / "merges.json").write_text(json.dumps(merges, ensure_ascii=False), encoding="utf-8")
     else:
@@ -586,6 +616,9 @@ def extract(gguf_path, out_dir) -> dict:
     tpl = GGUFFile(pathlib.Path(gguf_path)).metadata.get("tokenizer.chat_template")
     if tpl:
         (out / "chat_template.jinja").write_text(tpl, encoding="utf-8", newline="\n")
+    # last: setup and iq_pack.py take vocab.json as the sign that the folder is complete, so an extraction that
+    # stops part way is run again instead of leaving a tokenizer without its merges
+    (out / "vocab.json").write_text(json.dumps(tk.ids, ensure_ascii=False), encoding="utf-8")
     return cfg
 
 

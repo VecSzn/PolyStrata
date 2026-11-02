@@ -1,0 +1,44 @@
+[
+  {
+    "name": "poly_attend_test-baseline",
+    "returncode": -6,
+    "elapsed_s": 3.7065542050404474,
+    "output": "terminate called after throwing an instance of 'std::runtime_error'\n  what():  attention scores: cuBLAS status 1\n"
+  },
+  {
+    "name": "poly_attend_test-candidate",
+    "returncode": -6,
+    "elapsed_s": 3.6947545430157334,
+    "output": "terminate called after throwing an instance of 'std::runtime_error'\n  what():  attention scores: cuBLAS status 1\n"
+  },
+  {
+    "name": "poly_sink_attend_test-baseline",
+    "returncode": 0,
+    "elapsed_s": 1.1407893280265853,
+    "output": "ok   full   pos     0 rows  100: 1.38e-03 from attend() (results up to 3.62), blocks of rows 1.19e-06\nok   full   pos     0 rows  600: 1.39e-03 from attend() (results up to 3.62), blocks of rows 1.43e-06\nok   full   pos  3000 rows  740: 9.91e-04 from attend() (results up to 2.45), blocks of rows 1.31e-06\nok   window pos     0 rows  100: 1.38e-03 from attend() (results up to 3.62)\nok   window pos     0 rows  600: 1.39e-03 from attend() (results up to 3.62)\nok   window pos  1024 rows 1024: 1.60e-03 from attend() (results up to 3.60)\nok   window pos  3000 rows  740: 1.28e-03 from attend() (results up to 3.08)\nall passed\n"
+  },
+  {
+    "name": "poly_sink_attend_test-candidate",
+    "returncode": 0,
+    "elapsed_s": 1.0944405880291015,
+    "output": "ok   full   pos     0 rows  100: 1.38e-03 from attend() (results up to 3.62), blocks of rows 1.19e-06\nok   full   pos     0 rows  600: 1.39e-03 from attend() (results up to 3.62), blocks of rows 1.43e-06\nok   full   pos  3000 rows  740: 9.91e-04 from attend() (results up to 2.45), blocks of rows 1.31e-06\nok   window pos     0 rows  100: 1.38e-03 from attend() (results up to 3.62)\nok   window pos     0 rows  600: 1.39e-03 from attend() (results up to 3.62)\nok   window pos  1024 rows 1024: 1.60e-03 from attend() (results up to 3.60)\nok   window pos  3000 rows  740: 1.28e-03 from attend() (results up to 3.08)\nall passed\n"
+  },
+  {
+    "name": "default-baseline",
+    "returncode": 0,
+    "elapsed_s": 5.1137242399854586,
+    "output": "poly_hip_value_split_test: default output written, checks=398\n"
+  },
+  {
+    "name": "default-candidate",
+    "returncode": 0,
+    "elapsed_s": 5.086221797042526,
+    "output": "poly_hip_value_split_test: default output written, checks=398\n"
+  },
+  {
+    "name": "ctest-focused",
+    "returncode": 0,
+    "elapsed_s": 8.33273584098788,
+    "output": "Test project /home/leak/AI/hip-value-pr-20261024/build-hip\n    Start 127: poly_hip_value_split_policy_test\n1/3 Test #127: poly_hip_value_split_policy_test ...   Passed    0.00 sec\n    Start 129: poly_hip_value_split_test\n2/3 Test #129: poly_hip_value_split_test ..........   Passed    8.13 sec\n    Start 131: poly_kv_q8_test\n3/3 Test #131: poly_kv_q8_test ....................   Passed    0.14 sec\n\n100% tests passed out of 3\n\nTotal Test time (real) =   8.28 sec\n"
+  }
+]

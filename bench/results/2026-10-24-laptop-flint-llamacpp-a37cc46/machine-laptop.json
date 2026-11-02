@@ -1,0 +1,15 @@
+{
+ "gguf": "E:/Projects/PolyStrata/models/flint-UD-Q3_K_XL/flint-UD-Q3_K_XL.gguf",
+ "llama_server": "E:/Projects/PolyStrata/work/llama-flint/build/bin/llama-server.exe",
+ "strata_cfg": "E:/Projects/PolyStrata/strata-flint-ud-q3_k_xl.json",
+ "serve": "E:/Projects/PolyStrata/serve",
+ "cwd": "E:/Projects/PolyStrata",
+ "configs": [
+  {"name": "polystrata-setup", "kind": "strata", "args": [], "override": {"--max-context": "36864"}},
+  {"name": "llama-cpumoe36", "kind": "llama",
+   "args": ["-ngl", "99", "--n-cpu-moe", "36", "-c", "36864", "-ctk", "q8_0", "-ctv", "q8_0", "-fa", "on", "-t", "20", "-ub", "512"]},
+  {"name": "llama-cpumoe40", "kind": "llama",
+   "args": ["-ngl", "99", "--n-cpu-moe", "40", "-c", "36864", "-ctk", "q8_0", "-ctv", "q8_0", "-fa", "on", "-t", "20", "-ub", "512"]},
+  {"name": "llama-fit", "kind": "llama", "args": ["--fit", "on", "-c", "36864", "-ctk", "q8_0", "-ctv", "q8_0", "-fa", "on"]}
+ ]
+}

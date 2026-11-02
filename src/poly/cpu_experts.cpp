@@ -139,22 +139,27 @@ bool cpu_expert_types_ok(int gu_type, int d_type, int n_embd, int n_ff, std::str
     return true;
 }
 
-void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, int gu_type, int d_type, int n_embd,
-                 int n_ff, const float* x, float limit, bool gelu, float* out,
-                 const std::function<void()>* meanwhile) {
+void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, int gu_type, int u_type, int d_type,
+                 int n_embd, int n_ff, const float* x, float limit, bool gelu, float* out,
+                 const std::function<void()>* meanwhile, const uint8_t* late, const std::function<void(int)>* wait) {
     init_once();
     const ggml_type_traits_cpu* tg = traits(gu_type);
+    const ggml_type_traits_cpu* tu = traits(u_type);
     const ggml_type_traits_cpu* td = traits(d_type);
     const size_t gu_row = ggml_row_size((ggml_type) gu_type, n_embd);
+    const size_t u_row = ggml_row_size((ggml_type) u_type, n_embd);
     const size_t d_row = ggml_row_size((ggml_type) d_type, n_ff);
     const size_t a_bytes = ggml_row_size(tg->vec_dot_type, n_embd);
+    const size_t au_bytes = ggml_row_size(tu->vec_dot_type, n_embd);
     const size_t h_bytes = ggml_row_size(td->vec_dot_type, n_ff);
+    const bool own_act = tu->vec_dot_type != tg->vec_dot_type;   // up's dot product takes another quantization
 
     // The workers get these through the pointers below: a thread_local named in their code would be their own.
-    static thread_local std::vector<uint8_t> act, hq;
+    static thread_local std::vector<uint8_t> act, act_u, hq;
     static thread_local std::vector<float> h;
     static thread_local std::vector<int> by, run;
     act.resize((size_t) rows * a_bytes);
+    if (own_act) act_u.resize((size_t) rows * au_bytes);
     hq.resize((size_t) n * h_bytes);
     h.resize((size_t) n * n_ff);
     // ggml's quantizers for the activations are scalar: microseconds a row, which on one thread kept the others
@@ -162,6 +167,13 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
     uint8_t* actp = act.data();
     const auto act_from = traits(tg->vec_dot_type)->from_float;
     workers.run(rows, [&](int t) { act_from(x + (size_t) t * n_embd, actp + (size_t) t * a_bytes, n_embd); });
+    uint8_t* actup = actp;
+    if (own_act) {
+        actup = act_u.data();
+        const auto au_from = traits(tu->vec_dot_type)->from_float;
+        workers.run(rows, [&](int t) { au_from(x + (size_t) t * n_embd, actup + (size_t) t * au_bytes, n_embd); });
+    }
+    const size_t au_step = own_act ? au_bytes : a_bytes;
 
     // The uses of one expert next to each other (by), and where each expert's run of them starts (run).
     by.resize((size_t) n);
@@ -172,27 +184,36 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         if (i == 0 || experts[by[(size_t) i]].gate != experts[by[(size_t) i - 1]].gate) run.push_back(i);
     const int n_run = (int) run.size();
     run.push_back(n);
+    // the runs in the order their products are taken: the late experts' last, so their reads go on meanwhile
+    static thread_local std::vector<int> order;
+    order.resize((size_t) n_run);
+    std::iota(order.begin(), order.end(), 0);
+    if (late)
+        std::stable_partition(order.begin(), order.end(), [&](int u) { return !late[by[(size_t) run[(size_t) u]]]; });
 
     float* hp = h.data();
     const int* byp = by.data();
     const int* runp = run.data();
+    const int* orderp = order.data();
     const int gu_tasks = (n_ff + kRowsPerTask - 1) / kRowsPerTask;
     const int first = meanwhile ? 1 : 0;   // task 0, so it is taken at once
     workers.run(first + n_run * gu_tasks, [&](int t) {
         if (t < first) return (*meanwhile)();
         t -= first;
-        const int i0 = runp[t / gu_tasks], i1 = runp[t / gu_tasks + 1];
+        const int u = orderp[t / gu_tasks], i0 = runp[u], i1 = runp[u + 1];
+        if (late && late[byp[i0]]) (*wait)(byp[i0]);
         const CpuExpert& e = experts[byp[i0]];
         const int r0 = (t % gu_tasks) * kRowsPerTask, r1 = std::min(n_ff, r0 + kRowsPerTask);
         for (int r = r0; r < r1; ++r) {
             const uint8_t* gate = e.gate + (size_t) r * gu_row;
-            const uint8_t* up = e.up + (size_t) r * gu_row;
+            const uint8_t* up = e.up + (size_t) r * u_row;
             for (int i = i0; i < i1; ++i) {
                 const int j = byp[i];
                 const uint8_t* a = actp + (size_t) experts[j].row * a_bytes;
+                const uint8_t* au = actup + (size_t) experts[j].row * au_step;
                 float g = 0.f, u = 0.f;
                 tg->vec_dot(n_embd, &g, 0, gate, 0, a, 0, 1);
-                tg->vec_dot(n_embd, &u, 0, up, 0, a, 0, 1);
+                tu->vec_dot(n_embd, &u, 0, up, 0, au, 0, 1);
                 if (gelu) {
                     hp[(size_t) j * n_ff + r] =
                         0.5f * g * (1.f + std::tanh(0.7978845608f * g * (1.f + 0.044715f * g * g))) * u;

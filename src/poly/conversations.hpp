@@ -5,7 +5,8 @@
 // recurrent state at that point, which is a checkpoint, and the rows its tokens left in the attention caches.  The
 // rows of the sequence in the engine are there already.  A conversation that makes room for another is parked:
 // its rows are copied to host memory, up to its last checkpoint.  What is saved is written once and never changed,
-// so conversations that start alike share it, and a parked conversation comes back bit for bit.
+// so conversations that start alike share it, and a parked conversation comes back bit for bit.  Between requests
+// it leaves the process for the file cache (release(), spill.hpp).
 //
 // Nothing here knows the model.  E is the engine:
 //     void reset();
@@ -20,9 +21,10 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
-#include <new>
 #include <utility>
 #include <vector>
+
+#include "spill.hpp"
 
 namespace strata::poly {
 
@@ -92,7 +94,7 @@ public:
     /// logits that come with it.
     void before(int64_t at, bool last) {
         if (o_.checkpoints < 1 || at < 1 || (!last && at != turn_ && (o_.every < 1 || at % o_.every != 0))) return;
-        if (const BlobPtr b = mark(at)) e_.save_state(b->p.get());
+        if (const BlobPtr b = mark(at)) e_.save_state(b->data());
     }
 
     /// For an engine that reads past checkpoints in one go, of n tokens from `at`: the checkpoints due after the
@@ -122,7 +124,7 @@ public:
         for (const int64_t p : due) {
             const bool stays = std::find(after_.begin(), after_.end(), p) != after_.end();
             due_.push_back({p, stays ? blob(e_.state_bytes()) : nullptr});
-            out.emplace_back(p - at, due_.back().state ? due_.back().state->p.get() : nullptr);
+            out.emplace_back(p - at, due_.back().state ? due_.back().state->data() : nullptr);
         }
     }
 
@@ -157,7 +159,7 @@ public:
         }
         const int64_t at = s.marks.back().pos;
         cut(s, at);
-        e_.load_state(s.marks.back().state->p.get(), at);
+        e_.load_state(s.marks.back().state->data(), at);
         return at;
     }
     /// The first n tokens of the conversation are the prompt the client sent.
@@ -184,6 +186,18 @@ public:
         s.stamp = ++clock_;
     }
 
+    /// Between requests: what the parked conversations hold leaves the process.  On the laptop four parked
+    /// conversations of Qwen3.6 held 1.1 to 1.7 GB, one of 29K tokens 1.05 GB.  The one in the engine keeps its
+    /// states in memory: every request saves one (63 MB of Qwen3.6's), and the next request most likely goes on
+    /// from it, so written to the disk it would mostly be read back at once.
+    void release() const {
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            if (i == cur_) continue;
+            for (const Checkpoint& m : slots_[i].marks) m.state->release();
+            for (const Rows& r : slots_[i].rows) r.blob->release();
+        }
+    }
+
     /// The parked conversations, the bytes they hold, and how many were pushed out so far.
     size_t parked() const { return held(slots_.size()).count; }
     size_t parked_bytes() const { return held(slots_.size()).bytes; }
@@ -192,10 +206,7 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
 
-    struct Blob {
-        std::unique_ptr<uint8_t[]> p;
-        size_t bytes = 0;
-    };
+    using Blob = Spill;
     using BlobPtr = std::shared_ptr<const Blob>;
     struct Checkpoint {
         int64_t pos;
@@ -240,15 +251,13 @@ private:
 
     static const uint8_t* state_at(const Slot& s, int64_t at) {
         for (const Checkpoint& m : s.marks)
-            if (m.pos == at) return m.state->p.get();
+            if (m.pos == at) return m.state->data();
         return nullptr;   // resume() only goes to positions reach() found
     }
 
     static BlobPtr blob(size_t bytes) {
-        auto b = std::make_shared<Blob>();
-        b->p.reset(new (std::nothrow) uint8_t[bytes]);
-        b->bytes = bytes;
-        return b->p ? b : nullptr;
+        auto b = std::make_shared<Blob>(bytes);
+        return b->data() ? b : nullptr;
     }
 
     // A checkpoint of the current conversation at `at`, its state still to be written.  Null: there is one there,
@@ -302,7 +311,7 @@ private:
         }
         std::sort(seen.begin(), seen.end());
         seen.erase(std::unique(seen.begin(), seen.end()), seen.end());
-        for (const Blob* b : seen) h.bytes += b->bytes;
+        for (const Blob* b : seen) h.bytes += b->bytes();
         return h;
     }
 
@@ -343,7 +352,7 @@ private:
             return false;
         }
         if (b) {
-            e_.save_rows(from, end - from, b->p.get());
+            e_.save_rows(from, end - from, b->data());
             s.rows.push_back({b, from, end - from, end - from});
         }
         if (!fit(0, keep)) return false;
@@ -377,7 +386,7 @@ private:
         if (cur().seq.empty() || !park(i)) slots_[cur_] = Slot{};
         for (const Rows& r : in.rows) {
             const int64_t a = std::max(r.first, have), b = std::min(r.first + r.keep, need);
-            if (a < b) e_.load_rows(r.blob->p.get(), r.first, r.count, a, b - a);
+            if (a < b) e_.load_rows(r.blob->data(), r.first, r.count, a, b - a);
         }
         cur_ = i;
         say("restored", need, t0, slots_.size());

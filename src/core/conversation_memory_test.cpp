@@ -49,6 +49,16 @@ int main() {
                                    std::numeric_limits<uint64_t>::max(), 0), "maximal exact bound");
     check(!conversation_memory_admit(std::numeric_limits<uint64_t>::max(),
                                     std::numeric_limits<uint64_t>::max(), 1), "maximal sum overflow rejected");
+    // #3493: the budget used when --conversation-cache-mib is not given
+    const auto GiB = [](uint64_t n) { return n << 30; };
+    check(auto_conversation_cache_mib({}, 2560) == 0, "unknown telemetry: no cache");
+    check(auto_conversation_cache_mib(GiB(2), 2560) == 0, "below the parking floor: off");
+    check(auto_conversation_cache_mib(GiB(4), 2560) == 0, "4 GiB free: 40% of 1.5 GiB is under 1 GiB: off");
+    check(auto_conversation_cache_mib(GiB(8), 2560) == 2048, "8 GiB free: 40% of 5.5 GiB, in steps of 256");
+    check(auto_conversation_cache_mib(GiB(20), 2560) == 7168, "20 GiB free: 40% of 17.5 GiB");
+    check(auto_conversation_cache_mib(GiB(40), 2560) == 8192, "capped at 8 GiB");
+    check(auto_conversation_cache_mib(GiB(1000), 0) == 8192, "a big server: still the cap");
+    check(auto_conversation_cache_mib(GiB(40), 1000000) == 0, "a floor above the RAM: off, no underflow");
     // Test the real provider without assuming any particular amount of free RAM.
     const auto available = available_host_bytes();
     check(!available || conversation_memory_admit(available, 0, 0), "provider returns bytes or unknown");

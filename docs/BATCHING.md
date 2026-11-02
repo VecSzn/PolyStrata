@@ -20,8 +20,8 @@ same server): its numbers, what a slot costs and where setup recommends it are i
 ## The strata-poly models
 
 `"parallel": N` in the model's config (`strata-<model>.json`), or `--parallel N` when you run setup, works for
-GLM 5.3 Flash, DeepSeek V4 Flash, LFM2.5, Qwen3.6, Ornith 1.5, Gemma 4, Tiel Coder and MiniCPM-V too, up to 8. The
-server drives it the way it drives the Strata project's engine (below), with the same lines:
+GLM 5.3 Flash, DeepSeek V4 Flash, LFM2.5, Flint, Qwen3.6, Ornith 1.5, Gemma 4, Tiel Coder and MiniCPM-V too, up to
+8. The server drives it the way it drives the Strata project's engine (below), with the same lines:
 
 - A request alone writes on its own and guesses ahead as always, so one user sees no change.
 - When a second one comes, the first goes on in a batch slot from where it was, nothing read again, and the two
@@ -56,7 +56,8 @@ VRAM from the expert cache, an expert that moves to the CPU rounds differently, 
 reason alone ([issue 55](https://github.com/VecSzn/PolyStrata/issues/55)). On the
 laptop every token matched for Qwen3.6, Gemma 4 and LFM2.5 with 2 to 4 sequences and prompts of 19 to 3,000 tokens,
 and on the RTX 5090 for Qwen3.6, MiniCPM-V, LFM2.5, DeepSeek V4 Flash and GLM 5.3 Flash with 3 sequences after
-prompts of 64 and 3,000 tokens. Through the server on the laptop, with the same four options in the run config,
+prompts of 64 and 3,000 tokens, and for Flint after prompts of 15 and 3,000 tokens, with every expert on the card
+and with the card held to 8 GB. Through the server on the laptop, with the same four options in the run config,
 three chats at once gave the text each gave alone, to the character.
 
 Without those options the text of a chat answered together can part from the one it gets alone after a few dozen

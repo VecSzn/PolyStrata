@@ -1,5 +1,6 @@
-// src/poly/gemm_small_test.cu - gemm_f32() for one group of up to 256 outputs (gemm_small_kernel) against the same
-// products on the host: each output's sum of fmaf in the inputs' order, so the bits must be the same.
+// src/poly/gemm_small_test.cu - gemm_f32() for one group of up to 256 outputs (gemm_small_kernel, gemm_tile_kernel past
+// 64 of them) against the same products on the host: each output's sum of fmaf in the inputs' order, so the bits
+// must be the same.
 //
 // usage: poly_gemm_small_test   (exit 0: every output the same)
 #include "strata/poly/kernels.hpp"
@@ -54,8 +55,9 @@ int main() {
     std::mt19937 rng(3);
     int bad = 0;
     for (int n_out : {32, 64, 100, 128, 256})
-        for (int rows : {32, 37, 1024}) bad += check(h, 2048, n_out, rows, rng);
-    bad += check(h, 2000, 64, 45, rng);   // inputs that end inside a step
+        for (int rows : {32, 37, 1024, 2048}) bad += check(h, 2048, n_out, rows, rng);
+    bad += check(h, 2000, 64, 45, rng);    // inputs that end inside a step
+    bad += check(h, 2000, 256, 45, rng);   // and of gemm_tile_kernel's
     cublasDestroy(h);
     if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess) {
         std::printf("CUDA: %s\n", cudaGetErrorString(e));

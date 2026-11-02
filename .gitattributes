@@ -5,6 +5,11 @@ bench/prompts/** -text
 *.sh text eol=lf
 *.bat text eol=crlf
 
+# Byte-checked upstream GDN copy and its imported helpers.
+src/poly/gdn_mma* text eol=lf
+src/kernels/cuda/gdn_mma* text eol=lf
+include/strata/kernels/gdn_mma* text eol=lf
+
 # copies of real packs' native_experts.txt, parsed byte for byte by tests/core/expert_layout_test.cpp
 tests/data/native_experts/** -text
 

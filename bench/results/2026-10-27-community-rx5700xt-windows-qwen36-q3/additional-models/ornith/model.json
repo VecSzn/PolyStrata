@@ -1,0 +1,15 @@
+{
+  "family": "ornith",
+  "quant": "APEX-I-COMPACT",
+  "repo": "mudler/Ornith-1.5-35B-A3B-APEX-MTP-GGUF",
+  "revision": "4c326713c52d13fdb40983a2a09a46cca8e88739",
+  "files": [
+    {
+      "filename": "Ornith-1.5-35B-A3B-APEX-MTP-I-Compact.gguf",
+      "local_filename": "Ornith-1.5-35B-A3B-APEX-MTP-I-Compact.gguf",
+      "bytes": 17437861408,
+      "sha256": "67e6cdff678e67180d3cd4eef55277277563319057de287b8855c4d1fbff4165"
+    }
+  ],
+  "total_bytes": 17437861408
+}

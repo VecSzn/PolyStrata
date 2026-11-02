@@ -1,0 +1,36 @@
+{
+  "plain": [
+    "Return only the integer result of 37 times 19.",
+    "Return only JSON: {\"product\":37*19,\"values\":sorted([7,-2,7,0])}, with the expressions evaluated."
+  ],
+  "recall_recipe": {
+    "prefix": "Remember FIRST_MARKER=JADE-7429\n",
+    "corpus_tokens": [
+      0,
+      48000
+    ],
+    "middle": "\nMIDDLE_MARKER=AMBRE-2851\n",
+    "second_corpus_tokens": [
+      48000,
+      96000
+    ],
+    "suffix": "\nLAST_MARKER=AZUR-6193\nReturn only JSON with keys first,middle,last and these three marker values."
+  },
+  "code_recipe": {
+    "prefix": "Reference material for an independent code check:\n",
+    "corpus_tokens": [
+      0,
+      32768
+    ],
+    "separator": "\nIgnore the reference material above for the task:\n",
+    "tasks": [
+      "Implement merge_intervals(intervals). Input is a list of (start,end) pairs. Merge overlapping intervals and intervals sharing an endpoint; return sorted pairs. Do not mutate the input. Empty input returns an empty list. Return only complete Python code, no imports, no type annotations, no markdown or explanation.",
+      "Implement parse_config(text). Each nonblank line not starting with # after trimming is a key=value pair split at the FIRST =. Trim keys and values. Skip lines without = and empty keys. Last duplicate wins. Return a dict. Return only complete Python code, no imports, no type annotations, no markdown or explanation."
+    ]
+  },
+  "output_caps": {
+    "plain_and_recall": 128,
+    "code": 512
+  },
+  "sampling": "Same as reproduce.py; thinking off. Tasks run in listed order; prefix reuse is allowed for quality checks."
+}

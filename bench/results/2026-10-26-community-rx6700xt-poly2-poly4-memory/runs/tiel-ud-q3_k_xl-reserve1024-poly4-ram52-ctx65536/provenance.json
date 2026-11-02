@@ -1,0 +1,28 @@
+{
+  "profile": "tiel-ud-q3_k_xl-reserve1024",
+  "release": "v0.1.45-poly.4",
+  "source_commit": "145493e66580c80bba09b0130f667a2b1789da69",
+  "engine_sha256": "372c6ed707d302c470b864a8fc24ff2a3e462f94cb33c0956c20205a95ef9785",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 52,
+  "docker_memory_bytes": 55834574848,
+  "docker_memory_swap_combined_bytes": 55834574848,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "3e4decf5774a6006cb983886a7dc6e5ef3c85fbfd996f8d2000a0885b53e3cfc",
+    "file": "../../initial-expert-profiles/3e4decf5774a6006cb983886a7dc6e5ef3c85fbfd996f8d2000a0885b53e3cfc.txt"
+  },
+  "source_config_sha256": "72cb23ee0ab81a8eae525ba98db22dd91d4af4d5e5b1b6d118ee288d068760ce",
+  "original_results_sha256": "765ec4af930d249753cbae994d896bf46fc8df57d773cfcc2ada07e786854b45",
+  "published_results_sha256": "5e152c3c513925b7a213ceabfeaa62f0ca495a7801c34338f31ae9fa956cd917",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+      "bytes": 17234935648,
+      "sha256": "46b8fbeba6e888c9a101e49cc717baa9bb8dfa0d203ec7b3185288159543ec14",
+      "role": "model"
+    }
+  ]
+}

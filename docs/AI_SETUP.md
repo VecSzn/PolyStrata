@@ -93,6 +93,12 @@ on a PC with too little RAM for it; QAD-Q4_0, UD-Q6_K_XL and Q8_0 are by name. I
 only to companies with less than 10 million US dollars of yearly revenue. Take it only when the user asks for it,
 and read [LFM.md](LFM.md) first.
 
+`--family flint` (Flint 40B-A2.5B, by Recursive) runs on that engine as well, experimental: Linux or Windows, one
+NVIDIA card, an 18 to 42 GB download, about 22 to 46 GB of RAM beside an 8 GB card by setup's estimate, no images.
+Leave `--model` out: setup takes UD-Q4_K_XL where the PC has about 15 GB of RAM past that estimate (40 GB beside an
+8 GB card), else UD-Q3_K_XL; UD-Q6_K_XL and Q8_0 are by name. Its license is Apache 2.0. Take it only when the user
+asks for it, and read [FLINT.md](FLINT.md) first.
+
 `--family qwen36`, `--family ornith` and `--family gemma4` (Qwen3.6-35B-A3B, Ornith 1.5, Gemma 4 26B-A4B) are
 smaller models on GLM's engine, and experimental too: Linux or Windows, one NVIDIA card, an 11 to 24 GB download,
 about 15 to 28 GB of RAM beside an 8 GB card by setup's estimate, by size. On Windows setup compiles the engine
@@ -101,6 +107,14 @@ about 15 to 28 GB of RAM beside an 8 GB card by setup's estimate, by size. On Wi
 has three sizes. Leave `--model` out: setup takes UD-Q3_K_M (APEX-I-COMPACT for Ornith), or the smallest on a PC
 with too little RAM for it. The largest is by name, `--model UD-Q4_K_M` or `--model APEX-I-QUALITY`.
 Take one only when the user asks for it; [BACKENDS.md](BACKENDS.md#install) has what was measured.
+
+`--family kolibri` (Kolibri 1, by Aleph Alpha, in Hob-forge's own GGUF conversion) is a new model on the same
+engine, and experimental: Linux or Windows, one or two NVIDIA cards of 8 GB or more (it has run on one and on two
+32 GB V100s, and on a 12 GB one under Windows), a 29 to 48 GB download, about 33 to 52 GB of RAM beside an 8 GB
+card by setup's estimate and about 16 to 26 GB beside a 32 GB one, no images and no draft model. At 131K context
+one 32 GB V100 wrote 91 tokens/s and read a 32K prompt at 1,017 tokens/s (first token 32.7 s); two with the
+layers split wrote 93 and read it at 2,179 (first token 15.3 s); three runs, the medians above. `--model`
+takes Q4_K_M, Q2_K on a PC with little RAM, or Q3_K_M by name. The support is new, the GGUF independent: ask first.
 
 ## 4. Run setup without questions
 
@@ -124,6 +138,9 @@ The flags (all of them: `START-HERE.bat --help`):
 | `--backend cuda\|hip` | NVIDIA or AMD engine; chosen by itself on a PC with only one kind of card |
 | `--build` | compile the engine on this PC instead of using the ready-made one (AMD on Windows too: needs Visual Studio 2022 Build Tools with C++) |
 | `--data-dir PATH` | where the 70-120 GB of model files go |
+| `--custom-gguf PATH` | install one custom GGUF; setup reads the header and picks family/size. Not for nvfp4 packs |
+| `--gguf-dir PATH` | run GGUFs you already have by name; strata-poly also accepts same-arch fine-tunes. Not for nvfp4 packs |
+| `--inspect` | print what setup would read from a GGUF; no install |
 | `--port N` | the server port (default 8080) |
 | `--host H --api-key K` | listen beyond this PC; **only together with a key** |
 | `--no-start` | install only, do not start the server |

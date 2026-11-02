@@ -1,0 +1,11 @@
+{
+  "compiled": [
+    "strata-poly",
+    "poly_hip_value_split_policy_test",
+    "poly_hip_value_split_test",
+    "poly_attend_test"
+  ],
+  "architecture": "86",
+  "runtime_tested": false,
+  "reason": "No NVIDIA GPU on the host"
+}

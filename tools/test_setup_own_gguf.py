@@ -28,6 +28,20 @@ def gguf(path, arch, floats=64, short=0):
     path.write_bytes(head + b"\0" * (floats * 4 - short))
 
 
+def gguf_tensors(path, arch, tensors):
+    """A GGUF v3 file of architecture `arch` with (name, ggml type id, values) tensors, F32 (0) or F16 (1)."""
+    kv = _str("general.architecture") + struct.pack("<I", 8) + _str(arch)
+    tinfo, off, data = b"", 0, b""
+    for name, ttype, n in tensors:
+        tinfo += _str(name) + struct.pack("<I", 1) + struct.pack("<Q", n) + struct.pack("<I", ttype) + struct.pack("<Q", off)
+        size = n * (4 if ttype == 0 else 2)
+        data += b"\0" * size + b"\0" * ((32 - size % 32) % 32)
+        off = len(data)
+    head = b"GGUF" + struct.pack("<IQQ", 3, len(tensors), 1) + kv + tinfo
+    head += b"\0" * ((32 - len(head) % 32) % 32)
+    path.write_bytes(head + data)
+
+
 def quiet(f, *args, **kw):
     with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
         try:
@@ -57,10 +71,31 @@ class OwnGguf(unittest.TestCase):
         gguf(self.f, "qwen35moe")                  # a Qwen3.6-type file is not a Gemma 4 one
         self.assertEqual(quiet(setup.verify_poly_own, self.f, 13_600_000_000, "0" * 64, "gemma4")[0], "stopped")
 
+    def test_gate_and_up_of_different_types_are_refused(self):
+        # issue 54: Tiel APEX-I-NanoPlus, whose layer 16 stores gate and up differently; the engine refuses it at load
+        gguf_tensors(self.f, "qwen35moe", [("blk.16.ffn_gate_exps.weight", 0, 64), ("blk.16.ffn_up_exps.weight", 1, 64)])
+        code, out = quiet(setup.verify_poly_own, self.f, 13_600_000_000, "0" * 64, "tiel")
+        self.assertEqual(code, "stopped")
+        self.assertIn("blk.16: F32 and F16", out)
+        gguf_tensors(self.f, "qwen35moe", [("blk.16.ffn_gate_exps.weight", 1, 64), ("blk.16.ffn_up_exps.weight", 1, 64)])
+        self.assertEqual(quiet(setup.verify_poly_own, self.f, 13_600_000_000, "0" * 64, "tiel")[0], "ok")
+
     def test_an_incomplete_copy_is_refused(self):
         gguf(self.f, "qwen35moe", short=100)
         self.assertEqual(quiet(setup.verify_poly_own, self.f, 13_600_000_000, "0" * 64, "tiel")[0], "stopped")
         self.assertTrue(self.f.exists())
+
+    def test_ones_own_file_in_setups_folder_is_pointed_to_gguf_dir(self):
+        # issue 54: renamed into setup's own models folder, without --gguf-dir
+        gguf(self.f, "qwen35moe")
+        code, out = quiet(setup.verify_poly_download, self.f, 13_600_000_000, "0" * 64, "tiel")
+        self.assertEqual(code, "stopped")
+        self.assertIn("--gguf-dir", out)
+        self.assertNotIn("delete it and run setup again (the download restarts)", out)
+        self.assertTrue(self.f.exists())
+        gguf(self.f, "qwen35moe", short=100)       # a truncated download is still one to fetch again
+        code, out = quiet(setup.verify_poly_download, self.f, 13_600_000_000, "0" * 64, "tiel")
+        self.assertIn("the download restarts", out)
 
     def test_a_wrong_hash_deletes_only_what_setup_downloaded(self):
         gguf(self.f, "qwen35moe")

@@ -15,6 +15,7 @@
 //
 // usage: poly_fattn_test   (exit 0: every case within kRoomBatch and kRoomDoubles, times max(1, largest result), of
 //        attend_batch() and the doubles)
+//        poly_fattn_test [dec] gqa16   the same checks with Ornith 122B's 32 heads / 2 KV heads
 //        poly_fattn_test dec   fdec_q8() and fdec_f16() (the decode kernel) against attend() and the doubles, up
 //                              to 170,000 rows; a token alone and with others, and from a position on the card,
 //                              to the bit
@@ -37,7 +38,8 @@ namespace {
 
 using namespace strata::poly;
 
-constexpr int kDim = 256, kHeads = 16, kKvHeads = 2, kWidth = kKvHeads * kDim, kMaxRows = 131072, kBatch = 1024;
+constexpr int kDim = 256, kKvHeads = 2, kWidth = kKvHeads * kDim, kMaxRows = 131072, kBatch = 1024;
+int kHeads = 16;   // gqa16 selects 32; the existing group-8 geometry remains the default
 constexpr size_t kScore = size_t(16) << 20;   // Qwen35's score_ (kScoreFloats)
 constexpr float kRoomBatch = 2e-2f, kRoomDoubles = 7.5e-3f;   // the bounds, as shares of the largest result (at least 1)
 
@@ -180,7 +182,7 @@ std::vector<double> exact(const Cache& K, const Cache& V, const float* qh, int g
 }
 
 int decode_main() {
-    constexpr int kRows = 172032, kMaxN = 6;
+    constexpr int kRows = 172032, kMaxN = 9;
     std::mt19937 rng(11);
     std::normal_distribution<float> nd(0.f, 1.f);
     std::vector<float> q(size_t(kMaxN) * kHeads * kDim);
@@ -208,7 +210,9 @@ int decode_main() {
     cudaEvent_t e0, e1;
     cudaEventCreate(&e0), cudaEventCreate(&e1);
     auto old = [&](long long pos, int n) {
-        attend(dq, f16 ? kh : nullptr, f16 ? vh : nullptr, pos, n, score, 4, out, kDim, kHeads, kKvHeads, scale, nullptr,
+        // The reference writes chunk * heads * keys scores. Group 16 exceeds kScore at long context with 4.
+        const int chunk = std::min<size_t>(4, kScore / (size_t(kHeads) * (pos + n)));
+        attend(dq, f16 ? kh : nullptr, f16 ? vh : nullptr, pos, n, score, chunk, out, kDim, kHeads, kKvHeads, scale, nullptr,
                0, 0, false, nullptr, 0, 0, f16 ? Kvq8{} : kq, f16 ? Kvq8{} : vq);
     };
     auto dec = [&](long long pos, int n, bool on_card) {
@@ -234,7 +238,7 @@ int decode_main() {
     int bad = 0;
     struct Case { long long pos; int n; };
     const Case cases[] = {{0, 1}, {5, 3}, {1022, 2}, {1023, 4}, {1024, 1}, {2047, 5}, {30000, 2},
-                          {120000, 3}, {140000, 1}, {140000, 3}, {170000, 4}, {170000, 6}};
+                          {120000, 3}, {140000, 1}, {140000, 3}, {170000, 4}, {170000, 6}, {170000, 9}};
     for (const bool half_cache : {false, true})
     for (const Case& c : cases) {
         f16 = half_cache;
@@ -296,7 +300,29 @@ int decode_main() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc > 1 && std::string(argv[1]) == "dec") {
+    bool decode = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg == "dec") decode = true;
+        else if (arg == "gqa16") kHeads = 32;
+        else {
+            std::fprintf(stderr, "usage: poly_fattn_test [dec] [gqa16]\n");
+            return 2;
+        }
+    }
+    std::printf("query heads %d, KV heads %d, group %d\n", kHeads, kKvHeads, kHeads / kKvHeads);
+    if (fattn_fits(kDim, 24, kKvHeads, kBatch, kScore) ||
+        fdec_fits(kDim, 24, kKvHeads, 1024, kScore) ||
+        fattn_fits(128, kHeads, kKvHeads, kBatch, kScore) ||
+        fdec_fits(128, kHeads, kKvHeads, 1024, kScore) ||
+        fattn_fits(kDim, kHeads, 0, kBatch, kScore) ||
+        fdec_fits(kDim, kHeads, 0, 1024, kScore) ||
+        fattn_fits(kDim, kHeads, kKvHeads, kBatch, 0) ||
+        fdec_fits(kDim, kHeads, kKvHeads, 1024, 0)) {
+        std::printf("FAIL: unsupported shape or insufficient scratch accepted\n");
+        return 1;
+    }
+    if (decode) {
         if (!fdec_fits(kDim, kHeads, kKvHeads, 172032, kScore)) {
             std::printf("no decode kernel for this card\n");
             return 1;
@@ -333,7 +359,10 @@ int main(int argc, char** argv) {
     int bad = 0;
     struct Case { long long pos; int n; size_t floats; };
     // a few thousand keys a block: the batch's results (n * 4096 floats) and its metadata, then rows of 512 floats
-    auto few = [](int n, int rows) { return size_t(n) * kHeads * (kDim + 4) + 64 + size_t(n) / 8 + size_t(rows) * kWidth; };
+    auto few = [](int n, int rows) {
+        const int tile_tokens = 64 / (kHeads / kKvHeads);
+        return size_t(n) * kHeads * (kDim + 4) + 64 + size_t(n + tile_tokens - 1) / tile_tokens + size_t(rows) * kWidth;
+    };
     const Case cases[] = {{0, 16, kScore},          {0, 64, kScore},          {0, kBatch, kScore},
                           {5, 37, kScore},          {1000, 517, kScore},      {4095, kBatch, kScore},
                           {30000, kBatch, kScore},  {30000, kBatch, few(kBatch, 4096)},

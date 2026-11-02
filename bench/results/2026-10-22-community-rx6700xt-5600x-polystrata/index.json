@@ -1,0 +1,73 @@
+{
+  "source_commits": {
+    "original_runs": "c54f0eaf6200a9207f13f900a5fc772d437d6f7a",
+    "rerun_runs": "e97c8aa47ca2c01025accdd32d07a01536d794ce"
+  },
+  "runs": [
+    {
+      "profile": "gemma4-qat-ud-q4_k_xl-qatdraft-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/gemma4-qat-ud-q4_k_xl-qatdraft-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "gemma4-qat-ud-q4_k_xl-repodraft-reserve1024-ctx32768",
+      "stage": "official-control",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/gemma4-qat-ud-q4_k_xl-repodraft-reserve1024-ctx32768/official-control"
+    },
+    {
+      "profile": "lfm25-ud-q4_k_xl-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/lfm25-ud-q4_k_xl-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "lfm25-ud-q4_k_xl-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/lfm25-ud-q4_k_xl-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_xl-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_xl-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_xl-reserve1024-ctx32768-rerun-e97c8aa",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_xl-reserve1024-ctx32768-rerun-e97c8aa/official-standard"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_xl-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_xl-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_xl-reserve1024-ctx65536-rerun-e97c8aa",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_xl-reserve1024-ctx65536-rerun-e97c8aa/official-long"
+    },
+    {
+      "profile": "tiel-ud-q3_k_xl-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/tiel-ud-q3_k_xl-reserve1024-ctx32768/official-standard"
+    }
+  ],
+  "tool_sha256": "bd65126bed1f8e5ff3648f5d65c230ea7566219a443272115c1d622735d02be5",
+  "tool_sha_note": "sha256 of tools/strata_bench.py at e97c8aa (rerun runs); original runs used the same file at c54f0ea (runner-side AMD naming fix present in both)"
+}

@@ -1,0 +1,42 @@
+{
+ "exe": "<STRATA>\\engine-poly\\strata-poly.exe",
+ "args": [
+  "--model",
+  "<DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+  "--max-context",
+  "131072",
+  "--expert-profile",
+  "<DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt",
+  "--conversation-cache-mib",
+  "auto",
+  "--tail-skip",
+  "6",
+  "--threads",
+  "8",
+  "--kv",
+  "q8_0",
+  "--vram-reserve-mib",
+  "512"
+ ],
+ "cwd": "<STRATA>",
+ "tokenizer": "<DATA>\\packs\\qwen36-ud-q3_k_m\\tokenizer",
+ "model_name": "qwen3.6-35b-a3b-ud-q3_k_m",
+ "aliases": [
+  "qwen3.6-35b-a3b"
+ ],
+ "display_name": "Qwen3.6-35B-A3B UD-Q3_K_M",
+ "log": "<STRATA>\\bench\\results\\2026-10-28-ctx128k-opt\\engine-B-fattn.log",
+ "lib_dirs": [
+  "<STRATA>\\.venv\\Lib\\site-packages\\nvidia\\cu13\\bin\\x86_64"
+ ],
+ "port": 8099,
+ "gpu": 0,
+ "gpus_asked": true,
+ "api_key": "<API_KEY>",
+ "reasoning_loop_recovery": "recover",
+ "reasoning_budget_tokens": 8192,
+ "tool_call_recovery": true,
+ "env": {
+  "STRATA_FATTN": "1"
+ }
+}

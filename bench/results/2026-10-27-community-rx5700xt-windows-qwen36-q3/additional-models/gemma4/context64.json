@@ -1,0 +1,71 @@
+{
+  "configured_context": 65536,
+  "target_input": 59500,
+  "output_allowance": 128,
+  "response": {
+    "first": 189.08379980002064,
+    "total": 190.9465562000405,
+    "text": "```json\n{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}\n```",
+    "usage": {
+      "prompt_tokens": 59539,
+      "completion_tokens": 52,
+      "total_tokens": 59591,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 59539,
+      "prompt_ms": 187150.9,
+      "prompt_per_token_ms": 3.143,
+      "prompt_per_second": 318.1,
+      "predicted_n": 52,
+      "predicted_ms": 1864.4,
+      "predicted_per_token_ms": 35.854,
+      "predicted_per_second": 27.9,
+      "draft_n": 39,
+      "draft_n_accepted": 39
+    },
+    "err": null,
+    "pieces": 45
+  },
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 189.084,
+    "total_s": 190.947,
+    "prompt_tokens": 59539,
+    "reused_tokens": 0,
+    "read_tokens": 59539,
+    "generated_tokens": 52,
+    "prompt_tps": 318.1,
+    "prompt_tps_source": "engine",
+    "decode_tps": 27.9,
+    "decode_tps_source": "engine",
+    "prompt_ms": 187150.9,
+    "decode_ms": 1864.4,
+    "drafts_offered": 39,
+    "drafts_accepted": 39
+  },
+  "expected": {
+    "alpha": "CEDAR-5187",
+    "beta": "HARBOR-2649",
+    "gamma": "QUARTZ-9036"
+  },
+  "passed": false,
+  "filler_words": 59444,
+  "seed": 117,
+  "prompt_utf8_lf_sha256": "7dab0806b5d152c19681295992839aa87ab9897d7a4c19bb5097eb0125d03246",
+  "fixture": {
+    "generator": "reproduce-additional.py",
+    "seed": 117,
+    "filler_words": 59444,
+    "utf8_lf_sha256": "7dab0806b5d152c19681295992839aa87ab9897d7a4c19bb5097eb0125d03246",
+    "expected": {
+      "alpha": "CEDAR-5187",
+      "beta": "HARBOR-2649",
+      "gamma": "QUARTZ-9036"
+    }
+  }
+}

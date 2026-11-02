@@ -5,8 +5,7 @@ normal PC: one NVIDIA or AMD graphics card plus system RAM, on Windows or Linux.
 (`src/`, `include/`), a Python server with an OpenAI- and Anthropic-compatible API and a web app (`serve/`), and a
 one-click installer (`setup.py`, started by `START-HERE.bat` / `setup.sh`).
 
-A second engine, `strata-poly` (`src/poly/`), runs GLM 5.3 Flash and three smaller models from their GGUF files, on
-Linux with one NVIDIA card: [docs/GLM.md](docs/GLM.md), [docs/BACKENDS.md](docs/BACKENDS.md). The Qwen engine, the installer, the server and the web app come from
+A second engine, `strata-poly` (`src/poly/`), runs GLM 5.3 Flash, Ornith 1.5 (35B and 122B), DeepSeek V4 Flash and other GGUF models on Linux or Windows: [docs/GLM.md](docs/GLM.md), [docs/ORNITH.md](docs/ORNITH.md), [docs/DEEPSEEK.md](docs/DEEPSEEK.md), [docs/BACKENDS.md](docs/BACKENDS.md). The Qwen engine, the installer, the server and the web app come from
 [Strata](https://github.com/Niko1221/Strata).
 
 ## Installing PolyStrata for a user

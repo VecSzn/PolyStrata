@@ -1,0 +1,6 @@
+strata-poly: the experts' split is frozen for the engine's whole run (STRATA_FREEZE_EXPERTS): greedy answers are a function of the request alone, and the only cache change after load is the serve VRAM resize
+strata-poly: q8_0 KV cache: 544 bytes a row
+strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel
+strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel
+strata-poly: loaded in 1.4 s; 1204 of 12544 routed experts in VRAM (5.8 GiB), 12 CPU threads
+prompt 8440 tokens 719.0 tok/s, generated 5 tokens 19.24 tok/s (stop); experts from VRAM 11.3%, CPU experts 0.0 ms/token, router wait 0.6 ms/token, 0 experts swapped into VRAM, 0 left out, 2 of 2 guessed tokens right

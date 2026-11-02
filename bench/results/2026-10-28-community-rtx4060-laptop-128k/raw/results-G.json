@@ -1,0 +1,31 @@
+{
+ "arm": "G-harness-chat",
+ "turns": [
+  {
+   "turn": "1 fresh prompt",
+   "wall_s": 89.8,
+   "prompt_n": 117995,
+   "prompt_tok_s": 1330.5,
+   "decode_tok_s": 48.7,
+   "cached": null,
+   "answer_chars": 70
+  },
+  {
+   "turn": "2 follow-up turn (assistant resent)",
+   "wall_s": 7.8,
+   "prompt_n": 5395,
+   "prompt_tok_s": 791.7,
+   "decode_tok_s": 52.8,
+   "cached": 112640
+  },
+  {
+   "turn": "3 identical resend (retry)",
+   "wall_s": 1.0,
+   "prompt_n": 1,
+   "prompt_tok_s": 4.9,
+   "decode_tok_s": 66.9,
+   "cached": 118034
+  }
+ ],
+ "api_key": "<API_KEY>"
+}

@@ -16,13 +16,16 @@
 
 #include "cpu_experts.hpp"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -36,8 +39,12 @@ namespace strata::poly {
 class Shards;
 struct Likeliest;
 
-/// The attention caches' storing format: fp16 (default) or ggml Q8_0; opt-in via --kv.
-enum class KvFmt { kFp16 = 0, kQ8_0 = 1 };
+/// The attention caches' storing format, opt-in via --kv.  q8_0 is ggml's blocks (one fp16 scale a 32-value
+/// block of int8 codes) and reads them back element by element; int8 is the same rule with the codes and the
+/// deltas in two arrays, which a reader can take four codes to a load, and int8k keeps only the keys' side
+/// quantized.  q8_0 is qwen35moe's; int8 and int8k are Gemma 4's - the two readers are not the same arithmetic,
+/// so a model has one or the other rather than a choice between them.
+enum class KvFmt { kFp16 = 0, kQ8_0 = 1, kInt8 = 2, kInt8K = 3 };
 
 struct Options {
     std::string model;
@@ -50,13 +57,14 @@ struct Options {
     // A prompt batch.  More tokens a call and a larger staging buffer read a prompt faster, and both take VRAM
     // that the expert cache, and so decoding, does without.
     int prompt_batch = 1024;      ///< prompt tokens one eval() takes; the scratch is about 1.4 MiB of VRAM a token
-    int stage_mib = 2048;         ///< the buffer the experts that are not cached pass through: by default about
-                                  ///< what a layer of Q2_K experts leaves out of the cache, and never more than
-                                  ///< a layer's experts take
-    int stage_read_mib = 0;       ///< a read of several calls: the staging buffer grows to this, at most what a
+    int stage_mib = 0;            ///< the buffer the experts that are not cached pass through, never more than a
+                                  ///< layer's experts take; 0: 128 where a read can widen it (stage_read_mib) on
+                                  ///< CUDA, else 2048, about what a layer of Q2_K experts leaves out of the cache
+    int stage_read_mib = -1;      ///< a read of several calls: the staging buffer grows to this, at most what a
                                   ///< layer's experts take, with VRAM the expert cache lends it until the read is
                                   ///< done (end_read()), so that each layer's experts are copied once a read, not
-                                  ///< once a call; 0 (or no more than stage_mib): never
+                                  ///< once a call; 0 (or no more than stage_mib): never; below 0: 2048 with the
+                                  ///< 128 MiB default of stage_mib, else never
     int stage_ahead = 1024;       ///< from this many tokens, a call routes to most of a layer's experts, and the
                                   ///< ones that are not cached start their copy before the layer has routed; in a
                                   ///< read of several calls and this many tokens every call does; 0: never.  Under
@@ -67,6 +75,10 @@ struct Options {
                                   ///< below 0: as the two took the time between them; 0: none
     int expert_swaps = 64;        ///< experts on their way into the cache at a time while an answer is written, each
                                   ///< to the slot of one the answer uses less; 0: the cache stays as it was loaded
+    int64_t ram_experts_mib = -1; ///< the memory this process holds for the experts outside VRAM, answer or not:
+                                  ///< the ones used most lately are read into it from the files; the others are left
+                                  ///< to the file cache, which gives them to whatever needs the memory, and come back
+                                  ///< from it or the disk when a token routes to them.  Below 0: all of them
     bool stay_near = true;        ///< with several NUMA nodes, keep the CPU threads on the one that holds the experts
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
@@ -85,6 +97,9 @@ struct Options {
     float skip_weight = 0;        ///< in place of tail_skip: a routed expert outside VRAM whose router weight is under
                                   ///< this share of its token's experts' weight, for every token of the call, is left
                                   ///< out (--skip-weight); 0: tail_skip decides
+    float cache_bias = 0;         ///< a token's few-at-a-time routing adds this to the score of each expert in VRAM
+                                  ///< before it picks its experts; their weights stay the softmax of the scores the
+                                  ///< router gave (--cache-bias, qwen35moe only); 0: the router's own picks
     std::string layer_split;      ///< the layers across the CUDA devices this process sees, in their order: "auto"
                                   ///< (by each card's free VRAM) or the first layer of each later card ("20,30");
                                   ///< empty, or one device: the current card alone
@@ -121,6 +136,14 @@ struct Layer {
     size_t gu_bytes = 0, d_bytes = 0;  ///< one expert's gate (or up), and its down
     size_t gu_stride = 0;              ///< from an expert's gate to the next one's: twice gu_bytes in a file that
                                        ///< keeps an expert's gate and up in one tensor
+    // up's own format (issue 103: IsValorum's NanoPlus files quantize gate and up differently); in every other file
+    // these equal gu_type, gu_bytes and gu_stride, and nothing about the layer changes
+    uint32_t u_type = 0;
+    size_t u_bytes = 0, u_stride = 0;
+    bool mixed() const { return u_type != gu_type; }
+    size_t gu2() const { return gu_bytes + u_bytes; }   ///< an expert's gate and up: where its down starts in a slot
+    size_t gu_step = 0;   ///< from a staged expert's gate|up to the next one's: gu2(), and in a mixed layer whole
+                          ///< blocks of both types, since MMQ takes the stride in blocks (Mmq::mul)
     std::vector<uint8_t*> slot;        ///< per expert: gate | up | down in VRAM, or null
     size_t slot_bytes = 0;             ///< from a slot of the layer to the one behind it: whole blocks of both types
     std::vector<int32_t> ahead;        ///< experts a full prompt batch stages before it routes
@@ -186,6 +209,10 @@ public:
     double numa_share() const { return node_share_; }
     int64_t pos() const { return pos_; }
     int64_t meta_u(const char* key, int64_t fallback) const;
+    /// What --kv asked for, in the two short forms an architecture's code reads: the int8 codes/delta cache
+    /// (both sides, or the keys' side alone under int8k).
+    bool int8() const { return opt_.kv_format == KvFmt::kInt8 || opt_.kv_format == KvFmt::kInt8K; }
+    bool int8k() const { return opt_.kv_format == KvFmt::kInt8K; }
 
     /// Forget the sequence.
     void reset();
@@ -250,8 +277,14 @@ public:
     /// it; draft(guess, i, &p) for i = 1, 2, ... then guesses on from the i-th guess, with the block's own output
     /// in the model's place.  p is the probability the block gives what it returns.  pos() + i must be inside the
     /// context.  logits() is left alone.  An architecture may guess with a small model of its own instead of a
-    /// block (draft_step()); the calls are the same.
-    bool drafts() const { return next_ ? next_->drafts() : draft_; }
+    /// block (draft_step()); the calls are the same.  A model trained to guess a block of tokens at once may guess
+    /// them itself (block_mask(), under STRATA_BLOCK_GUESS=1): draft(token, 0, &p) makes a window's guesses in one
+    /// call, and the calls after it return them, whatever guess they are given.  It does so only while the card holds
+    /// every expert: the block runs the whole model, and with experts on the CPU it cost more than its right guesses
+    /// saved (Clover on an 8 GB laptop wrote 57.7 tokens/s after a 32K prompt with its guesses, 61.6 without).
+    bool drafts() const { return next_ ? next_->drafts() : draft_ || (block_guess_ && all_cached()); }
+    /// The guesses of a window come out of draft(token, 0, &p) together: asking for one more costs nothing.
+    bool guesses_at_once() const { return next_ ? next_->guesses_at_once() : block_guess_; }
     /// Test only: the calls read()'s layer-major path gave the draft block's rows (draft_rows()) on the card that has
     /// the block, since load.  Two or more in one read are back-to-back refills of its pinned input rows.
     int64_t read_draft_calls_for_test() const { return next_ ? next_->read_draft_calls_for_test() : read_draft_calls_; }
@@ -278,7 +311,16 @@ public:
     void load_rows(const uint8_t* src, int64_t from, int64_t count, int64_t first, int64_t n);
 
     const Stats& stats() const;
+    /// Between requests, and once after the load: of the experts the card has, the pages of the half used most
+    /// lately leave this process's working set (after the load only under Options::ram_experts_mib), and so do the
+    /// CPU's experts' under Options::ram_experts_mib and cuBLAS's pages; the pinned memory only a long prompt needs
+    /// is given back.
+    void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
+    /// The RAM held for the experts outside VRAM, in MiB, as load() settled Options::ram_experts_mib (-1: all of
+    /// them), and those experts' GiB.
+    int64_t ram_experts_mib() const { return opt_.ram_experts_mib; }
+    double outside_gib() const { return double(outside_bytes_) / double(1ull << 30); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
     double cached_gib() const { return double(exp_at_) / double(1ull << 30) + (next_ ? next_->cached_gib() : 0); }
     /// The cache as load() filled it, which is as large as resize_cache() makes it again.
@@ -339,6 +381,12 @@ protected:
     /// How many of the vocabulary's first tokens hold nearly every token an answer writes; 0: the order says
     /// nothing of that.
     virtual int guess_vocab() const { return 0; }
+    /// The token a model trained to guess a block of tokens at once fills the block with after the known one
+    /// (guess_block()); -1: the model is not.  Its layers then run a call of block_pass_ as that block.
+    virtual int block_mask() const { return -1; }
+    /// In a call of block_pass_: what is done to the n tokens' scores at layer il's router, together, before each
+    /// token is routed (route()).
+    virtual void route_block(int il, float* scores, int n) { (void) il, (void) scores, (void) n; }
     /// The layers' places in state_, and the attention's caches: a row a position.  Only for the layers this
     /// engine runs (runs()).
     virtual void alloc_caches() = 0;
@@ -447,6 +495,7 @@ protected:
     void shared_scratch();
     float* draft_input(const int32_t* tokens, int64_t row, const float* h, int n);
     void draft_rows(const int32_t* tokens, int first, int n);
+    void guess_block(int32_t token);
     const Image* image_at(int64_t row) const;
     bool input(int32_t token, int64_t row, float* dst) const;
     void lin(const Dev& w, const float* x, float* y, int n, const void* xq = nullptr, int rows_per_x = 0);
@@ -462,9 +511,13 @@ protected:
     bool moe(Layer& L, int il, int n, const std::function<void()>* first = nullptr);
     bool card_moe(int n);
     bool moe_card(Layer& L, int il, int n);
+    const float* biased(const Layer& L, const float* scores);
     /// Whether n tokens take layer L's routed experts as a prompt batch, through MMQ (moe_rows()), and not a few at
     /// a time (moe()).
     bool batched(const Layer& L, int n) const;
+    /// The routed experts' rows a call routed on the card has room for (d_): a window of a model that guesses its
+    /// own block, or kSumRows.  The others keep kSumRows, whose windows past it are routed on the host as before.
+    int card_rows() const;
     void moe_add(int n);
     template <class F>
     void* record(F&& work);
@@ -480,6 +533,9 @@ protected:
     int room_key(int n) const;
     void* dmalloc(size_t bytes, const char* what);
     void* hmalloc(size_t bytes, const char* what);
+    void hfree(void* p);
+    std::vector<uint8_t> ram_keep(const std::vector<float>* lately = nullptr) const;
+    bool read_file(uint8_t* dst, const uint8_t* src, size_t n) const;
     /// A write into VRAM, on st_.  Every one of them goes through these two or is an async call on a stream of
     /// its own: see the note on h2d() in engine.cpp.
     void h2d(void* dst, const void* src, size_t bytes);
@@ -508,7 +564,8 @@ protected:
     void vmm_unmap(Mapped& m, size_t bytes);
     void vmm_free(Mapped& m);
     void shrink_cache(size_t bytes);
-    int grow_cache(size_t bytes);
+    int grow_cache(size_t bytes, bool later = false);
+    void fill_now();
     void widen_stage();
     void narrow_stage();
     void resize_card_cache(int mib);   ///< resize_cache() and mind_vram() for this engine's card
@@ -580,11 +637,18 @@ protected:
     float rms_eps_ = 0;
     bool gelu_ = false;       ///< the routed experts' activation: GELU of the gate, else SiLU within the layer's limits
     std::vector<float> clamp_exp_, clamp_shexp_;   ///< a layer's SwiGLU limits: the routed experts', the shared one's
+    /// a prompt batch's products go through guard_half_sums(): the model's activations can sum past a half's range
+    /// in a block.  Off for the models whose sums stay in range: it cost LFM2.5 4% of a 30K prompt's read on a 5090.
+    bool half_sum_guard_ = false;
 
     std::vector<Layer> layers_;   ///< the model's, and after them the draft block
     Dev out_norm_, output_;
     bool draft_ = false;
     bool block_layer_ = false;    ///< what guesses ahead is a block after the model's layers (layers_' last)
+    bool block_guess_ = false;    ///< the model guesses a window's tokens itself, in a block (block_mask())
+    bool block_pass_ = false;     ///< the call under way is that block: its tokens see each other, no state changes
+    Likeliest* h_block_ = nullptr;   ///< the block's guesses and their probabilities, pinned
+    int block_n_ = 0;                ///< how many it holds
     Dev d_proj_, d_enorm_, d_hnorm_, d_head_;   ///< the draft block's input projection and norms, and its output norm
     const uint8_t* tok_embd_ = nullptr;   ///< the token table in the mapped file, tok_row_ bytes a token
     size_t tok_row_ = 0;
@@ -618,11 +682,20 @@ protected:
         std::vector<std::vector<void*>> heads;   ///< Layer::heads, by layer
         std::map<std::vector<int>, void*> passes;
         void* tail = nullptr;
+        // A sequence's own fp16 twin of its int8 caches (Gemma 4's --kv int8), and the halves of it that have
+        // VRAM behind them.  The twin is a sequence's: a batch gives every row its own sequence, and the twin is
+        // where that sequence's prompt batch reads, so the twin belongs with the sequence's other members.
+        Mapped twin_k, twin_v;
+        size_t twin_mapped = 0;
     };
     std::vector<Seq> seqs_;      ///< the bound one's place holds nothing while it is bound
     int bound_ = 0;
     std::vector<Buf> bufs_;      ///< the bound sequence's: what kv_alloc() and seq_alloc() gave it, in that order
     size_t again_ = SIZE_MAX;    ///< while alloc_caches() points at the bound sequence's buffers again: the next one
+    // The bound sequence's fp16 twin of its int8 caches (Gemma 4's --kv int8): the addresses for the whole and
+    // the VRAM behind them.  A sequence's own, since a batch gives every row its own sequence.
+    Mapped twin_k_, twin_v_;
+    size_t twin_mapped_ = 0;
     void park_bound();
     void take_bound(int s);
     void hold(int s);   ///< bind() on this card alone
@@ -630,7 +703,7 @@ protected:
     size_t budget_ = 0;          ///< their VRAM and the expert cache's together, as the cache was filled
     int asked_reserve_mib_ = -1; ///< Options::vram_reserve_mib as load() got it
     int reserve_mib_ = 0;        ///< what the cache was sized to leave free
-    bool ram_tight_ = false;     ///< the machine's RAM is within 4 GiB of the model's files (fill_expert_cache())
+    bool ram_tight_ = false;     ///< the machine's RAM is within 5 GiB of the model's files (fill_expert_cache())
     int minds_ = 0;              ///< mind_vram()'s calls
     int full_cached_ = 0;        ///< the cache as load() filled it: its experts and their bytes
     size_t full_bytes_ = 0;
@@ -679,7 +752,9 @@ protected:
     // A prompt batch's MoE (moe_rows).  A row is a token and one of the experts it routes to.
     std::unique_ptr<Mmq> mmq_;   ///< null when the card has no MMQ tile for the experts' types
     float *gu_ = nullptr, *hx_ = nullptr, *dx_ = nullptr;   ///< the rows' gate|up, hidden and down values
+    float* hf_ = nullptr;   ///< the power of two a row was divided by for its half sums (guard_half_sums())
     void *mq_ = nullptr, *mq2_ = nullptr;                   ///< the rows quantized for the two products
+    void* mqu_ = nullptr;   ///< the rows quantized for up's product, in a layer whose up is not gate's type
     void* mqx_ = nullptr;                                   ///< lin()'s tokens quantized for a product
     int32_t *tab_ = nullptr, *h_tab_ = nullptr;   ///< a layer's row tables, in VRAM and pinned
     int32_t* iota_ = nullptr;                     ///< 0, 1, 2, ...
@@ -707,6 +782,7 @@ protected:
     int stage_turn_ = 0;
     std::vector<int32_t> ids_, count_, first_, group_, round_;
     std::vector<float> route_tmp_;   ///< route()'s scratch, a share for each host thread
+    std::vector<float> bias_rl_;     ///< one token's scores with Options::cache_bias added (moe())
     struct Run {
         int c, j, m, most;   ///< the rows' class, its first cached expert and how many, the most rows one has
     };
@@ -735,6 +811,112 @@ protected:
     size_t slot_max_ = 0;            ///< the largest expert of the cache
     void* swap_st_ = nullptr;        ///< the stream of their uploads
     std::thread follower_;
+    static constexpr int kSwapPins = 2;
+    uint8_t* swap_pin_[kSwapPins] = {};   ///< the follower's pinned buffers (follow_loop())
+    void* swap_pin_ev_[kSwapPins] = {};   ///< each one's last upload
+    struct Refill {
+        int il, e;
+        uint8_t* slot;
+    };
+    std::vector<Refill> refill_;   ///< empty slots of the cache the follower is to fill (grow_cache(later))
+    /// the dense tensors' bytes in the mapped files, which leave the working set once they are on the card (load())
+    std::vector<std::pair<const uint8_t*, size_t>> uploaded_;
+    /// with Options::ram_experts_mib: the CPU's experts read through the mapping, whose pages stay in the working set
+    /// (ram_keep(), at the load and after a long prompt); the others come from pool_
+    std::vector<uint8_t> kept_;
+    size_t outside_bytes_ = 0;   ///< the routed experts the card does not have, after load()
+    void rekeep();
+    struct FileView {
+        const uint8_t* base;
+        size_t bytes;
+        std::string path;
+    };
+    std::vector<FileView> views_;   ///< the mapped files, for read_file()
+    // With Options::ram_experts_mib, the experts outside kept_ that an answer gives the CPU: read from the files into
+    // slots of this memory (gate | up | down, as a card's slot).  Through the mapping they stayed in the working set
+    // until trim(), and a long answer brought nearly all back.  kept_ and the slots fill the budget from the load
+    // on, so the working set stays where the load left it.
+    std::unique_ptr<uint8_t[]> pool_;
+    // The slots come in a size for each size of expert, side by side, each size with its share of the budget and a
+    // clock of its own.  Every slot the size of the largest one, Qwen3.6's 6 GiB held 3263 of its experts where
+    // their own sizes held 4625: one of its 41 layers has experts of 1.88 MiB, 37 of 1.30.
+    struct PoolSize {
+        size_t bytes;   ///< a slot's, in whole cache lines
+        size_t at;      ///< where the first one starts in pool_
+        size_t first;   ///< its number
+        size_t n;
+        size_t hand;    ///< pool_victim()'s, within these
+        size_t nprot;   ///< of these, held (pool_prot_)
+        size_t prot_max;
+    };
+    std::vector<PoolSize> pool_sizes_;
+    std::vector<uint8_t> pool_size_of_;   ///< per layer: its experts' place in pool_sizes_
+    size_t pool_bytes_ = 0;               ///< of Options::ram_experts_mib, what the slots take; kept_ has the rest
+    uint8_t* pool_at(size_t v) const;
+    size_t pool_slot_of(int il, const uint8_t* p) const;
+    std::vector<uint8_t> pool_pin_;     ///< per slot: an upload to the card copies it (follow_loop())
+    const uint8_t* pool_has(int il, int e) const;
+    std::vector<int32_t> pool_of_;      ///< per (layer, expert): its slot, or -1
+    std::vector<int64_t> pool_who_;     ///< per slot: layer * n_expert + expert, or -1
+    std::vector<uint64_t> pool_tick_;   ///< per slot: the call that used it last
+    std::vector<uint8_t> pool_ref_;     ///< per slot: used since pool_victim()'s hand came by
+    // An expert read into a slot (missed, or read ahead) is on trial until a later call uses it, which holds it
+    // (pool_prot_).  The clock takes the trial slots it comes to, and passes the held ones that were used since
+    // it last came by; one that was not goes back on trial while more than prot_max of its size are held.  With every
+    // slot alike, the reads ahead that went unused (a third of them) pushed out experts later tokens used.  One clock
+    // whose reads ahead come in unmarked missed half as often with all the budget in slots, but the file cache kept a
+    // second copy of what the slots held and pushed out what they did not: the laptop read 7.5 GiB from its disk in
+    // an answer's 35 seconds, where kept_'s pages through the mapping are the file cache's own.
+    std::vector<uint8_t> pool_prot_;
+    size_t pool_victim(int il);
+    uint64_t pool_now_ = 0;
+    struct PoolRead {
+        size_t e;
+        int32_t s;
+        bool ok;
+    };
+    std::vector<PoolRead> pool_reads_;   ///< pool_take()'s experts to read into their slots now
+    void pool_take(const Layer& L, int il, CpuExpert* host, int n);
+    void pool_read(const Layer& L, PoolRead& r);
+    void pool_fill();
+    int first_moe_layer() const;
+    // The prompt's own uses of each expert since trim() (moe_rows()), and its rows: after a long one, the answer's
+    // first call has the slots take the experts it used most (pool_reseed()).
+    std::vector<float> prompt_use_;
+    int64_t prompt_rows_ = 0;
+    void pool_reseed();
+    // Read ahead: moe_router() also scores the next MoE layer's router on this layer's input (on the card, copied to
+    // h_ahead_ before ev_, a part of a window apiece, as ev_row_; a head recorded as a graph copies it too), and
+    // moe() hands that layer's likeliest experts that the CPU would read from the files to pool_threads_ before
+    // this layer's are computed.
+    // A slot being read is pool_state_ 1 (2: the read failed); its layer's call waits for it.
+    int prefetch_k_ = 0;   ///< the next MoE layer's guessed top k
+    float* ahead_dev_ = nullptr;
+    float* h_ahead_ = nullptr;
+    std::unique_ptr<std::atomic<uint8_t>[]> pool_state_;
+    struct PoolJob {   ///< a piece of an expert's read into its slot, or with s = kTouch / kDrop pages of the mapping
+        uint8_t* dst;
+        const uint8_t* src;
+        size_t n;
+        int32_t s;
+    };
+    static constexpr int32_t kTouch = -1, kDrop = -2;
+    std::deque<PoolJob> pool_jobs_;
+    /// kTouch / kDrop jobs, taken when pool_jobs_ is empty: in the first answer after the load the cache traded
+    /// 2,700 experts, and their page work ahead of the reads held the reads a call waited for up
+    std::deque<PoolJob> pool_pages_;
+    std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
+    std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
+    void pool_queue(const Layer& L, size_t e, int32_t s, bool first);
+    std::mutex pool_m_;
+    std::atomic<int> pool_n_{0};   ///< the jobs in pool_jobs_ and pool_pages_, which pool_loop() spins on
+    std::condition_variable pool_cv_;
+    bool pool_quit_ = false;
+    std::vector<std::thread> pool_threads_;
+    void pool_ahead(int j, int n, size_t part, int k);
+    void pool_loop();
+    void pool_run(const PoolJob& job);
+    bool pool_help();
     std::mutex swap_m_;
     std::condition_variable swap_cv_;
     bool swap_quit_ = false;
@@ -750,6 +932,7 @@ protected:
     uint64_t images_set_ = 0;            ///< counts images(): what was derived from an earlier list is stale
     std::vector<int64_t> use_, prior_;   ///< routed count per (layer, expert): this run, and the profile's
     Stats stats_;
+    bool stream_stage_ = false;         ///< opt-in streaming CPU stores into the existing expert upload buffers
 };
 
 }  // namespace strata::poly

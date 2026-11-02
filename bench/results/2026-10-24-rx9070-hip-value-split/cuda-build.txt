@@ -1,0 +1,10 @@
+CUDA redistributable 13.0.88, GCC 13.3, sm_86, CMake Release, Ninja.
+
+[111/134] Building CXX object CMakeFiles/poly_hip_value_split_policy_test.dir/src/poly/hip_value_split_policy_test.cpp.o
+[127/134] Building CUDA object CMakeFiles/poly_hip_value_split_test.dir/src/poly/hip_value_split_test.cu.o
+[133/134] Building CUDA object CMakeFiles/poly_hip_value_split_test.dir/src/poly/kernels.cu.o
+[134/134] Linking CUDA executable poly_hip_value_split_test
+poly_hip_value_split_policy_test: PASS
+CUDA_BUILD_PASS
+
+No NVIDIA GPU was present, so only compilation ran on CUDA.

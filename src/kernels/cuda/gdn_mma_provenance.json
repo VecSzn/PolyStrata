@@ -1,0 +1,9 @@
+{
+  "upstream_revision": "7182ef71e6d5dd0c8ea76486fac134fcd25025d4",
+  "upstream_path": "ggml/src/ggml-cuda/gated-delta-net-mma.cu",
+  "upstream_file_sha256": "b9a54b0f8a60944f948df4da0c94a3ff16eab83d50f8a65f7f409c495e19d9d2",
+  "kernel_body_sha256": "ea7103b9dba784fb55c122f3dd88e906a7c253e1011a979a68d99d3b175dd84e",
+  "helpers_sha256": "868710b3d9f220c5eaf61ffcd6d0a9a691cf39070bf85d688e267a94a6a3c5d8",
+  "pinned_ggml_revision": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
+  "pinned_mma_sha256": "c7e0f3332da182e203b4b953f9fa8535ffca3767d2b7d4d7dbf7ce486262d1af"
+}

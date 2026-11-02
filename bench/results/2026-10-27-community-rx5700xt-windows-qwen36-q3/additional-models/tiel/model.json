@@ -1,0 +1,15 @@
+{
+  "family": "tiel",
+  "quant": "UD-Q3_K_XL",
+  "repo": "peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP",
+  "revision": "bb5f3f441849fc24c2d9037c310bc995404bfa0c",
+  "files": [
+    {
+      "filename": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+      "local_filename": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+      "bytes": 17234935648,
+      "sha256": "46b8fbeba6e888c9a101e49cc717baa9bb8dfa0d203ec7b3185288159543ec14"
+    }
+  ],
+  "total_bytes": 17234935648
+}

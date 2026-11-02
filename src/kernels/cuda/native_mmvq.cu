@@ -1743,9 +1743,71 @@ __global__ void native_mmvq_slots_kernel(S slots, int n_in, int n_out) {
     }
 }
 
+// native_mmvq_slots_kernel when a row's blocks all fall to the first warp's lanes (blocks_per_row * T <= WARP, e.g. an
+// expert's IQ4_XS down projection of 512 values: 2 blocks, 16 lanes): there the other warps only add zeros, so each
+// warp takes rows of its own instead - the same lanes' terms, the same three zero partials and the same warp_sum,
+// bit for bit, with a quarter of the blocks and no shared memory or barrier.  Qwen3.6 UD-Q3_K_M on an RX 7800 XT:
+// the down products were 32% of a decode's GPU time at ~75 GB/s.  Taken where native_mmvq_slots_wide() says so.
+template<typename F, int ROWS, typename S, int G = 1>
+__launch_bounds__(WARPS * WARP)
+__global__ void native_mmvq_slots_warp_kernel(S slots, int n_in, int n_out) {
+    // G row groups a warp, WARP / G lanes each (G = 2 when a row needs 16 lanes or fewer: the IQ4_XS down projection's
+    // 512 values are 16): the full warp_sum's steps between the groups added the zeros of the lanes that had none of
+    // the row, so a group adds those zeros and sums its own lanes - the same bits again
+    constexpr int L = WARP / G;
+    const SlotPtrs at = slot_ptrs(slots, int(blockIdx.y));
+    const auto* w = static_cast<const typename F::Block*>(at.w);
+    const auto* x = static_cast<const Q81Block*>(at.x);
+    float* y = at.y;
+    const int lane = int(threadIdx.x), grp = lane / L, local = lane - grp * L;
+    const int warp_row0 = ROWS * (int(blockIdx.x) * WARPS + int(threadIdx.y)) * G;
+    if (warp_row0 >= n_out) return;   // whole warps: no barrier below
+    const int row0 = warp_row0 + ROWS * grp;
+    const int blocks_per_row = n_in / F::DIV;
+    float tmp[ROWS] = {};
+    if (row0 < n_out) {
+        for (int kbx = local / F::T; kbx < blocks_per_row; kbx += F::BPI) {
+            const int kby = kbx * F::KBY;
+            const int kqs = F::kqs(local);
+#pragma unroll
+            for (int i = 0; i < ROWS; ++i) {
+                if (row0 + i < n_out) {
+                    const std::size_t block = std::size_t(row0 + i) * blocks_per_row + kbx;
+                    tmp[i] += F::apply(F::load(w + block, kqs), x + kby, kqs);
+                }
+            }
+        }
+    }
+#pragma unroll
+    for (int i = 0; i < ROWS; ++i) {
+#pragma unroll
+        for (int l = 0; l < WARPS - 1; ++l) tmp[i] += 0.0f;   // the block kernel's partials of the other warps
+        if constexpr (G == 1) {
+            tmp[i] = warp_sum(tmp[i]);
+        } else {
+#pragma unroll
+            for (int offset = WARP / 2; offset >= L; offset >>= 1) tmp[i] += 0.0f;   // the other group's lanes: zeros
+#pragma unroll
+            for (int offset = L / 2; offset > 0; offset >>= 1) tmp[i] += __shfl_xor_sync(0xffffffff, tmp[i], offset, WARP);
+        }
+        if (local == i && row0 + i < n_out) y[row0 + i] = tmp[i];
+    }
+}
+
 template<typename F, typename S>
 void launch_slots(const S& slots, int count, int n_in, int n_out, cudaStream_t s) {
     const dim3 threads(WARP, WARPS);
+    if (native_mmvq_slots_wide() && n_in / F::DIV * F::T <= WARP && n_in % F::DIV == 0) {
+        constexpr int ROWS = 2;
+        if (n_in / F::DIV * F::T <= WARP / 2) {   // a row in half a warp: two rows' groups a warp
+            const dim3 blocks(unsigned((std::size_t(n_out) + 2 * ROWS * WARPS - 1) / (2 * ROWS * WARPS)), unsigned(count));
+            native_mmvq_slots_warp_kernel<F, ROWS, S, 2><<<blocks, threads, 0, s>>>(slots, n_in, n_out);
+        } else {
+            const dim3 blocks(unsigned((std::size_t(n_out) + ROWS * WARPS - 1) / (ROWS * WARPS)), unsigned(count));
+            native_mmvq_slots_warp_kernel<F, ROWS, S, 1><<<blocks, threads, 0, s>>>(slots, n_in, n_out);
+        }
+        return;
+    }
     if (n_in / F::DIV < F::BPI) {
         constexpr int ROWS = 2;
         const dim3 blocks(unsigned((std::size_t(n_out) + ROWS - 1) / ROWS), unsigned(count));
@@ -2591,7 +2653,9 @@ std::size_t native_q8_1_bytes(int n_in, int ncols) {
 }
 
 void native_quantize_q8_1(const float* x, void* x_q8_1, int n_in, int ncols, void* stream) {
-    validate_shape(n_in, ncols);
+    // one flat vector whatever ncols is (below): up to kMmvqSlotsMax columns, a slots launch's activations
+    validate_shape(n_in, 1);
+    if (ncols < 1 || ncols > kMmvqSlotsMax) throw std::invalid_argument("native_quantize_q8_1 requires 1 <= ncols <= 32");
     validate_pointer(x);
     validate_pointer(x_q8_1);
     validate_stream(stream);
@@ -3175,10 +3239,22 @@ void launch_slots_of(int ggml_type, const S& slots, int count, int n_in, int n_o
 
 }  // namespace
 
+bool native_mmvq_slots_wide() {
+    static const bool on = [] {
+        const char* v = std::getenv("STRATA_SLOTS_WARP");
+#if defined(__HIPCC__)
+        return v == nullptr || v[0] != '0';
+#else
+        return v != nullptr && v[0] == '1';
+#endif
+    }();
+    return on;
+}
+
 bool native_mmvq_slots(int ggml_type, const MmvqSlots& slots, int count, int n_in, int n_out, void* stream) {
     if (!slots_kind(ggml_type)) return false;
-    if (n_out <= 0 || count < 1 || count > MAX_NCOLS)
-        throw std::invalid_argument("native MMVQ requires n_out > 0 and 1 to 8 matrices");
+    if (n_out <= 0 || count < 1 || count > kMmvqSlotsMax)
+        throw std::invalid_argument("native MMVQ requires n_out > 0 and 1 to 32 matrices");
     for (int i = 0; i < count; ++i) {
         validate_pointer(slots.w[i]);
         validate_pointer(slots.x[i]);

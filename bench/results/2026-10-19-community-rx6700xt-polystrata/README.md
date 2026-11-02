@@ -59,3 +59,7 @@ The initial Qwen profile without an explicit reserve passed its 32K suite, retai
 These measurements do not establish general model accuracy, production reliability, vision support or successful recall at the configured context limit. The upstream agent session is a speed/cache workload, not an external tool-execution accuracy test. No llama.cpp baseline was run for this report.
 
 `index.json` enumerates included official stages and the measured tool hash. Copied upstream reports and per-run JSON are unchanged; settings metadata is separately labeled.
+
+## Follow-up report
+
+[October 25/26: v0.1.45-poly.2 versus v0.1.45-poly.4 at 28/52 GiB](../2026-10-26-community-rx6700xt-poly2-poly4-memory/README.md) adds a controlled memory-limit comparison on this card after the machine was upgraded to 64 GB. These original results remain the historical record; the new memory caps do not recreate the former physical DIMMs.

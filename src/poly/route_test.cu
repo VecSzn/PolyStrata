@@ -1,7 +1,8 @@
 // src/poly/route_test.cu - route_rows() against the hosts' routing: the same experts for every token, and the same
 // weights up to a few units in the last place.  The host side is the architectures' route() written out once more
 // (softmax: Qwen3.6, Gemma 4's with its scale and each expert's own; sigmoid with a bias: GLM 5.3 Flash and
-// LFM2.5; sqrt of softplus with a bias: DeepSeek V4).  Random scores, and some tokens whose top scores tie.
+// LFM2.5; sqrt of softplus with a bias: DeepSeek V4; sigmoid with the pick on the bare scores: Kolibri 1).  Random
+// scores, and some tokens whose top scores tie.
 //
 // usage: poly_route_test   (exit 0: every pick the same and every weight close)
 #include "strata/poly/kernels.hpp"
@@ -28,10 +29,12 @@ void host_route(const float* lg, int n_expert, int n_used, int gate, float in_sc
     for (int e = 0; e < n_expert; ++e) mx = std::max(mx, lg[e] * in_scale);
     for (int e = 0; e < n_expert; ++e) {
         const float x = lg[e] * in_scale;
-        p[e] = gate == 0 ? std::exp(x - mx) : gate == 1 ? 1.f / (1.f + std::exp(-x))
-                                                        : std::sqrt(x > 20.0f ? x : std::log(1.0f + std::exp(x)));
+        // gate 3 (SIGMOID_LOGIT_ADD, Kolibri 1): the weight is the sigmoid of the score, the pick is on the score
+        p[e] = gate == 0 ? std::exp(x - mx)
+             : gate == 2 ? std::sqrt(x > 20.0f ? x : std::log(1.0f + std::exp(x)))
+                         : 1.f / (1.f + std::exp(-x));
         all += p[e];
-        pick[e] = p[e] + (bias ? bias[e] : 0.f);
+        pick[e] = (gate == 3 ? x : p[e]) + (bias ? bias[e] : 0.f);
     }
     by = pick;
     const float inv = gate == 0 ? (float) (1.0 / all) : 1.f;
@@ -117,6 +120,7 @@ int main() {
     bad += check(1, 256, 8, 1.f, true, false, true, 2.5f, rng);                    // GLM 5.3 Flash
     bad += check(2, 256, 6, 1.f, true, false, true, 1.5f, rng);                    // DeepSeek V4
     bad += check(1, 64, 4, 1.f, true, false, true, 0.f, rng);                      // LFM2.5-24B-A2B
+    bad += check(3, 384, 6, 1.f, true, false, false, 0.f, rng);                    // Kolibri 1
     if (cudaGetLastError() != cudaSuccess) {
         std::printf("CUDA error\n");
         return 2;

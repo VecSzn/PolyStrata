@@ -127,7 +127,7 @@ def try_json(base, path, key="", timeout=20):
 
 def chat(base: str, key: str, messages: list, max_tokens: int, think: bool = False, tools=None, timeout: float = 3600) -> dict:
     """One streamed chat request -> {first, total, text, usage, timings, err}.  `first` is the seconds to the first
-    non-empty content or reasoning piece (keep-alives and empty deltas ignored)."""
+    non-empty content, reasoning or tool-call piece (keep-alives and empty deltas ignored)."""
     body = {"model": "strata", "stream": True, "max_tokens": max_tokens, "temperature": 0, "messages": messages}
     if tools:
         body["tools"] = tools
@@ -157,7 +157,8 @@ def chat(base: str, key: str, messages: list, max_tokens: int, think: bool = Fal
                 for ch in j.get("choices") or []:
                     dl = ch.get("delta") or {}
                     piece = (dl.get("content") or "") + (dl.get("reasoning_content") or "")
-                    if piece:
+                    # a turn can be a tool call alone (LFM2.5 calls one though the agent prompt asks it not to)
+                    if piece or dl.get("tool_calls"):
                         if first is None:
                             first = time.perf_counter() - t0
                         pieces += 1

@@ -1,0 +1,54 @@
+{
+  "versions": {
+    "poly2": {
+      "tag": "v0.1.45-poly.2",
+      "commit": "974552f562aecb3e86cdd2679e76e4515b52b9d2",
+      "engine_sha256": "5cecdf2d8354ae704e456914c8d453d3497dfa8200b52e6c0f61802d52912aca",
+      "build": {
+        "source": "local-hip",
+        "backend": "hip",
+        "version": "0.1.45",
+        "archs": [
+          "gfx1031"
+        ],
+        "vision": "none",
+        "lib_dirs": [
+          "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+          "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+        ],
+        "src": "40ab2f9aba52871b"
+      }
+    },
+    "poly4": {
+      "tag": "v0.1.45-poly.4",
+      "commit": "145493e66580c80bba09b0130f667a2b1789da69",
+      "engine_sha256": "372c6ed707d302c470b864a8fc24ff2a3e462f94cb33c0956c20205a95ef9785",
+      "build": {
+        "source": "local-hip",
+        "backend": "hip",
+        "version": "0.1.45",
+        "archs": [
+          "gfx1031"
+        ],
+        "vision": "none",
+        "lib_dirs": [
+          "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+          "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+        ],
+        "src": "2b143a317883c573"
+      }
+    }
+  },
+  "rocm_packages": [
+    "numpy==2.5.3",
+    "rocm==7.13.0a20260515",
+    "rocm-sdk-core==7.13.0a20260515",
+    "rocm-sdk-devel==7.13.0a20260515",
+    "rocm-sdk-libraries-gfx103X-all==7.13.0a20260515"
+  ],
+  "llama_cpp_commit": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
+  "compiler_policy": "Original pinned ROCm compiler and libraries reused for both source builds; no dependency upgrade.",
+  "benchmark_source_commit": "974552f562aecb3e86cdd2679e76e4515b52b9d2",
+  "benchmark_sha256": "bd65126bed1f8e5ff3648f5d65c230ea7566219a443272115c1d622735d02be5",
+  "comparison_scope": "Full source checkout/server/engine bundle, not an isolated GPU kernel comparison."
+}

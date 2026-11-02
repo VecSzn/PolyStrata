@@ -1,0 +1,104 @@
+[
+  {
+    "arm": "pr_quality_off",
+    "test": "quality-0",
+    "passed": true,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "703"
+    }
+  },
+  {
+    "arm": "pr_quality_off",
+    "test": "quality-1",
+    "passed": true,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\"product\":703,\"values\":[-2,0,7,7]}"
+    }
+  },
+  {
+    "arm": "pr_quality_off",
+    "test": "recall_96k",
+    "passed": false,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\n  \"first\": \"FIRST_MARKER=JADE-7429\",\n  \"middle\": \"MIDDLE_MARKER=AMBRE-2851\",\n  \"last\": \"LAST_MARKER=AZUR-6193\"\n}"
+    },
+    "semantic_recall_passed": true
+  },
+  {
+    "arm": "pr_quality_off",
+    "test": "code-merge",
+    "passed": true,
+    "detail": "PASS\n",
+    "message": {
+      "role": "assistant",
+      "content": "```python\ndef merge_intervals(intervals):\n    if not intervals:\n        return []\n    sorted_intervals = sorted(intervals, key=lambda x: (x[0], x[1]))\n    merged = [list(sorted_intervals[0])]\n    for start, end in sorted_intervals[1:]:\n        last_end = merged[-1][1]\n        if start <= last_end:\n            merged[-1][1] = max(last_end, end)\n        else:\n            merged.append([start, end])\n    return [tuple(pair) for pair in merged]\n```"
+    }
+  },
+  {
+    "arm": "pr_quality_off",
+    "test": "code-config",
+    "passed": true,
+    "detail": "PASS\n",
+    "message": {
+      "role": "assistant",
+      "content": "```python\ndef parse_config(text):\n    result = {}\n    for line in text.splitlines():\n        line = line.strip()\n        if not line or line.startswith('#'):\n            continue\n        if '=' not in line:\n            continue\n        key, value = line.split('=', 1)\n        key = key.strip()\n        value = value.strip()\n        if not key:\n            continue\n        result[key] = value\n    return result\n```"
+    }
+  },
+  {
+    "arm": "pr_quality_on",
+    "test": "quality-0",
+    "passed": true,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "703"
+    }
+  },
+  {
+    "arm": "pr_quality_on",
+    "test": "quality-1",
+    "passed": true,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\"product\":703,\"values\":[-2,0,7,7]}"
+    }
+  },
+  {
+    "arm": "pr_quality_on",
+    "test": "recall_96k",
+    "passed": false,
+    "detail": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\n  \"first\": \"FIRST_MARKER=JADE-7429\",\n  \"middle\": \"MIDDLE_MARKER=AMBRE-2851\",\n  \"last\": \"LAST_MARKER=AZUR-6193\"\n}"
+    },
+    "semantic_recall_passed": true
+  },
+  {
+    "arm": "pr_quality_on",
+    "test": "code-merge",
+    "passed": true,
+    "detail": "PASS\n",
+    "message": {
+      "role": "assistant",
+      "content": "```python\ndef merge_intervals(intervals):\n    if not intervals:\n        return []\n    sorted_intervals = sorted(intervals, key=lambda x: (x[0], x[1]))\n    merged = [list(sorted_intervals[0])]\n    for start, end in sorted_intervals[1:]:\n        last_end = merged[-1][1]\n        if start <= last_end:\n            merged[-1][1] = max(last_end, end)\n        else:\n            merged.append([start, end])\n    return [tuple(pair) for pair in merged]\n```"
+    }
+  },
+  {
+    "arm": "pr_quality_on",
+    "test": "code-config",
+    "passed": true,
+    "detail": "PASS\n",
+    "message": {
+      "role": "assistant",
+      "content": "```python\ndef parse_config(text):\n    result = {}\n    for line in text.splitlines():\n        line = line.strip()\n        if not line or line.startswith('#'):\n            continue\n        if '=' not in line:\n            continue\n        key, value = line.split('=', 1)\n        key = key.strip()\n        value = value.strip()\n        if not key:\n            continue\n        result[key] = value\n    return result\n```"
+    }
+  }
+]
