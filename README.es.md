@@ -1,6 +1,6 @@
 <h1 align="center">PolyStrata</h1>
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · **Español** · [Português](README.pt-BR.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · **Español** · [Português](README.pt-BR.md) · [Türkçe](README.tr.md)
 
 <p align="center"><b>Ejecuta modelos de IA grandes en tu propio PC</b><br>
 Qwen3.8-Flash-Next, GLM 5.3 Flash, DeepSeek V4 Flash, LFM2.5, Flint, Qwen3.6, Clover, Ornith 1.5, Gemma 4, Tiel Coder, MiniCPM-V y Kolibri 1 · libre y de código abierto</p>
