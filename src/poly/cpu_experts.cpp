@@ -222,7 +222,7 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         for (int i = 0; i < n_run; ++i) {
             const CpuExpert& e = experts[by[(size_t) run[(size_t) i]]];
             ranges.push_back({(PVOID) e.gate, (SIZE_T) ((size_t) n_ff * gu_row)});
-            ranges.push_back({(PVOID) e.up, (SIZE_T) ((size_t) n_ff * gu_row)});
+            ranges.push_back({(PVOID) e.up, (SIZE_T) ((size_t) n_ff * u_row)});
             ranges.push_back({(PVOID) e.down, (SIZE_T) ((size_t) n_embd * d_row)});
         }
         if (!ranges.empty()) (void) prefetch(GetCurrentProcess(), (ULONG_PTR) ranges.size(), ranges.data(), 0);

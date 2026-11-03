@@ -208,6 +208,9 @@ so setup does not fetch a draft from another model. Repeat-based guessing remain
 IQ1_S uses native GPU matrix-vector kernels and can enter the expert cache; CPU experts use ggml as before.
 No 35B tail-skipping or batch-size tuning is applied to this family.
 
+The following initial validation used the implementation recorded in commit `27ce71fe`, before merging
+upstream `f472d85a`. Performance measurements below refer to that source.
+
 On 2026-11-02, IQ1_S completed setup and text inference on Windows with an RX 9070 XT (15.9 GiB VRAM),
 63 GB system RAM and a Ryzen 7 7800X3D, using HIP SDK 7.2, VS 2022 and 16 CPU threads. All three downloaded
 shards passed SHA-256 verification. Setup used `--backend hip --vision no --context 32768`, mapped the card
@@ -230,7 +233,7 @@ on this machine because their toolchains were unavailable.
 
 Installer, MCP and server regression suites completed with 678, 29 and 971 tests respectively (12 skips
 in total). The host CTest run passed 38 tests and skipped one; `expert_parity` and `pool_test` could not
-read the separate Strata model fixture `pack/full/experts.bin`. Those two checks need that real expert pack
+read the separate PolyStrata model fixture `pack/full/experts.bin`. Those two checks need that real expert pack
 and were not validated by the Ornith GGUF inference runs.
 
 On Windows, `STRATA_POLY_PREFETCH_EXPERTS=1` is an opt-in for models whose CPU experts are read from an SSD.
@@ -265,6 +268,13 @@ The HIP build passed 4,000 worker checks and the real IQ1_S GGUF's expert and ma
 read-ahead enabled. With the expert cache frozen and guessing disabled, a separate off/on comparison
 returned the same 32 generated token IDs and every printed top-three probability. The installer preserved
 the per-model `env` setting, and the generated launcher passed generation, follow-up and restart checks.
+
+After merging upstream `f472d85a` on 2026-11-03, the Windows HIP engine was rebuilt on the same PC.
+The actual installer and generated launcher again answered `4`, then `7`, and `4` after restart; each load
+took 8.1 seconds. IQ kernel parity, the 512-expert/top-10 routing check, 4,000 worker checks and expert/matrix
+parity against the real IQ1_S shard passed. The frozen-cache prefetch comparison again returned the same
+32 token IDs and all printed top-three probabilities (2,926 cached experts in each run). These are correctness
+checks; the performance table above was not remeasured after this merge.
 
 ## How a backend works
 

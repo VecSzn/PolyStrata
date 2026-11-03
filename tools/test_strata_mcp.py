@@ -427,7 +427,7 @@ class Install(FakeRoot):
         sdk.amd_problem.return_value = None
         with mock.patch.object(M, "WIN", True), mock.patch.object(self.strata, "setup_module", return_value=sdk), \
                 mock.patch.object(M, "windows_video_controllers", return_value=[]):
-            hw = M.Strata._hardware(self.strata)
+            hw = type(self.strata)._hardware(self.strata)
         self.assertEqual([(g["vendor"], g["usable"], g["arch"]) for g in hw["gpus"]], [("amd", True, "gfx1201")])
 
     def test_a_family_with_sizes_of_its_own(self):
