@@ -1,0 +1,9 @@
+
+--- stderr ---
+strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel (STRATA_FATTN=0 turns it off)
+strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel from 4,096 tokens of context (STRATA_FDEC=0 turns it off)
+strata-poly: loaded in 3.8 s; 0 of 5120 routed experts in VRAM (0.0 GiB), 15 CPU threads
+check-batch: sequence 1: the first 32 of 32 tokens as on its own
+check-batch: sequence 2: the first 32 of 32 tokens as on its own
+check-batch: sequence 3: the first 32 of 32 tokens as on its own
+check-batch: 3 prompts read in 80413 ms, 32 steps of 3 tokens in 1399 ms (68.6 tok/s together)
