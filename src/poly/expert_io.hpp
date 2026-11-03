@@ -44,6 +44,22 @@ inline bool expert_prefetch_enabled() {
     return v && std::atoi(v) == 1;
 }
 
+/// Options::ram_experts_mib's "auto" mode: the engine settles the number at load, from the machine's RAM.
+inline constexpr int64_t kAutoRamExpertsMib = -2;
+
+/// The RAM budget for the experts outside VRAM, settled from what the machine has: as many of them as fit in
+/// the RAM available, less a margin for the OS and this process's own buffers (the larger of 4 GiB and an
+/// eighth of the RAM).  -1 when they all fit, which is the caller's default: every one of them stays in RAM,
+/// read through the file cache.  0 when the margin takes all of the RAM.  The budget is what the engine's
+/// staging pool and kept pages share between them, as --ram-experts-mib N gives.
+inline int64_t auto_ram_experts_mib(size_t outside_bytes, size_t avail_bytes) {
+    if (avail_bytes == 0) return -1;   // the machine's RAM could not be told: leave the default, all in RAM
+    const size_t margin = std::max<size_t>(size_t(4) << 30, avail_bytes / 8);
+    if (avail_bytes <= margin) return 0;
+    if (outside_bytes <= avail_bytes - margin) return -1;
+    return (int64_t) (std::min(outside_bytes, avail_bytes - margin) >> 20);
+}
+
 inline void unique_expert_ranges(std::vector<ExpertRange>& ranges) {
     std::erase_if(ranges, [](const ExpertRange& r) {
         return !r.data || !r.bytes || r.bytes > std::numeric_limits<uintptr_t>::max() - (uintptr_t) r.data;

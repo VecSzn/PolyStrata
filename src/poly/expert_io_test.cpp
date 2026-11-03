@@ -185,6 +185,22 @@ static void shutdown() {
     require(!q.help() && finished == 1, "queued work ran after shutdown");
 }
 
+// The auto RAM budget: VRAM is filled first by the caller, then as many of the experts outside it as fit in
+// the RAM available, less a margin of the larger of 4 GiB and an eighth of the RAM; -1 means they all fit.
+static void budget() {
+    const size_t gib = size_t(1) << 30, mib = size_t(1) << 20;
+    require(auto_ram_experts_mib(0, 64 * gib) == -1, "no experts outside VRAM should keep the default");
+    require(auto_ram_experts_mib(56 * gib, 64 * gib) == -1, "the last byte that fits in RAM should keep the default");
+    require(auto_ram_experts_mib(56 * gib + mib, 64 * gib) == (int64_t) (56 * gib / mib),
+            "the budget should be the RAM less the 8 GiB margin");
+    require(auto_ram_experts_mib(100 * gib, 64 * gib) == (int64_t) (56 * gib / mib),
+            "a model larger than RAM should take the whole budget");
+    require(auto_ram_experts_mib(30 * gib, 32 * gib) == (int64_t) (28 * gib / mib),
+            "the margin should be at least 4 GiB");
+    require(auto_ram_experts_mib(100 * gib, 3 * gib) == 0, "RAM under the margin should leave no budget");
+    require(auto_ram_experts_mib(100 * gib, 0) == -1, "RAM that cannot be told should keep the default");
+}
+
 #ifdef STRATA_TEST_EXPERT_ENGINE
 namespace strata::poly {
 struct ExpertIoProbe {
@@ -279,9 +295,11 @@ int main() {
         priorities();
         reads(f);
         shutdown();
+        budget();
 #endif
 #ifndef STRATA_TEST_EXPERT_ENGINE
-        std::puts("expert_io_test: mapped hints, mixed ranges, policy, read priority, file bytes, failure fallback and shutdown passed");
+        std::puts("expert_io_test: mapped hints, mixed ranges, policy, read priority, file bytes, failure fallback, "
+                  "shutdown and the auto RAM budget passed");
 #endif
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: %s\n", e.what());

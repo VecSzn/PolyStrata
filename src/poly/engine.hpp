@@ -79,7 +79,8 @@ struct Options {
     int64_t ram_experts_mib = -1; ///< the memory this process holds for the experts outside VRAM, answer or not:
                                   ///< the ones used most lately are read into it from the files; the others are left
                                   ///< to the file cache, which gives them to whatever needs the memory, and come back
-                                  ///< from it or the disk when a token routes to them.  Below 0: all of them
+                                  ///< from it or the disk when a token routes to them.  Below 0: all of them;
+                                  ///< kAutoRamExpertsMib (-2): settled at load from the machine's RAM
     bool stay_near = true;        ///< with several NUMA nodes, keep the CPU threads on the one that holds the experts
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
@@ -320,7 +321,7 @@ public:
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     /// The RAM held for the experts outside VRAM, in MiB, as load() settled Options::ram_experts_mib (-1: all of
-    /// them), and those experts' GiB.
+    /// them; auto settles it from the machine's RAM), and those experts' GiB.
     int64_t ram_experts_mib() const { return opt_.ram_experts_mib; }
     double outside_gib() const { return double(outside_bytes_) / double(1ull << 30); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }

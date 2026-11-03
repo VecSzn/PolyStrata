@@ -247,7 +247,9 @@ mapped reads still fetch the same weights if a hint fails. The option is off by 
 "env": {"STRATA_POLY_PREFETCH_EXPERTS": "1"}
 ```
 
-Without `--ram-experts-mib` (or with a negative value), this adds no staging pool or read threads. With an
+Without `--ram-experts-mib` (or with a negative value), this adds no staging pool or read threads. `auto`
+settles the budget from the machine's RAM at load, so it adds them only where the model's experts do not fit
+in RAM. With an
 explicit nonnegative RAM budget, the existing asynchronous reader owns its slots and reads: repeated
 experts reuse pending work, CPU workers wait for completion, and failed reads retry before a mapped-copy
 fallback. Prefetch skips those slots and hints only experts still using mappings, including when no slot
@@ -341,7 +343,8 @@ Peak process-tree RSS, sampled every 0.5 seconds across load and all three reque
 without a RAM budget and 11.54 / 11.56 GiB with 4096 MiB. This is process memory, not total system memory
 or a cap on the OS file cache. In these samples, mapped prefetch helped short-response generation but
 slowed the longer prompt; with staging it changed little. The option stays off by default, and setup
-does not select a staging budget automatically.
+does not select a staging budget automatically; the engine settles one only with `--ram-experts-mib auto`
+(see below).
 
 ## How a backend works
 
@@ -2234,6 +2237,16 @@ as well as between requests; without it every one of them stays in RAM. It is of
 slower, as below. It says so at the start:
 
     strata-poly: 6144 MiB of RAM for the 10.1 GiB of experts outside VRAM; the others come from the file cache when a token needs them (--ram-experts-mib, -1 for all)
+
+`--ram-experts-mib auto` settles the number at load, once the expert cache has taken what it takes of the VRAM:
+as many of the experts outside VRAM as fit in the RAM the machine has, less a margin for the OS and the
+process's own buffers (the larger of 4 GiB and an eighth of the RAM), the rest read from the SSD through the
+pool while an answer is written. On a machine whose RAM holds them all it keeps the default and holds every
+one of them, as `-1` does; each card of a layer split settles its own budget, so the margin is kept once per
+card. The settled number is said at the start, as the fixed one above is. On the Windows AMD test PC
+(RX 9070 XT, 63 GB of RAM, most of it held by other programs at the time), one IQ1_S load with `auto` on
+2026-11-03 settled 12,327 MiB for the 64.8 GiB of experts outside VRAM, in place of the default's every one
+in RAM.
 
 It was measured with 6,144 MiB on files with 6 to 12 GiB of experts outside VRAM, not with more.
 

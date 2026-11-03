@@ -97,7 +97,10 @@ To hold less, add `"--ram-experts-mib", "6144"` to the `"args"` list of `strata-
 ([where](docs/INSTALL.md#where-things-are-stored)) and restart. The engine then holds that many MiB of RAM for the
 experts that stay outside VRAM, while it answers too, and says so when it starts. The others stay in the system's
 file cache, where your other programs can take that memory, and are read from it when a token needs them. It is off
-by default because it writes slower, and we are still working on that. On the laptop (RTX 4070 Laptop 8 GB, 32 GB
+by default because it writes slower, and we are still working on that. `auto` settles the number itself when the
+model's experts do not fit in your RAM: as many of them as fit in the RAM free at load, less a margin of 4 GiB or an
+eighth of it, the rest read from the SSD while the answer is written; on a machine whose RAM holds them all it
+keeps the default and holds every one of them. On the laptop (RTX 4070 Laptop 8 GB, 32 GB
 of RAM, Windows 11), Qwen3.6-35B-A3B UD-Q3_K_M:
 
 | | default | `--ram-experts-mib 6144` |

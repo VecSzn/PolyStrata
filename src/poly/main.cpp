@@ -1088,7 +1088,8 @@ void usage() {
                  "                         stays as it was loaded)\n"
                  "  --ram-experts-mib N    hold N MiB of RAM for the experts outside VRAM, during answers too: the ones\n"
                  "                         used most lately; the rest stay in the file cache for other programs to take,\n"
-                 "                         and are read back when a token needs them (default: all of them)\n"
+                 "                         and are read back when a token needs them (default: all of them; auto: as\n"
+                 "                         many as fit in the RAM free, the rest read from the SSD)\n"
                  "  --prompt-batch N       prompt tokens read at a time (default 1024); about 1.4 MiB of VRAM each\n"
                  "  --stage-mib N          VRAM the experts outside the cache pass through in a prompt batch (default\n"
                  "                         128 on an NVIDIA card where a longer read widens it, else 2048; never more\n"
@@ -1201,7 +1202,10 @@ int main(int argc, char** argv) {
         else if (a == "--no-draft") o.draft = false;
         else if (a == "--draft-model") o.draft_model = val();
         else if (a == "--expert-swaps") o.expert_swaps = std::atoi(val());
-        else if (a == "--ram-experts-mib") o.ram_experts_mib = std::atoll(val());
+        else if (a == "--ram-experts-mib") {
+            const std::string v = val();
+            o.ram_experts_mib = v == "auto" ? strata::poly::kAutoRamExpertsMib : std::atoll(v.c_str());
+        }
         else if (a == "--tail-skip") o.tail_skip = std::atoi(val());
         else if (a == "--skip-weight") o.skip_weight = (float) std::atof(val());
         else if (a == "--cache-bias") o.cache_bias = (float) std::atof(val());
@@ -1275,7 +1279,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "strata-poly: loaded in %.1f s; %d of %d routed experts in VRAM (%.1f GiB), %d CPU threads\n",
                      ms_since(t0) / 1000.0, engine.cached_experts(), engine.total_experts(), engine.cached_gib(),
                      engine.threads());
-        if (engine.ram_experts_mib() >= 0)
+        if (o.ram_experts_mib != strata::poly::kAutoRamExpertsMib && engine.ram_experts_mib() >= 0)
             std::fprintf(stderr, "strata-poly: %lld MiB of RAM for the %.1f GiB of experts outside VRAM; the others "
                                  "come from the file cache when a token needs them (--ram-experts-mib, -1 for all)\n",
                          (long long) engine.ram_experts_mib(), engine.outside_gib());

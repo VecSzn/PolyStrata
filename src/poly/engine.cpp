@@ -2140,6 +2140,21 @@ void Engine::load(const Options& o) {
         if (L.moe)
             expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e]; },
                         [&](const uint8_t*, size_t n) { outside_bytes_ += n; });
+    if (opt_.ram_experts_mib == kAutoRamExpertsMib) {
+        // VRAM first (fill_expert_cache()), then RAM: as many of the experts outside VRAM as fit in the RAM the
+        // machine has, less a margin for the OS and this process's buffers; what the budget leaves out comes
+        // from the files (the SSD) through pool_.  Each card of a layer split settles its own budget, so the
+        // margin is kept once per card, which leaves more for the OS rather than less.
+        opt_.ram_experts_mib = auto_ram_experts_mib(outside_bytes_, ram_available());
+        if (opt_.ram_experts_mib >= 0)
+            std::fprintf(stderr, "strata-poly: auto: %lld MiB of RAM for the %.1f GiB of experts outside VRAM; "
+                                 "the others come from the SSD when a token needs them (--ram-experts-mib auto)\n",
+                         (long long) opt_.ram_experts_mib, outside_gib());
+        else
+            std::fprintf(stderr, "strata-poly: auto: the %.1f GiB of experts outside VRAM all fit in RAM and "
+                                 "stay there (--ram-experts-mib auto)\n",
+                         outside_gib());
+    }
     if (opt_.ram_experts_mib >= 0) {
         // each size of slot takes the share of the budget its experts outside VRAM have of all of those
         pool_size_of_.assign(layers_.size(), 0);
