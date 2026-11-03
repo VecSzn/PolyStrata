@@ -1,0 +1,28 @@
+{
+  "profile": "ornith-apex-i-compact-reserve1024",
+  "release": "v0.1.45-poly.4",
+  "source_commit": "145493e66580c80bba09b0130f667a2b1789da69",
+  "engine_sha256": "372c6ed707d302c470b864a8fc24ff2a3e462f94cb33c0956c20205a95ef9785",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 52,
+  "docker_memory_bytes": 55834574848,
+  "docker_memory_swap_combined_bytes": 55834574848,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "beef3742fb8a6ec44486c362a5a19442f89ab3cb7e33c48003cfe67e75b952a7",
+    "file": "../../initial-expert-profiles/beef3742fb8a6ec44486c362a5a19442f89ab3cb7e33c48003cfe67e75b952a7.txt"
+  },
+  "source_config_sha256": "db1c2b24718c45f8d907e0397bb02c884faf9608e1c4b907b9975290935ee710",
+  "original_results_sha256": "685a327b1f5f7380462aeba8422e34e6b0c8445434661c4b03e4306d88f6ab40",
+  "published_results_sha256": "fcadf6693adb35f5939fb13f68932909298f35a884543907a50f9d68c00431f7",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "Ornith-1.5-35B-A3B-APEX-MTP-I-Compact.gguf",
+      "bytes": 17437861408,
+      "sha256": "67e6cdff678e67180d3cd4eef55277277563319057de287b8855c4d1fbff4165",
+      "role": "model"
+    }
+  ]
+}

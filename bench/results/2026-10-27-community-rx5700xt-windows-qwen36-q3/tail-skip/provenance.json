@@ -1,0 +1,16 @@
+{
+  "source_commit": "cc508adc50c32e0a98bd9bc1c5688ab5195b2538",
+  "engine_sha256": "a712397d4e2d82d8c207627766ba991e615ae7fc648d90e6ebfddf4c970ae959",
+  "model_sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1",
+  "model_revision": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+  "initial_profile_sha256": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+  "fixture_sha256": "bd47cbf37bf29661c55eab53fbe4c3c082f505bf472a85c14f41068453888272",
+  "tasks_sha256": "00216e8ad04d65127f3a31d00f20e258e27e292aa0384dc14cadbbadea071da6",
+  "context": 65536,
+  "kv": "FP16 default, kv-whole",
+  "experimental_variable": "Only STRATA_ROUTE_TAIL_SKIP environment 6 versus0; CLI --tail-skip6 held constant; environment takes precedence",
+  "order": "AB / BA / AB; A6 B0",
+  "scope": "Custom controlled benchmark, not official suite; one identical warmup then structured/coding/generation/long per fresh server; same frozen initial profile for all six arms; prefix reuse on long must be zero",
+  "fixture_sha256_note": "fixture_sha256 identifies the original Windows CRLF file; the API LF prompt hash is in tasks.json",
+  "tasks_sha256_note": "tasks_sha256 identifies the retained original task freeze; the public long request uses a generator placeholder"
+}

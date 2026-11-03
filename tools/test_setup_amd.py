@@ -6,6 +6,9 @@ which TheRock index each family installs from.  No GPU, no ROCm, no downloads.
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -78,6 +81,13 @@ class KfdDetection(unittest.TestCase):
         # #524: the RX 6700 XT (gfx1031) takes the RDNA2 wheels, as the RX 6800 / 6900 (gfx1030)
         self.assertEqual(setup.ROCM_INDEXES["gfx1031"], setup.ROCM_INDEXES["gfx1030"])
         self.assertIsNone(setup.amd_problem({"arch": "gfx1031"}))
+        # the RX 6600 / 6600 XT / 6650 XT (gfx1032) too: one owner built for it and ran Qwen3.6 on these wheels
+        self.assertEqual(setup.ROCM_INDEXES["gfx1032"], setup.ROCM_INDEXES["gfx1030"])
+        self.assertIsNone(setup.amd_problem({"arch": "gfx1032"}))
+        # PR 102: an RX 5700 XT (gfx1010, RDNA1) ran four models on Windows; its Linux wheels are their own family
+        self.assertTrue(setup.ROCM_INDEXES["gfx1010"].endswith("/gfx101X-dgpu/"))
+        self.assertIsNone(setup.amd_problem({"arch": "gfx1010"}))
+        self.assertIn("gfx1010", setup.AMD_CARDS)
 
 
 class GpuLists(unittest.TestCase):
@@ -234,6 +244,14 @@ class WindowsDetection(unittest.TestCase):
         self.assertEqual(setup.win_amd_arch(0x73DF, "AMD Radeon RX 6800M"), "gfx1031")
         self.assertIsNone(setup.amd_problem({"arch": "gfx1031"}))
 
+    def test_rx_6650_xt_is_gfx1032(self):
+        """Issue 121: PCI 73EF (RX 6650 XT) and 73FF (RX 6600 / 6600 XT) are gfx1032, and so is the name of one
+        whose id is not listed."""
+        self.assertEqual(setup.win_amd_arch(0x73EF, "AMD Radeon RX 6650 XT"), "gfx1032")
+        self.assertEqual(setup.win_amd_arch(0x73FF, "AMD Radeon RX 6600"), "gfx1032")
+        self.assertEqual(setup.win_amd_arch(0x1234, "AMD Radeon RX 6600 XT"), "gfx1032")
+        self.assertIsNone(setup.amd_problem({"arch": "gfx1032"}))
+
     def test_cpu_vision_build_uses_the_visual_studio_environment(self):
         """#881: build_vision_cpu on Windows hands cmake_build the vcvars file and a real .bat name (it passed None and
         an empty name before)."""
@@ -248,7 +266,8 @@ class WindowsDetection(unittest.TestCase):
     def test_registry_alone(self):
         """No WMI answer: the registry's own list (which can hold a removed card)."""
         g = setup.amd_gpus_windows([], self.REGISTRY)
-        self.assertEqual([x["arch"] for x in g if not x["arch"].startswith("unknown")], ["gfx1201", "gfx1101"])
+        self.assertEqual([x["arch"] for x in g if not x["arch"].startswith("unknown")],
+                         ["gfx1032", "gfx1201", "gfx1101"])   # the removed RX 6600 too
 
     def test_arch_names(self):
         for name, arch in (("AMD Radeon RX 9070 GRE", "gfx1201"), ("AMD Radeon AI PRO R9700", "gfx1201"),
@@ -561,6 +580,162 @@ class EngineLaunchEnv(unittest.TestCase):
                 found = setup.hip_devices(probe)
             self.assertEqual(found[0]["arch"], "gfx1100")
             self.assertEqual(seen["env"]["PATH"].split(setup.os.pathsep)[0], str(eng / "rocm" / "bin"))
+
+
+class PolyHipWindows(unittest.TestCase):
+    """strata-poly on an AMD card under Windows: setup compiles it itself (AMD's TheRock wheels in .rocm-win), the
+    wheels' version coming from STRATA_ROCM_WIN_VERSION (or build_windows.bat's STRATA_ROCM_VERSION).
+    No ROCm, no GPU, no downloads."""
+
+    def test_an_installed_rocm_win_is_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / "rocm"
+            (root / "lib" / "llvm" / "bin").mkdir(parents=True)
+            (root / "lib" / "llvm" / "bin" / "clang++.exe").write_text("x")
+            (root / ".kpack").mkdir()
+            (root / ".kpack" / "blas_lib_gfx1201.kpack").write_text("x")
+            (root / "bin").mkdir()
+            venv = Path(t) / ".rocm-win" / "Scripts"
+            venv.mkdir(parents=True)
+            (venv / "python.exe").write_text("x")
+            (venv / "rocm-sdk.exe").write_text("x")
+            asked = []
+            with mock.patch.object(setup, "ROOT", Path(t)), \
+                    mock.patch.object(setup, "out", lambda cmd: asked.append(cmd) or str(root) + "\n"), \
+                    mock.patch.object(setup, "run", mock.Mock(side_effect=AssertionError("installed"))):
+                got, dirs = setup.rocm_win_root(["gfx1201"])
+            self.assertEqual((got, dirs), (root, [str(root / "bin")]))
+            # through the venv's python.exe: rocm-sdk.exe names the folder's old place once it is moved (issue 78)
+            self.assertEqual(asked, [[str(venv / "python.exe"), "-m", "rocm_sdk", "path", "--root"]])
+
+    @staticmethod
+    def rocm_win_tree(t):
+        """A .rocm-win holding every arch's kernels and a working root: the layout setup keeps as it is."""
+        root = Path(t) / "rocm"
+        (root / "lib" / "llvm" / "bin").mkdir(parents=True)
+        (root / "lib" / "llvm" / "bin" / "clang++.exe").write_text("x")
+        (root / ".kpack").mkdir()
+        (root / ".kpack" / "blas_lib_gfx1201.kpack").write_text("x")
+        venv = Path(t) / ".rocm-win"
+        (venv / "Scripts").mkdir(parents=True)
+        (venv / "Scripts" / "python.exe").write_text("x")
+        (venv / "Scripts" / "rocm-sdk.exe").write_text("x")
+        return root, venv
+
+    def test_another_wheels_version_is_installed_in_its_place(self):
+        with tempfile.TemporaryDirectory() as t:
+            root, venv = self.rocm_win_tree(t)
+            (venv / "Lib" / "site-packages" / "rocm-9.9.9.dist-info").mkdir(parents=True)
+            ran = []
+            with mock.patch.object(setup, "ROOT", Path(t)), \
+                    mock.patch.object(setup, "out", lambda cmd: str(root) + "\n"), \
+                    mock.patch.object(setup, "run", lambda cmd: ran.append(cmd)):
+                got, dirs = setup.rocm_win_root(["gfx1201"])
+            self.assertEqual((got, dirs), (root, [str(root / "bin")]))
+            pip = [c for c in ran if "pip" in c]
+            self.assertEqual(len(pip), 1, ran)                       # exactly one install, and it is the wanted version
+            self.assertIn(f"rocm[libraries,devel,device-gfx1201]=={setup.ROCM_WIN_VERSION}", pip[0])
+            self.assertIn([str(venv / "Scripts" / "python.exe"), "-m", "rocm_sdk", "init"], ran)
+
+    def test_a_venv_that_does_not_say_its_version_is_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            root, venv = self.rocm_win_tree(t)                       # no rocm-*.dist-info: not pip's doing
+            warned = []
+            with mock.patch.object(setup, "ROOT", Path(t)), \
+                    mock.patch.object(setup, "out", lambda cmd: str(root) + "\n"), \
+                    mock.patch.object(setup, "ROCM_WIN_VERSION_OVERRIDE", "9.9.9"), \
+                    mock.patch.object(setup, "ROCM_WIN_VERSION", "9.9.9"), \
+                    mock.patch.object(setup, "warn", lambda msg: warned.append(msg)), \
+                    mock.patch.object(setup, "run", mock.Mock(side_effect=AssertionError("installed"))):
+                got, dirs = setup.rocm_win_root(["gfx1201"])
+            self.assertEqual((got, dirs), (root, [str(root / "bin")]))
+            self.assertTrue(any("does not say which ROCm" in m for m in warned), warned)
+            self.assertTrue(any("9.9.9" in m for m in warned), warned)
+
+    def test_the_env_var_picks_the_wheels_version(self):
+        base = {k: v for k, v in os.environ.items()
+                if k not in ("STRATA_ROCM_WIN_VERSION", "STRATA_ROCM_VERSION")}
+
+        def constant(**env):
+            r = subprocess.run([sys.executable, "-c", "import setup; print(setup.ROCM_WIN_VERSION)"],
+                               cwd=Path(setup.__file__).resolve().parent, capture_output=True, text=True,
+                               env={**base, **env})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+
+        self.assertEqual(constant(STRATA_ROCM_WIN_VERSION="9.9.9"), "9.9.9")
+        self.assertEqual(constant(STRATA_ROCM_VERSION="8.8.8"), "8.8.8")   # build_windows.bat's name
+        self.assertEqual(constant(STRATA_ROCM_WIN_VERSION="9.9.9", STRATA_ROCM_VERSION="8.8.8"), "9.9.9")
+        self.assertEqual(constant(), setup.ROCM_WIN_VERSION_DEFAULT)
+
+    def test_an_engine_of_this_source_is_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            eng = root / setup.ENGINE_POLY_DIR
+            eng.mkdir()
+            (eng / setup.POLY_EXE).write_text("x")
+            (eng / "BUILD.json").write_text(json.dumps({"source": "local-hip", "backend": "hip",
+                                                        "archs": ["gfx1201"], "src": "abc"}), encoding="utf-8")
+            compiled = mock.Mock(side_effect=AssertionError("compiled"))
+            with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "source_hash", lambda parts: "abc"), \
+                    mock.patch.object(setup, "cmake_build", compiled):
+                got = setup.build_engine_poly_hip_win({"arch": "gfx1201", "archs": ["gfx1201"]}, root / "llama.cpp")
+            self.assertEqual(got, eng)
+            compiled.assert_not_called()
+
+    def test_the_windows_engine_is_dispatched_from_the_amd_build(self):
+        seen = {}
+        with mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "build_engine_poly_hip_win", lambda gpu, llama: seen.update(gpu=gpu)):
+            setup.build_engine_poly_hip({"arch": "gfx1201"}, Path("llama.cpp"))
+        self.assertEqual(seen["gpu"], {"arch": "gfx1201"})
+
+    def test_the_check_line_names_amd_on_windows(self):
+        d = setup.FAMILIES["tiel"]["models"]["UD-Q3_K_XL"]
+        with mock.patch.object(setup, "WIN", True):
+            line = setup.poly_verdict(d, 63, 15.9, True)
+        self.assertIn("measured on one AMD card on Windows", line)
+        self.assertIn("fits by setup's estimate", line)
+
+    def build(self, root, bundled):
+        """The Windows HIP build's compile with cmake mocked: returns (the cmake args, the BUILD.json)."""
+        built = []
+
+        def cmake(src_dir, bdir, target, defs, vcvars, bat):
+            built.append((target, defs))
+            bdir.mkdir(parents=True, exist_ok=True)
+            (bdir / setup.POLY_EXE).write_text("x")
+
+        with mock.patch.object(setup, "ROOT", root), \
+                mock.patch.object(setup, "source_hash", lambda parts: "new"), \
+                mock.patch.object(setup, "find_vcvars", lambda: "vcvars"), \
+                mock.patch.object(setup, "rocm_win_root", lambda archs: (root / "rocm", [])), \
+                mock.patch.object(setup, "cmake_build", cmake), \
+                mock.patch.object(setup, "hipblaslt_version", lambda dirs: None), \
+                mock.patch.object(setup, "source_version", lambda: "0.1.45"), \
+                mock.patch.object(setup, "hip_runtime_beside_exe", lambda eng: None):
+            got = setup.build_engine_poly_hip_win({"arch": "gfx1201"}, root / "llama.cpp")
+        self.assertEqual(got, root / setup.ENGINE_POLY_DIR)
+        return built[0][1], json.loads((root / setup.ENGINE_POLY_DIR / "BUILD.json").read_text(encoding="utf-8"))
+
+    def test_the_build_is_native_and_loads_the_bundled_rocm(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            bundled = root / "engine" / "rocm" / "bin"
+            bundled.mkdir(parents=True)
+            defs, meta = self.build(root, bundled)
+            self.assertIn("-DSTRATA_PORTABLE=OFF", defs)           # native for the PC setup builds on (as on Linux)
+            self.assertIn("-DSTRATA_PREFILL_MMQ=ON", defs)         # the ready-made Windows HIP engine's own build
+            self.assertNotIn("-DSTRATA_NATIVE_EXPERTS=ON", defs)   # ON by default
+            self.assertEqual(meta["lib_dirs"], [str(bundled)])     # the ready-made engine's ROCm: not on the disk twice
+            self.assertFalse((root / setup.ENGINE_POLY_DIR / "rocm").exists())
+
+    def test_without_a_ready_made_engine_the_wheels_own_rocm_is_used(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            defs, meta = self.build(root, root / "engine" / "rocm" / "bin")
+            self.assertEqual(meta["lib_dirs"], [str(root / "rocm" / "bin")])   # .rocm-win's own
+            self.assertFalse((root / setup.ENGINE_POLY_DIR / "rocm").exists())
 
 
 class TdrPointer(unittest.TestCase):

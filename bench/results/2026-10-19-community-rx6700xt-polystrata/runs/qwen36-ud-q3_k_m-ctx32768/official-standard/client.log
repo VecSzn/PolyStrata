@@ -1,0 +1,58 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-standard", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/out,dst=/opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--out", "/opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/out/official"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.08 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 84.3 tok/s, first token 0.389 s, 100 tokens
+  run 1 q2: decode 64.4 tok/s, first token 0.343 s, 100 tokens
+  run 1 q3: decode 75.5 tok/s, first token 0.39 s, 100 tokens
+  run 2 q1: decode 94.1 tok/s, first token 0.404 s, 100 tokens
+  run 2 q2: decode 79.6 tok/s, first token 0.39 s, 100 tokens
+  run 2 q3: decode 77.2 tok/s, first token 0.366 s, 100 tokens
+  run 3 q1: decode 97.5 tok/s, first token 0.396 s, 100 tokens
+  run 3 q2: decode 78.2 tok/s, first token 0.407 s, 100 tokens
+  run 3 q3: decode 77.6 tok/s, first token 0.401 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4019 tokens, prompt 1205.6 tok/s (0 reused), first token 3.339 s
+  run 2: 4019 tokens, prompt 1211.9 tok/s (0 reused), first token 3.321 s
+  run 3: 4019 tokens, prompt 1216.4 tok/s (0 reused), first token 3.309 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16058 tokens, prompt 1092.4 tok/s (0 reused), first token 14.725 s
+  run 2: 16058 tokens, prompt 1104.2 tok/s (0 reused), first token 14.557 s
+  run 3: 16058 tokens, prompt 1103.6 tok/s (0 reused), first token 14.565 s
+agent: a session of 6 turns with four tools, x 3 runs
+  run 1 turn 0: prompt 609, reused 0, read 609, first token 1.086 s
+  run 1 turn 1: prompt 4189, reused 602, read 3587, first token 3.632 s
+  run 1 turn 2: prompt 5825, reused 4182, read 1643, first token 1.914 s
+  run 1 turn 3: prompt 9245, reused 5818, read 3427, first token 4.43 s
+  run 1 turn 4: prompt 12197, reused 9238, read 2959, first token 3.758 s
+  run 1 turn 5: prompt 15126, reused 12190, read 2936, first token 4.829 s
+  run 2 turn 0: prompt 609, reused 0, read 609, first token 1.085 s
+  run 2 turn 1: prompt 4174, reused 602, read 3572, first token 3.652 s
+  run 2 turn 2: prompt 5813, reused 4167, read 1646, first token 1.9 s
+  run 2 turn 3: prompt 9241, reused 5806, read 3435, first token 4.472 s
+  run 2 turn 4: prompt 12210, reused 9234, read 2976, first token 3.727 s
+  run 2 turn 5: prompt 15147, reused 12203, read 2944, first token 4.858 s
+  run 3 turn 0: prompt 609, reused 0, read 609, first token 1.081 s
+  run 3 turn 1: prompt 4197, reused 602, read 3595, first token 3.705 s
+  run 3 turn 2: prompt 5831, reused 4190, read 1641, first token 1.923 s
+  run 3 turn 3: prompt 9255, reused 5824, read 3431, first token 4.581 s
+  run 3 turn 4: prompt 12209, reused 9248, read 2961, first token 3.718 s
+  run 3 turn 5: prompt 15139, reused 12202, read 2937, first token 4.869 s
+
+Results (median, range over the runs):
+  chat decode tok/s                     78.20   (64.40 - 97.50, n=9)
+  chat first token (s)                   0.39   (0.34 - 0.41, n=9)
+  4K prompt tok/s                     1211.90   (1205.60 - 1216.40, n=3)
+  4K first token (s)                     3.32   (3.31 - 3.34, n=3)
+  16K prompt tok/s                    1103.60   (1092.40 - 1104.20, n=3)
+  16K first token (s)                   14.56   (14.56 - 14.72, n=3)
+  agent cache hit %                     68.76   (68.72 - 68.77, n=3)
+  agent re-read tokens/session         251.00   (238.00 - 259.00, n=3)
+  agent turn first token (s)             3.73   (1.90 - 4.87, n=15)
+  agent decode tok/s                    71.10   (59.90 - 74.40, n=15)
+
+Report: /opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/out/official/2026-10-19-community-cpu-qwen3-6-35b-a3b-ud-q3-k-m/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/qwen36-ud-q3_k_m-ctx32768/out/official/2026-10-19-community-cpu-qwen3-6-35b-a3b-ud-q3-k-m (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

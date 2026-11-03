@@ -1,0 +1,58 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-standard", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/out,dst=/opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--out", "/opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/out/official"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.08 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 66.1 tok/s, first token 0.365 s, 100 tokens
+  run 1 q2: decode 68.5 tok/s, first token 0.338 s, 100 tokens
+  run 1 q3: decode 66.8 tok/s, first token 0.381 s, 100 tokens
+  run 2 q1: decode 79.1 tok/s, first token 0.367 s, 100 tokens
+  run 2 q2: decode 71.0 tok/s, first token 0.348 s, 100 tokens
+  run 2 q3: decode 66.9 tok/s, first token 0.366 s, 100 tokens
+  run 3 q1: decode 79.2 tok/s, first token 0.381 s, 100 tokens
+  run 3 q2: decode 69.4 tok/s, first token 0.362 s, 100 tokens
+  run 3 q3: decode 67.6 tok/s, first token 0.371 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4019 tokens, prompt 1059.1 tok/s (0 reused), first token 3.8 s
+  run 2: 4019 tokens, prompt 1071.4 tok/s (0 reused), first token 3.756 s
+  run 3: 4019 tokens, prompt 1067.7 tok/s (0 reused), first token 3.769 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16058 tokens, prompt 989.2 tok/s (0 reused), first token 16.247 s
+  run 2: 16058 tokens, prompt 992.4 tok/s (0 reused), first token 16.195 s
+  run 3: 16058 tokens, prompt 986.8 tok/s (0 reused), first token 16.288 s
+agent: a session of 6 turns with four tools, x 3 runs
+  run 1 turn 0: prompt 609, reused 0, read 609, first token 1.106 s
+  run 1 turn 1: prompt 4182, reused 602, read 3580, first token 4.061 s
+  run 1 turn 2: prompt 5820, reused 4175, read 1645, first token 2.157 s
+  run 1 turn 3: prompt 9244, reused 5813, read 3431, first token 5.044 s
+  run 1 turn 4: prompt 12213, reused 9237, read 2976, first token 4.123 s
+  run 1 turn 5: prompt 15147, reused 12206, read 2941, first token 5.375 s
+  run 2 turn 0: prompt 609, reused 0, read 609, first token 1.184 s
+  run 2 turn 1: prompt 4182, reused 602, read 3580, first token 4.126 s
+  run 2 turn 2: prompt 5819, reused 4175, read 1644, first token 2.166 s
+  run 2 turn 3: prompt 9238, reused 5812, read 3426, first token 4.928 s
+  run 2 turn 4: prompt 12211, reused 9231, read 2980, first token 4.121 s
+  run 2 turn 5: prompt 15152, reused 12204, read 2948, first token 5.314 s
+  run 3 turn 0: prompt 609, reused 0, read 609, first token 1.074 s
+  run 3 turn 1: prompt 4196, reused 602, read 3594, first token 4.152 s
+  run 3 turn 2: prompt 5827, reused 4189, read 1638, first token 2.166 s
+  run 3 turn 3: prompt 9246, reused 5820, read 3426, first token 5.031 s
+  run 3 turn 4: prompt 12207, reused 9239, read 2968, first token 4.157 s
+  run 3 turn 5: prompt 15134, reused 12200, read 2934, first token 5.345 s
+
+Results (median, range over the runs):
+  chat decode tok/s                     68.50   (66.10 - 79.20, n=9)
+  chat first token (s)                   0.37   (0.34 - 0.38, n=9)
+  4K prompt tok/s                     1067.70   (1059.10 - 1071.40, n=3)
+  4K first token (s)                     3.77   (3.76 - 3.80, n=3)
+  16K prompt tok/s                     989.20   (986.80 - 992.40, n=3)
+  16K first token (s)                   16.25   (16.20 - 16.29, n=3)
+  agent cache hit %                     68.73   (68.72 - 68.76, n=3)
+  agent re-read tokens/session         259.00   (246.00 - 264.00, n=3)
+  agent turn first token (s)             4.15   (2.16 - 5.38, n=15)
+  agent decode tok/s                    64.60   (57.40 - 67.70, n=15)
+
+Report: /opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/out/official/2026-10-19-community-cpu-ornith-1-5-35b-a3b-apex-i-compact/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/ornith-apex-i-compact-reserve1024-ctx32768/out/official/2026-10-19-community-cpu-ornith-1-5-35b-a3b-apex-i-compact (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

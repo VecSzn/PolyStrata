@@ -50,6 +50,14 @@ class Verdict(unittest.TestCase):
         self.assertIn("Qwen3.6-35B-A3B", sentence)
         self.assertIn("--family qwen36", sentence)
 
+    def test_gemma4_runs_on_poly_engine(self):
+        fp = self.fp("qwen/Q2_0")
+        fp["arch"] = "gemma4"
+        kind, sentence = SI.verdict(fp, self.table)
+        self.assertEqual(kind, "family")
+        self.assertIn("Gemma 4 26B-A4B", sentence)
+        self.assertIn("--gguf-dir", sentence)
+
     def test_expert_type_without_kernel(self):
         fp = self.fp("qwen/IQ3_S")
         fp["expert_bytes"] = {"IQ1_S": 30_000_000_000}

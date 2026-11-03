@@ -1,0 +1,39 @@
+[
+  {
+    "release": "v0.1.45-poly.3",
+    "source_commit": "f096adb0c2739b6348a5c69f94dfb09737c4b044",
+    "source_archive_sha256": "901e6ba1593301bcf31c49793c99ca4618a5900ae0f8ccbd729127dcb6054741",
+    "source_url": "https://github.com/VecSzn/PolyStrata/tree/f096adb0c2739b6348a5c69f94dfb09737c4b044",
+    "release_url": "https://github.com/VecSzn/PolyStrata/releases/tag/v0.1.45-poly.3",
+    "engine": {
+      "version": "0.1.45",
+      "source": "release",
+      "cuda_build_version": "13.0",
+      "source_id": "38ce288cd08729a0",
+      "vision_source_id": "68eadd07fce1dbf1",
+      "cuda_architectures": [
+        75,
+        80,
+        86,
+        89,
+        120
+      ],
+      "sha256": "68260200a4a55b74795228f0311dcde8e1f839ee6c8e045b8adfdc99d5724098"
+    },
+    "setup_sha256": "0fb3724e9aa18109eaa29a641992f77d7d856224a1515663d21141eaf057f8a8",
+    "official_benchmark_sha256": "bd65126bed1f8e5ff3648f5d65c230ea7566219a443272115c1d622735d02be5",
+    "id": "poly3"
+  },
+  {
+    "id": "poly2",
+    "release": "v0.1.45-poly.2",
+    "source_commit": "974552f562aecb3e86cdd2679e76e4515b52b9d2",
+    "source_url": "https://github.com/VecSzn/PolyStrata/tree/974552f562aecb3e86cdd2679e76e4515b52b9d2",
+    "engine": {
+      "sha256": "346ccf666a1c8194bd57cfe40164095abbe475949662e190f9337a2354f13163",
+      "version": "0.1.45",
+      "cuda_build_version": "13.0"
+    },
+    "historical_official_suite_sha256": "bd65126bed1f8e5ff3648f5d65c230ea7566219a443272115c1d622735d02be5"
+  }
+]

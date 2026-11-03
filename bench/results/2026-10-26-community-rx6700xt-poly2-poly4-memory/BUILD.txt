@@ -1,0 +1,9 @@
+Native gfx1031 HIP build. Poly.4 built against the same pinned SDK and llama.cpp checkout as the baseline.
+Path placeholders must be replaced with the local installation. The CMake line below is the recorded display of argv; flags containing spaces must be quoted when reproducing it.
+
+  > <installation>/upstream/.venv/bin/cmake -G Ninja -DCMAKE_MAKE_PROGRAM=<installation>/upstream/.venv/bin/ninja -S <experiment>/poly4 -B <experiment>/poly4/build-poly-hip -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_BUILD_TESTS=OFF -DCMAKE_HIP_ARCHITECTURES=gfx1031 -DCMAKE_HIP_COMPILER=<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/llvm/bin/clang++ -DCMAKE_HIP_COMPILER_ROCM_ROOT=<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel -DCMAKE_PREFIX_PATH=<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel;<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all -DCMAKE_HIP_FLAGS=--rocm-path=<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel --rocm-device-lib-path=<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib/llvm/amdgcn/bitcode -DSTRATA_GGML_DIR=<experiment>/poly4/third_party/llama.cpp
+-- The CXX compiler identification is GNU 14.2.0
+-- The HIP compiler identification is Clang 23.0.0
+-- The C compiler identification is GNU 14.2.0
+-- The ASM compiler identification is GNU
+  > <installation>/upstream/.venv/bin/cmake --build <experiment>/poly4/build-poly-hip --target strata-poly -j 5

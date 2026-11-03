@@ -18,11 +18,11 @@ It is early. This project has built and run it on one machine, with Linux and on
 | Model | `GLM-5.3-Flash-GSQ-RCO-3.0bit-q4kattn.gguf`, 113.6 GB, from [neuralll/GLM-5.3-Flash-GSQ-RCO-3.0bit-Q4Kattn-GGUF](https://huggingface.co/neuralll/GLM-5.3-Flash-GSQ-RCO-3.0bit-Q4Kattn-GGUF) |
 | Context | 32K |
 
-| | `strata-poly` | llama.cpp ([neurall's fork](https://github.com/neurall/llama.cpp)), stock settings |
+| | `strata-poly` | llama.cpp ([neurall's fork](https://github.com/neurall/llama.cpp)), `-ngl 999 -fa on`, `-ncmoe` lowered until the card is full |
 | --- | ---: | ---: |
-| Writes answers | 46 tokens/s after the prompt of 11,673 tokens and 62 to 66 after the one of 29,069, 62 to 65 for a 400-token answer to a short one | 26 tokens/s |
-| Reads a prompt of 3,059 tokens | 641 to 648 tokens/s | about 265 tokens/s |
-| Reads a prompt of 11,673 tokens | 760 to 817 tokens/s | |
+| Writes answers | 46 tokens/s after the prompt of 11,673 tokens and 62 to 66 after the one of 29,069, 62 to 65 for a 400-token answer to a short one | 25.5 to 29.7 tokens/s |
+| Reads a prompt of 3,059 tokens | 641 to 648 tokens/s | 61, 154 to 157, 273 to 278 tokens/s with `-ub` 512, 2048, 4096 |
+| Reads a prompt of 11,673 tokens | 760 to 817 tokens/s | 61, 199, 353 tokens/s with `-ub` 512, 2048, 4096 |
 | Reads a prompt of 29,069 tokens | 740 to 782 tokens/s | |
 | Starts | about 7 s with the file in the page cache | |
 
@@ -34,8 +34,14 @@ two runs of the build of 2026-10-06, which read the three prompts at 610 to 620,
 and wrote 47 to 51 after the long ones; the 400-token answer is that build's, and came at 64 to 65 from this one.
 The 29,069-token prompt starts like the 11,673-token one before it, so its first 10,240 tokens are not read
 again. An earlier build, measured the same way without the draft block, wrote 26.7 to 27.7 tokens/s and read the
-three prompts at 373, 334 and 312; [BACKENDS.md](BACKENDS.md#what-was-tuned) has what changed since. llama.cpp was
-not run again.
+three prompts at 373, 334 and 312; [BACKENDS.md](BACKENDS.md#what-was-tuned) has what changed since.
+
+This table first gave llama.cpp at its stock settings, 26 tokens/s writing and about 265 reading. On 2026-10-21 it
+ran again on the same kind of machine with the same prompt ids, its experts placed by hand: the fork at c504768,
+`-ngl 999 -fa on -t 24 -c 16384`, and `-ncmoe` lowered until the card was full, 35 with the default batch of 512
+and 37 with `-ub 2048` and `-ub 4096`. A larger batch reads a prompt faster there and writes at the same speed, so
+the tuned runs end where the stock one did. On that machine the engine of 2f9d0e4d read the two prompts at 629 to
+634 and 799 to 802 tokens/s and wrote 42 to 53 tokens/s after them with the draft block, 44 to 48 without.
 
 The README's row for 3.0BIT is PolyStrata's own benchmark through the server, the test every model of this engine
 gets ([BACKENDS.md](BACKENDS.md#a-prompt-of-30000-tokens)), with the engine of the ready-made release: a short chat
@@ -245,7 +251,7 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--serve` | | take requests from the server (the server passes this) |
 | `--max-context N` | 8192 | tokens a conversation can hold |
 | `--threads N` | all usable | CPU threads for the experts that are not in VRAM |
-| `--vram-reserve-mib N` | a thirty-second of the card, 256 to 768, or a sixteenth, 512 to 1024, kept whole, when the PC's free RAM is within 4 GiB of the model's files; else half of it after the first request | VRAM left free beside the expert cache |
+| `--vram-reserve-mib N` | a thirty-second of the card, 256 to 768, or a sixteenth, 512 to 1024, kept whole, when the PC's free RAM is within 5 GiB of the model's files; else half of it after the first request | VRAM left free beside the expert cache |
 | `--layer-split S` | the first card alone | the model's layers across the cards the engine sees: `auto` (by each card's free VRAM) or the first layer of each later card, as `20` or `20,30` ([MULTI_GPU.md](MULTI_GPU.md#the-strata-poly-models)) |
 | `--expert-profile FILE` | | expert use counts, read at the start and written back after an answer, every 10 seconds at most, and at the end |
 | `--no-gpu-experts` | | keep every routed expert on the CPU |
@@ -258,9 +264,11 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--draft-model FILE.gguf` | | a file of the same model to take that block from, when `--model` has none; setup passes the one it downloaded |
 | `--draft-vocab N` | 131072 for Qwen3.6, Ornith and Tiel Coder, all of it for the others | the block guesses among the vocabulary's first N tokens; 0 = all |
 | `--kv-whole` | on an AMD card | give the attention caches VRAM for the whole context at load, not as the conversation grows; setup writes it for an AMD card, where ROCm keeps the VRAM the expert cache gives back ([AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta)) |
-| `--kv fmt` | fp16 | the K and V attention caches' format: `fp16` (default, unchanged) or `q8_0` (ggml Q8_0 blocks: one fp16 scale a 32-value block of int8 codes): half the KV VRAM, the same answers on the tested models ([Q8_KV.md](Q8_KV.md)) |
+| `--kv fmt` | fp16 | the K and V attention caches' format: `fp16` (default, unchanged); `q8_0` (ggml Q8_0 blocks: one fp16 scale a 32-value block of int8 codes: half the KV VRAM, the same answers on the tested models; `qwen35moe`'s); `int8` / `int8k` (Gemma 4's: the same rule in two arrays, so a reader takes four codes to a load; `int8k` keeps only the keys' side quantized) ([Q8_KV.md](Q8_KV.md)) |
 | `--prompt-batch N` | 1024 | prompt tokens read at a time, 1 to 4096; about 1.4 MiB of VRAM each |
-| `--stage-mib N` | 2048 | VRAM the experts outside the cache pass through while a prompt is read |
+| `--stage-mib N` | 128 on an NVIDIA card where a longer read can widen it (one card), else 2048 | VRAM the experts outside the cache pass through while a prompt is read |
+| `--stage-read-mib N` | 2048 with the 128 MiB `--stage-mib` default, else 0 | a prompt read of several batches widens the staging buffer to N MiB (at most a layer's experts) with VRAM the expert cache lends it until the answer starts; 0 = never |
+| `--ram-experts-mib N` | all of them | the MiB of RAM held for the experts outside VRAM, while an answer is written too, the most used first; the rest stay in the file cache for other programs to take and are read back when a token needs them, which writes slower |
 | `--stage-ahead N` | 1024 | from N tokens, a batch copies those experts before the layer has chosen, as does every batch of a prompt of N tokens or more that is read several at a time; 0 = never |
 | `--cpu-share F` | as the times say | in a batch of fewer tokens than `--stage-ahead`, the share of the experts outside VRAM that the CPU computes while the others are copied: the ones the fewest tokens chose; 0 = none |
 | `--prompt-cache N` | 6 | checkpoints kept of a conversation; 0 = only a next turn is not read again |
@@ -280,6 +288,18 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 fp16↔q8_0 parity on Tiel, Ornith and Occamy, and what was left alone (the `strata` engine, `glm5next`, Gemma 4,
 the default path).
 
+Gemma 4 has its own pair beside it: `--kv int8` (both sides quantized) and `--kv int8k` (the keys' side only,
+the values in fp16), with the same Q8_0 rule — the block's largest magnitude over 127 as the delta,
+`roundf(x / delta)` as the code — but the codes and the deltas in two arrays instead of ggml's 34-byte
+`block_q8_0`, so a reader takes four codes to an aligned load and a decode step is one `__dp4a`
+(`src/poly/kernels.cu`, `store_int8` / `attend_int8`; above 16K keys, an int8 tensor-core MMA). A prompt batch
+converts the codes it needs to halves once — O(rows) against an attention's O(rows²) — and cuBLAS takes it from
+there, as llama.cpp does on CUDA. Both are rejected for any other architecture at load
+(`--kv int8 and --kv int8k are Gemma 4's; for a qwen35moe model use --kv q8_0`). The figures: the kernel unit
+test (`poly_kv_int8_test`, 35 checks) agrees with ggml's own quantizer to the bit, and on a Gemma 4 26B the
+three formats run within run-to-run scatter of each other (prompt 984.0 / 941.8 / 968.1 ms and decode 37.68 /
+38.22 / 38.01 tok/s for fp16 / int8 / int8k, RTX 4070 Laptop, medians of 15) with the answers kept.
+
 ## What is missing
 
 - Other files of the model. The engine reads the layouts of four converters (neurall's llama.cpp fork,
@@ -293,10 +313,12 @@ the default path).
   answered, and one request of 557K tokens was read at 286 tokens/s with the three facts planted in it found.
   With 0.1.44.1-poly.5 a request of 1,002,452 tokens was read in 45.7 minutes (66.3 with poly.2), the three
   facts found, and from the second request after it the engine wrote at 25 to 30 tokens/s again.
-- Intel cards, and AMD cards on Windows. On Linux setup compiles the engine for an AMD card
-  ([AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta)), a beta tested with Qwen3.6 and Ornith on an RX 7600; GLM
-  itself has not been tried on one, and setup says so. Two NVIDIA cards can share the model
-  ([MULTI_GPU.md](MULTI_GPU.md#the-strata-poly-models)): REAP50 has run on two 10 GB cards under Linux.
+- Intel cards, and Gemma 4 and GLM on an AMD card. On Linux setup compiles the engine for an AMD card
+  ([AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta)), a beta tested with Qwen3.6 and Ornith on an RX 7600, and
+  setup compiles it under Windows too (AMD's TheRock wheels in `.rocm-win`), where one model, Tiel Coder,
+  has run on an RX 9070 XT; GLM itself has not been tried on an AMD card, and setup says so. Two NVIDIA cards can
+  share the model ([MULTI_GPU.md](MULTI_GPU.md#the-strata-poly-models)): REAP50 has run on two 10 GB cards under
+  Linux.
 - Pictures. The model's image input is not read.
 - Several requests decoded together (`"parallel"`). Requests wait their turn.
 - `--prompt-cache-root` and `--turn-token`. Checkpoints are taken by position.

@@ -5,8 +5,16 @@ bench/prompts/** -text
 *.sh text eol=lf
 *.bat text eol=crlf
 
+# Byte-checked upstream GDN copy and its imported helpers.
+src/poly/gdn_mma* text eol=lf
+src/kernels/cuda/gdn_mma* text eol=lf
+include/strata/kernels/gdn_mma* text eol=lf
+
 # copies of real packs' native_experts.txt, parsed byte for byte by tests/core/expert_layout_test.cpp
 tests/data/native_experts/** -text
 
 # the quant yardstick's text set: tokenized byte for byte (set.ids.json), never convert its line endings
 data/quant_quality/** -text
+
+# llama.cpp's flash-attention kernel and its patch: git apply (tools/test_fattn_sync.py) rejects them with CRLF
+src/poly/fattn_mma.* text eol=lf

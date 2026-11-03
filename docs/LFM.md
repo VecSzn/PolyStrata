@@ -161,8 +161,8 @@ The decode numbers are UD-Q4_K_XL on the RTX 5090 with the engine's guesses, aft
 - RAM for the experts the card does not hold. They are read from the mapped file while the model answers, so they
   should stay in the OS file cache: setup's estimate is in the table above. All five sizes have run on the laptop
   with 32 GB, but Q8_0 fills it and is slow there.
-- Linux or Windows 10 / 11. AMD cards: the engine compiles for them on Linux, and this model has not been tried on
-  one; setup says so.
+- Linux or Windows 10 / 11. AMD cards: the engine compiles for them on Linux and under Windows as
+  well (AMD's TheRock wheels); this model has not been tried on one, and setup says so.
 
 ## Install
 

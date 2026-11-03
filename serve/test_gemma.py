@@ -262,6 +262,25 @@ class ServiceForGemma(unittest.TestCase):
         self.assertEqual("".join(e.text for e in evs if e.kind == "reasoning"), "Three.")
         self.assertEqual("".join(e.text for e in evs if e.kind == "content"), "It is 3.")
 
+    def test_the_thinking_budget_closes_the_thought_with_its_own_tag(self):
+        # Discussion 60: the wrap-up closed it with </think>, which is text inside Gemma's thought, and the model
+        # thought on to max_tokens with no answer
+        tok = self.tok
+
+        class Thinks(MockEngine):
+            def generate(self, ids, max_new, sampling, cancel, embeddings=None):
+                done = ids[-1] == 256 + GemmaTokens.SPECIALS.index("<channel|>")
+                text = "It is 3." if done else "<|channel>thought\nLet me count. " + "Then more. " * 40 + "<channel|>It is 3."
+                yield from (tok.encode(text, parse_special=True) + tok.encode("<turn|>", parse_special=True))[:max_new]
+
+        ids = self.svc.encode_prompt(*openai_to_messages({"messages": self.ASKED[:1], "tools": self.TOOLS}))
+        self.svc.engine = Thinks(self.tok, "")
+        evs = [e for kind, e in self.svc.run(ids, True, self.TOOLS, 400, {"reasoning_budget_tokens": 20},
+                                             __import__("threading").Event()) if kind == "event"]
+        self.assertEqual("".join(e.text for e in evs if e.kind == "reasoning"),
+                         "Let me count. Then \n\nI have thought about this long enough; time to give my answer.\n")
+        self.assertEqual("".join(e.text for e in evs if e.kind == "content"), "It is 3.")
+
     def test_a_turn_for_the_model_after_an_answer_with_calls(self):
         said = [dict(self.ASKED[1], content="Let me add.")] + self.ASKED[2:]
         text, _ = self.prompt({"messages": self.ASKED[:1] + said})

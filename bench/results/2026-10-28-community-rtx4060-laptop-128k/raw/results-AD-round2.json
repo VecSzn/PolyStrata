@@ -1,0 +1,207 @@
+[
+ {
+  "arm": "A-baseline",
+  "env": {},
+  "extra_args": [],
+  "turns": [
+   {
+    "turn": "turn1-prefill",
+    "wall_s": 145.25,
+    "prompt_n": 117977,
+    "prompt_tok_s": 821.7,
+    "prompt_ms": 143577.1,
+    "predicted_n": 64,
+    "decode_tok_s": 32.0,
+    "cached_tokens": null,
+    "vram_after_mib": 7619,
+    "answer_head": "# PolyStrata - the details\n\nThe technical side of PolyStr"
+   },
+   {
+    "turn": "turn2-cache",
+    "wall_s": 25.09,
+    "prompt_n": 11519,
+    "prompt_tok_s": 486.8,
+    "prompt_ms": 23660.9,
+    "predicted_n": 64,
+    "decode_tok_s": 36.3,
+    "cached_tokens": 106496,
+    "vram_after_mib": 7299,
+    "answer_head": "Based on the provided documentation, the three files this engine reads at start"
+   }
+  ],
+  "ready_s": 5.0,
+  "vram_idle_mib": 7795,
+  "engine_log": [
+   "[strata] 2026-10-28 20:03:53 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: loaded in 9.4 s; 2472 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 345.8 ms; parked=1 bytes=1807766400 evictions=0",
+   "[strata] 2026-10-28 21:03:49 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: loaded in 2.2 s; 2473 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 3072 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 296.1 ms; parked=1 bytes=1807766400 evictions=0",
+   "strata-poly: the expert cache 1473 -> 1228 experts (1.56 GiB) for the VRAM free now, 516 MiB left"
+  ]
+ },
+ {
+  "arm": "B-fattn",
+  "env": {
+   "STRATA_FATTN": "1"
+  },
+  "extra_args": [],
+  "turns": [
+   {
+    "turn": "turn1-prefill",
+    "wall_s": 91.54,
+    "prompt_n": 117977,
+    "prompt_tok_s": 1311.9,
+    "prompt_ms": 89926.9,
+    "predicted_n": 64,
+    "decode_tok_s": 33.5,
+    "cached_tokens": null,
+    "vram_after_mib": 7619,
+    "answer_head": "# PolyStrata - the details\n\nThe technical side of PolyStr"
+   },
+   {
+    "turn": "turn2-cache",
+    "wall_s": 14.78,
+    "prompt_n": 11519,
+    "prompt_tok_s": 863.1,
+    "prompt_ms": 13345.9,
+    "predicted_n": 64,
+    "decode_tok_s": 36.6,
+    "cached_tokens": 106496,
+    "vram_after_mib": 7619,
+    "answer_head": "Based on the provided documentation, the three files PolyStrata reads at"
+   }
+  ],
+  "ready_s": 5.0,
+  "vram_idle_mib": 7431,
+  "engine_log": [
+   "[strata] 2026-10-28 20:07:01 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel",
+   "strata-poly: loaded in 2.2 s; 2471 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 259.2 ms; parked=1 bytes=1807766400 evictions=0",
+   "[strata] 2026-10-28 21:06:49 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel",
+   "strata-poly: loaded in 2.2 s; 2473 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 316.3 ms; parked=1 bytes=1807766400 evictions=0"
+  ]
+ },
+ {
+  "arm": "C-fdec",
+  "env": {
+   "STRATA_FDEC": "1"
+  },
+  "extra_args": [],
+  "turns": [
+   {
+    "turn": "turn1-prefill",
+    "wall_s": 143.43,
+    "prompt_n": 117977,
+    "prompt_tok_s": 829.1,
+    "prompt_ms": 142297.3,
+    "predicted_n": 64,
+    "decode_tok_s": 50.1,
+    "cached_tokens": null,
+    "vram_after_mib": 7566,
+    "answer_head": "# PolyStrata - the details\n\nThe technical side of PolyStr"
+   },
+   {
+    "turn": "turn2-cache",
+    "wall_s": 23.92,
+    "prompt_n": 11519,
+    "prompt_tok_s": 500.0,
+    "prompt_ms": 23039.0,
+    "predicted_n": 64,
+    "decode_tok_s": 62.1,
+    "cached_tokens": 106496,
+    "vram_after_mib": 7584,
+    "answer_head": "Based on the provided documentation, the three files this engine reads at start"
+   }
+  ],
+  "ready_s": 5.0,
+  "vram_idle_mib": 7431,
+  "engine_log": [
+   "[strata] 2026-10-28 20:08:56 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel",
+   "strata-poly: loaded in 2.1 s; 2470 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 271.7 ms; parked=1 bytes=1807766400 evictions=0",
+   "[strata] 2026-10-28 21:08:44 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel",
+   "strata-poly: loaded in 2.2 s; 2473 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 294.8 ms; parked=1 bytes=1807766400 evictions=0"
+  ]
+ },
+ {
+  "arm": "D-both",
+  "env": {
+   "STRATA_FATTN": "1",
+   "STRATA_FDEC": "1"
+  },
+  "extra_args": [
+   "--stage-read-mib",
+   "512"
+  ],
+  "turns": [
+   {
+    "turn": "turn1-prefill",
+    "wall_s": 93.8,
+    "prompt_n": 117977,
+    "prompt_tok_s": 1303.4,
+    "prompt_ms": 90513.9,
+    "predicted_n": 64,
+    "decode_tok_s": 50.7,
+    "cached_tokens": null,
+    "vram_after_mib": 7584,
+    "answer_head": "# PolyStrata - the details\n\nThe technical side of PolyStr"
+   },
+   {
+    "turn": "turn2-cache",
+    "wall_s": 14.26,
+    "prompt_n": 11519,
+    "prompt_tok_s": 861.9,
+    "prompt_ms": 13364.3,
+    "predicted_n": 64,
+    "decode_tok_s": 60.6,
+    "cached_tokens": 106496,
+    "vram_after_mib": 7584,
+    "answer_head": "Based on the provided documentation, here are the three files the engine reads"
+   }
+  ],
+  "ready_s": 5.0,
+  "vram_idle_mib": 7432,
+  "engine_log": [
+   "strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel",
+   "strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel",
+   "strata-poly: loaded in 2.2 s; 2471 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 294.2 ms; parked=1 bytes=1807766400 evictions=0",
+   "[strata] 2026-10-28 21:11:41 engine started: <STRATA>\\engine-poly\\strata-poly.exe --serve --model <DATA>\\models\\qwen36-UD-Q3_K_M\\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\\packs\\qwen36-ud-q3_k_m\\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512 --stage-read-mib 512",
+   "strata-poly: q8_0 KV cache: 544 bytes a row",
+   "strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel",
+   "strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel",
+   "strata-poly: loaded in 2.2 s; 2472 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads",
+   "strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off",
+   "strata-poly: conversation cache sized from the free RAM: 4096 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)",
+   "strata-poly: conversation cache: parked 118026 tokens in 265.0 ms; parked=1 bytes=1807766400 evictions=0"
+  ]
+ }
+]

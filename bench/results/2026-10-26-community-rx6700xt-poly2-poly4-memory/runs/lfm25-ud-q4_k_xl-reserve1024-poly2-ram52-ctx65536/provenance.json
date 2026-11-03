@@ -1,0 +1,28 @@
+{
+  "profile": "lfm25-ud-q4_k_xl-reserve1024",
+  "release": "v0.1.45-poly.2",
+  "source_commit": "974552f562aecb3e86cdd2679e76e4515b52b9d2",
+  "engine_sha256": "5cecdf2d8354ae704e456914c8d453d3497dfa8200b52e6c0f61802d52912aca",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 52,
+  "docker_memory_bytes": 55834574848,
+  "docker_memory_swap_combined_bytes": 55834574848,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "594ea439eebd74265f0679bba99c0a94b8a4cf3a8ae9852c4ef895fa0ff32e82",
+    "file": "../../initial-expert-profiles/594ea439eebd74265f0679bba99c0a94b8a4cf3a8ae9852c4ef895fa0ff32e82.txt"
+  },
+  "source_config_sha256": "95dd865b5238f46efd2955edf44f4e4a11d80e1a9f4a1b3e146abe9f698493d0",
+  "original_results_sha256": "7ad4885126fe3f3049ba57343cff11d88c03a4be65bd55c754a0a996e0b11753",
+  "published_results_sha256": "68aaff198616ca51c091c164e0c756e5306a0d2ab772fa04196cef5b03f8f867",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "LFM2.5-24B-A2B-UD-Q4_K_XL.gguf",
+      "bytes": 14876901632,
+      "sha256": "a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8",
+      "role": "model"
+    }
+  ]
+}

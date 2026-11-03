@@ -1,0 +1,13 @@
+{
+  "sample_count": 277,
+  "system_before_launch_in_use_bytes": 19059787776.0,
+  "system_sampled_peak_in_use_bytes": 38492573696,
+  "system_min_available_bytes": 235918819328,
+  "system_sampled_peak_commit_bytes": 32816136192,
+  "system_after_cleanup_in_use_bytes": 19245682688,
+  "engine_peak_rss_bytes": 18995277824,
+  "engine_peak_private_commit_bytes": 4367953920,
+  "gpu_sampled_peak_dedicated_bytes": 6588895232,
+  "gpu_sampled_peak_shared_bytes": 2123059200,
+  "scope": "Separate single128K lifecycle; system values include other applications/monitors, memory categories overlap, peaks are sampled."
+}

@@ -1,0 +1,83 @@
+{
+  "source": {
+    "repository": "VecSzn/PolyStrata",
+    "commit": "cc508adc50c32e0a98bd9bc1c5688ab5195b2538",
+    "archive_sha256": "6a83880db90be1f192c3d8c525d25e7f99515f95c4ebde7713af829cb4545c24",
+    "supplemental_data_archive_sha256": "f7a2712596a9b677e27bdf7fd041a27cd192d7678f1b54ef5caef1627c5f47a2",
+    "supplemental_tests_archive_sha256": "d4ddd0487d39c049fc09a0c0e6f9d7bd191e7c17351c3737539727c93fd37870",
+    "release_equivalence": "v0.1.45-poly.5 engine/build/setup source identical",
+    "ggml_dependency_commit": "3cf03257f219afbe7334045ff7c6a06ac68c627d"
+  },
+  "model": {
+    "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "revision": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "filename": "Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+    "bytes": 17104402720,
+    "sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1"
+  },
+  "rocm": {
+    "version": "10.2.0a20260930",
+    "index": "https://nightly.repo.amd.com/rocm/whl-next/",
+    "actual_target": "gfx1010"
+  },
+  "runtime_files": [
+    {
+      "path": "source\\engine-poly\\strata-poly.exe",
+      "bytes": 34949632,
+      "sha256": "a712397d4e2d82d8c207627766ba991e615ae7fc648d90e6ebfddf4c970ae959"
+    },
+    {
+      "path": "source\\engine-poly\\BUILD.json",
+      "bytes": 363,
+      "sha256": "e853e7e30fb915242c60840c9ebd47a677a4df06aa87f5d3cf640741227743f3"
+    },
+    {
+      "path": "python\\python.exe",
+      "bytes": 104952,
+      "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a"
+    },
+    {
+      "path": "python\\python312.dll",
+      "bytes": 6945272,
+      "sha256": "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120"
+    },
+    {
+      "path": "source\\engine-poly\\amdhip64_7.dll",
+      "bytes": 16399360,
+      "sha256": "344386dd39b2bba7060d62720054b9375401f23f2bcd29d730dd8d43019683cd"
+    },
+    {
+      "path": "source\\engine-poly\\amd_comgr.dll",
+      "bytes": 124121600,
+      "sha256": "0dd4e51ff6c32354b859ce8d91bd056eeb6cf4b42bc42fa6e7728ab5637cc954"
+    },
+    {
+      "path": "source\\engine-poly\\rocm_kpack.dll",
+      "bytes": 181248,
+      "sha256": "2e9734ffe6f6eefe1ff660a55dc85fffbcd2d66f794fce4878c6d95a55787b48"
+    },
+    {
+      "path": "source\\.rocm-win\\Lib\\site-packages\\_rocm_sdk_devel\\bin\\amdhip64_7.dll",
+      "bytes": 16399360,
+      "sha256": "344386dd39b2bba7060d62720054b9375401f23f2bcd29d730dd8d43019683cd"
+    },
+    {
+      "path": "source\\.rocm-win\\Lib\\site-packages\\_rocm_sdk_devel\\bin\\hipblas.dll",
+      "bytes": 809472,
+      "sha256": "1c51904da5e29f1a7747ebf9704ed45694126cbc5f9f401fa1f106341ee12a7d"
+    },
+    {
+      "path": "source\\.rocm-win\\Lib\\site-packages\\_rocm_sdk_devel\\bin\\rocblas.dll",
+      "bytes": 21071872,
+      "sha256": "36d8d37d422ca4259b3ee8a4f41ed16bc845a8fdf656c45f1cdd31dc3744106c"
+    }
+  ],
+  "toolchain": {
+    "python": "3.12.10",
+    "vs_build_tools": "17.14.42",
+    "cmake": "4.4.3",
+    "ninja": "1.13.2"
+  },
+  "privacy": "Public report contains hardware models, synthetic fixtures, numeric results and artifact hashes. Hostnames, user paths, network addresses, process/adapter identifiers and raw logs are omitted. Official results.json is copied byte-for-byte from the benchmark tool sanitizer output.",
+  "official_results_sha256": "9e285f27a562f3f5a9c84ca6d6bbd1e533bd15f4f7eb158e3252c8e6fa6d3c59"
+}

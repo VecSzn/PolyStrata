@@ -1,0 +1,113 @@
+[
+  {
+    "name": "warmup",
+    "cap": 32,
+    "request": {
+      "model": "strata",
+      "stream": true,
+      "max_tokens": 32,
+      "temperature": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "What is 7 plus 8? Reply with only the integer."
+        }
+      ],
+      "reasoning_effort": "none",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  {
+    "name": "structured",
+    "cap": 128,
+    "request": {
+      "model": "strata",
+      "stream": true,
+      "max_tokens": 128,
+      "temperature": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Return only JSON with exactly the key \"sorted\" holding [9, 2, 7, 1] sorted in ascending order."
+        }
+      ],
+      "reasoning_effort": "none",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  {
+    "name": "coding",
+    "cap": 768,
+    "request": {
+      "model": "strata",
+      "stream": true,
+      "max_tokens": 768,
+      "temperature": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Return only JSON with exactly the key \"code\", a string containing one Python function named merge_intervals(intervals). Input is a list of [start,end] integer pairs with start<=end. Return sorted merged intervals as a list of lists. Merge overlaps AND touching endpoints. Handle empty input, nested/duplicate intervals, negative integers and point intervals. Do not mutate input. Use sorted(intervals), no imports, no decorators, no type annotations, no lambda; calls may use only sorted, list, len, min, max, range, enumerate, tuple and list append/copy. No explanatory text."
+        }
+      ],
+      "reasoning_effort": "none",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  {
+    "name": "generation",
+    "cap": 384,
+    "request": {
+      "model": "strata",
+      "stream": true,
+      "max_tokens": 384,
+      "temperature": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Write a clear explanation of how a hash table handles collisions using separate chaining. Cover lookup, insertion, deletion, load factor and resizing. Aim for about 350 words. Do not use code or Markdown fences."
+        }
+      ],
+      "reasoning_effort": "none",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    }
+  },
+  {
+    "name": "long",
+    "cap": 384,
+    "request": {
+      "model": "strata",
+      "stream": true,
+      "max_tokens": 384,
+      "temperature": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "<fixed-long-fixture>"
+        }
+      ],
+      "reasoning_effort": "none",
+      "chat_template_kwargs": {
+        "enable_thinking": false
+      }
+    },
+    "fixture": {
+      "generator": "reproduce-additional.py",
+      "seed": 117,
+      "filler_words": 55221,
+      "utf8_lf_sha256": "14f2acad3ecbbc386af6d431f77d22ad98bff0c38c5d327611ff266c49e5daec",
+      "expected": {
+        "alpha": "CEDAR-5187",
+        "beta": "HARBOR-2649",
+        "gamma": "QUARTZ-9036"
+      }
+    }
+  }
+]

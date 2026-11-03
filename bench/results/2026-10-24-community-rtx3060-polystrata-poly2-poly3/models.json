@@ -1,0 +1,94 @@
+[
+  {
+    "family": "qwen36",
+    "label": "Qwen3.6-35B-A3B",
+    "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "revision": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "repository_url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/tree/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "files": [
+      {
+        "filename": "Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+        "bytes": 17104402720,
+        "sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/resolve/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-Q3_K_M.gguf"
+      }
+    ],
+    "id": "qwen36-ud-q3_k_m"
+  },
+  {
+    "family": "gemma4",
+    "label": "Gemma 4 26B-A4B",
+    "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "repository_url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/c099eb48e663fd284577b04978a94ffccb261841",
+    "files": [
+      {
+        "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+        "bytes": 16947541728,
+        "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+      },
+      {
+        "filename": "mtp-gemma-4-26B-A4B-it-Q8_0.gguf",
+        "bytes": 461766816,
+        "sha256": "6326fb9f5e487aa8dcdd313a091e3c67724cb2a666ec3b7d2895b5b26d93ed1b",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf"
+      }
+    ],
+    "id": "gemma4-ud-q4_k_m"
+  },
+  {
+    "family": "tiel",
+    "label": "Tiel Coder 35B-A3B",
+    "repository": "peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP",
+    "revision": "bbe9e566f39e4fc9652ac66b71968289a03c520a",
+    "repository_url": "https://huggingface.co/peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP/tree/bbe9e566f39e4fc9652ac66b71968289a03c520a",
+    "files": [
+      {
+        "filename": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+        "bytes": 17234935648,
+        "sha256": "46b8fbeba6e888c9a101e49cc717baa9bb8dfa0d203ec7b3185288159543ec14",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP/resolve/bbe9e566f39e4fc9652ac66b71968289a03c520a/Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf"
+      }
+    ],
+    "id": "tiel-ud-q3_k_xl"
+  },
+  {
+    "family": "lfm25",
+    "label": "LFM2.5-24B-A2B",
+    "repository": "unsloth/LFM2.5-24B-A2B-GGUF",
+    "revision": "faa77113e93335b63423e9e8d33395f86eaf8946",
+    "repository_url": "https://huggingface.co/unsloth/LFM2.5-24B-A2B-GGUF/tree/faa77113e93335b63423e9e8d33395f86eaf8946",
+    "files": [
+      {
+        "filename": "LFM2.5-24B-A2B-UD-Q4_K_XL.gguf",
+        "bytes": 14876901632,
+        "sha256": "a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/unsloth/LFM2.5-24B-A2B-GGUF/resolve/faa77113e93335b63423e9e8d33395f86eaf8946/LFM2.5-24B-A2B-UD-Q4_K_XL.gguf"
+      }
+    ],
+    "id": "lfm25-ud-q4_k_xl"
+  },
+  {
+    "family": "flint",
+    "label": "Flint 40B-A2.5B",
+    "repository": "unsloth/flint-GGUF",
+    "revision": "20468edfc38ab43d6914cc88b08cbecb05d0fc62",
+    "repository_url": "https://huggingface.co/unsloth/flint-GGUF/tree/20468edfc38ab43d6914cc88b08cbecb05d0fc62",
+    "files": [
+      {
+        "filename": "flint-UD-Q3_K_XL.gguf",
+        "bytes": 18494977472,
+        "sha256": "91b8d85ab6ff7fb095d9a972f9afa6f3fa2b9acb642867a079f3e013ea3c350c",
+        "release_manifest_match": true,
+        "source_url": "https://huggingface.co/unsloth/flint-GGUF/resolve/20468edfc38ab43d6914cc88b08cbecb05d0fc62/flint-UD-Q3_K_XL.gguf"
+      }
+    ],
+    "id": "flint-ud-q3_k_xl"
+  }
+]

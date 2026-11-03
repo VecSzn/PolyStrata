@@ -1,0 +1,70 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-control", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/out,dst=/opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--out", "/opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/out/official-control", "--long", "--clients", "2"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Note: the server runs 1 request(s) at a time (--batch), so 2 clients will partly wait their turn.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.08 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 87.0 tok/s, first token 0.427 s, 100 tokens
+  run 1 q2: decode 63.7 tok/s, first token 0.44 s, 100 tokens
+  run 1 q3: decode 67.0 tok/s, first token 0.46 s, 100 tokens
+  run 2 q1: decode 85.5 tok/s, first token 0.46 s, 100 tokens
+  run 2 q2: decode 71.2 tok/s, first token 0.423 s, 100 tokens
+  run 2 q3: decode 75.2 tok/s, first token 0.46 s, 100 tokens
+  run 3 q1: decode 85.8 tok/s, first token 0.489 s, 100 tokens
+  run 3 q2: decode 79.7 tok/s, first token 0.439 s, 100 tokens
+  run 3 q3: decode 81.1 tok/s, first token 0.421 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4019 tokens, prompt 912.1 tok/s (0 reused), first token 4.411 s
+  run 2: 4019 tokens, prompt 880.7 tok/s (0 reused), first token 4.569 s
+  run 3: 4019 tokens, prompt 915.5 tok/s (0 reused), first token 4.395 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16058 tokens, prompt 1017.4 tok/s (0 reused), first token 15.798 s
+  run 2: 16058 tokens, prompt 1021.3 tok/s (0 reused), first token 15.737 s
+  run 3: 16058 tokens, prompt 1025.1 tok/s (0 reused), first token 15.68 s
+agent: a session of 6 turns with four tools, x 3 runs
+  run 1 turn 0: prompt 609, reused 0, read 609, first token 1.715 s
+  run 1 turn 1: prompt 4185, reused 602, read 3583, first token 4.874 s
+  run 1 turn 2: prompt 5817, reused 4178, read 1639, first token 2.774 s
+  run 1 turn 3: prompt 9235, reused 5810, read 3425, first token 5.367 s
+  run 1 turn 4: prompt 12187, reused 9228, read 2959, first token 4.487 s
+  run 1 turn 5: prompt 15115, reused 12180, read 2935, first token 5.616 s
+  run 2 turn 0: prompt 609, reused 0, read 609, first token 1.67 s
+  run 2 turn 1: prompt 4221, reused 602, read 3619, first token 4.659 s
+  run 2 turn 2: prompt 5853, reused 4214, read 1639, first token 2.774 s
+  run 2 turn 3: prompt 9273, reused 5846, read 3427, first token 5.381 s
+  run 2 turn 4: prompt 12225, reused 9266, read 2959, first token 4.498 s
+  run 2 turn 5: prompt 15155, reused 12218, read 2937, first token 5.653 s
+  run 3 turn 0: prompt 609, reused 0, read 609, first token 1.674 s
+  run 3 turn 1: prompt 4189, reused 602, read 3587, first token 4.627 s
+  run 3 turn 2: prompt 5821, reused 4182, read 1639, first token 2.952 s
+  run 3 turn 3: prompt 9247, reused 5814, read 3433, first token 5.413 s
+  run 3 turn 4: prompt 12199, reused 9240, read 2959, first token 4.498 s
+  run 3 turn 5: prompt 15128, reused 12192, read 2936, first token 5.635 s
+concurrency: 2 requests at once x 3 rounds, 128 new tokens each
+  round 1: 256 tokens in 4.4 s = 58.3 tok/s total
+  round 2: 256 tokens in 4.2 s = 61.0 tok/s total
+  round 3: 256 tokens in 4.2 s = 60.8 tok/s total
+32K prompt: 3 fresh prompts of about 32768 tokens, 24 new tokens
+  run 1: 32049 tokens, prompt 814.9 tok/s (0 reused), first token 39.354 s
+  run 2: 32049 tokens, prompt 819.0 tok/s (0 reused), first token 39.157 s
+  run 3: 32049 tokens, prompt 816.6 tok/s (0 reused), first token 39.276 s
+
+Results (median, range over the runs):
+  chat decode tok/s                     79.70   (63.70 - 87.00, n=9)
+  chat first token (s)                   0.44   (0.42 - 0.49, n=9)
+  4K prompt tok/s                      912.10   (880.70 - 915.50, n=3)
+  4K first token (s)                     4.41   (4.39 - 4.57, n=3)
+  16K prompt tok/s                    1021.30   (1017.40 - 1025.10, n=3)
+  16K first token (s)                   15.74   (15.68 - 15.80, n=3)
+  32K prompt tok/s                     816.60   (814.90 - 819.00, n=3)
+  32K first token (s)                   39.28   (39.16 - 39.35, n=3)
+  agent cache hit %                     68.76   (68.75 - 68.80, n=3)
+  agent re-read tokens/session         240.00   (227.00 - 267.00, n=3)
+  agent turn first token (s)             4.66   (2.77 - 5.65, n=15)
+  agent decode tok/s                    76.50   (68.50 - 88.10, n=15)
+  2 clients total tok/s                 60.75   (58.33 - 61.04, n=3)
+
+Report: /opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/out/official-control/2026-10-19-community-cpu-qwen3-6-35b-a3b-ud-q4-k-m/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/out/official-control/2026-10-19-community-cpu-qwen3-6-35b-a3b-ud-q4-k-m (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

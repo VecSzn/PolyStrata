@@ -52,20 +52,23 @@ times as fast (the two runs are linked there).
 
 ### Does it run on Radeon / AMD?
 
-Qwen3.8-Flash-Next, yes: on a Radeon with 12 GB or more it runs through Strata's AMD backend. The five added
-models run on AMD under Linux since 0.1.42-poly.4, as a beta: setup compiles their engine for the card on your PC
-(there is no ready-made AMD engine, so not on Windows), a contributor's port tested with Qwen3.6 UD-Q2_K_XL and
+Qwen3.8-Flash-Next, yes: on a Radeon with 12 GB or more it runs through Strata's AMD backend. The added
+models run on AMD since 0.1.42-poly.4, as a beta: setup compiles their engine for the card on your PC
+(there is no ready-made AMD engine), on Linux with ROCm from your system or AMD's wheels, and on
+Windows with AMD's TheRock wheels as well. A contributor's port was tested with Qwen3.6 UD-Q2_K_XL and
 Ornith APEX-I-Mini on an RX 7600 with 8 GB: 74 and 40 tokens/s in a short chat, 53 and 43 after a 32K prompt,
-read at 481 and 444. Gemma 4, Tiel Coder, LFM2.5 and GLM have not been tried on an AMD card, and setup says so when
-you pick them. I don't have an AMD card myself, so reports from one help; see
+read at 481 and 444. One Windows run, Tiel Coder UD-Q3_K_XL on an RX 9070 XT, wrote at 55 to 75 tokens/s and
+read a 7,376-token prompt at 2,750. GLM 5.3 Flash, DeepSeek V4, Flint and Kolibri 1 have not been tried on an AMD
+card, and setup says so when you pick them. I don't have an AMD card myself, so reports from one help; see
 [AMD_HIP.md](AMD_HIP.md#strata-poly-on-amd-beta).
 
 ### Will it run on a 6 GB card, or 4 GB?
 
 It has only run on 8 GB cards and up. With a context of 32K, Qwen3.6 takes about 5 GB of VRAM beside its experts,
-Ornith about 4 GB, Gemma 4 about 6 GB, Tiel Coder about 5 GB and LFM2.5 about 4 GB. The attention caches are part
-of that and take their share as a conversation grows, so a short chat leaves more room. On a 6 GB card Ornith and
-LFM2.5 are the ones to try; LFM2.5's caches grow the least, 20 KB a token.
+Ornith about 4 GB, Gemma 4 about 6 GB, Tiel Coder about 5 GB, LFM2.5 about 4 GB, Flint about 4 GB and Kolibri 1
+about 4 GB. The
+attention caches are part of that and take their share as a conversation grows, so a short chat leaves more room.
+On a 6 GB card Ornith and LFM2.5 are the ones to try; LFM2.5's caches grow the least, 20 KB a token.
 That is untested. On 4 GB, none of them leaves room for experts.
 
 ### What about older cards like a GTX 1050?
@@ -80,7 +83,7 @@ This engine helps MoE models that don't fit in VRAM. A dense model like Bonsai u
 token, so there are no experts to split, and the 1-bit Bonsai models already fit on a small card. LFM2.5-8B-A1B
 fits whole on an 8 GB card, so plain llama.cpp is fine there. LFM2.5-24B-A2B, the larger one, runs now
 (`--family lfm25`, [LFM.md](LFM.md)). Bigger MoEs are the good fit. DeepSeek V4 Flash runs now (`--family
-deepseek`, [DEEPSEEK.md](DEEPSEEK.md)), and
+deepseek`, [DEEPSEEK.md](DEEPSEEK.md)), and so does Flint 40B-A2.5B (`--family flint`, [FLINT.md](FLINT.md)).
 Ling-2.6-flash (104B, 7.4B active) is on the list. Requests go in the issues, and the ones people ask for most come
 first.
 
@@ -93,7 +96,10 @@ Their numbers are in the
 weights from the GGUF, so a fine-tune that keeps the architecture of Qwen3.6, Ornith 1.5 or Gemma 4 should run.
 Setup only knows the files it offers. To give it another, put the file in a folder under the name of the size
 closest to it, `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` for a Q4_K_M of Qwen3.6, and run setup with
-`--family qwen36 --model UD-Q4_K_M --gguf-dir <that folder>`.
+`--family qwen36 --model UD-Q4_K_M --gguf-dir <that folder>`. Setup checks that the file is a whole GGUF of the
+family's architecture (`qwen35moe` for Qwen3.6, Ornith 1.5 and Tiel Coder, `gemma4` for Gemma 4), says that it is
+not the file it offers, and uses it as it is; it never deletes a file in that folder. Its RAM and VRAM estimates
+are those of the size whose name the file took.
 
 ### Can I use any GLM 5.3 Flash GGUF?
 

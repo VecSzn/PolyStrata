@@ -156,6 +156,38 @@ MODELS = {
              ["PolyStrata uses the file where", "it is: no second copy, and no", "lookup table to build"],
              "read once, at the first start", (0, 1, 2, 3, 4, 5)),
     ),
+    # Flint has no draft block either
+    "flint": dict(
+        head="The model is made of 12,032 small specialists - “experts”.",
+        sub=("Each word needs only 6 of the 256 in a layer. PolyStrata keeps the busy ones",
+             "on your graphics card and the rest in RAM - so it runs on a normal PC."),
+        at_work=(6, "6 of a layer's 256 at work"),
+        gpu=("8 GB or more; 32 GB holds 4-bit",
+             ["Runs the core of the model for", "every word, and keeps the busy", "experts: ~1,600-2,500 on 8 GB"],
+             "the experts an answer keeps using", 130),
+        ram=("32 GB of memory",
+             ["Holds the experts the card", "lacks. When a word needs one,", "the CPU does it - at once"],
+             "the experts the card lacks", 18),
+        ssd=("The model's file: 18-42 GB",
+             ["PolyStrata uses the file where", "it is: no second copy, and no", "lookup table to build"],
+             "read once, at the first start", (0, 1, 2, 3, 4, 5)),
+    ),
+    # Kolibri 1 has no draft block either: its file has none, so it answers one token at a time
+    "kolibri": dict(
+        head="The model is made of 19,200 small specialists - “experts”.",
+        sub=("Each word needs only 6 of the 384 in a layer. PolyStrata keeps the busy ones",
+             "on your graphics card and the rest in RAM - so one PC runs it, not a server."),
+        at_work=(6, "6 of a layer's 384 at work"),
+        gpu=("It has run on a 12 GB card",
+             ["Runs the core of the model", "for every word, and keeps the", "~6,000 experts used most"],
+             "the most-used experts", 130),
+        ram=("Big: 24 GB of memory or more",
+             ["Holds the other ~13,200 experts.", "When a word needs one of", "them, the CPU does it - at once"],
+             "the experts the card lacks", 36),
+        ssd=("The model's file: 29-48 GB",
+             ["PolyStrata uses the file where", "it is: no second copy, and no", "lookup table to build"],
+             "read once, at the first start", (0, 1, 2, 3, 4, 5)),
+    ),
 }
 
 

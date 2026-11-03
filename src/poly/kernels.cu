@@ -1,15 +1,24 @@
 // src/poly/kernels.cu - see the header.  The reference for every formula is llama.cpp's graph of the model and the
 // ggml ops it builds.  Where a kernel takes several tokens, blockIdx.y is the token unless it says otherwise.
 #include "strata/poly/kernels.hpp"
+#include "strata/kernels/dp4a.hpp"
+#ifdef STRATA_POLY_GDN_MMA
+#include "gdn_mma.hpp"
+#include "strata/kernels/gdn_mma_policy.hpp"
+#endif
 
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#if defined(STRATA_USE_HIP)
+#include "hip_value_split.cuh"
+#endif
 
 #include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
@@ -149,6 +158,91 @@ gemm_small_kernel(const float* __restrict__ w, const float* __restrict__ x, floa
     }
     const int t = t0 + tt, o = o0 + oo;
     if (t < rows && o < n_out) y[size_t(t) * n_out + o] = acc;
+}
+
+// gemm_small_kernel for more outputs (a router's 128 or 256): a block TILE_TOK tokens and TILE_OUT outputs, a thread
+// 4 of each, so a value read from shared memory serves 4 products where it served one.  For 2,048 tokens of 2,048
+// values and 256 outputs gemm_small_kernel took 0.34 ms on an RTX 5090, 241 ms of the 3.7 s Flint read a prompt of
+// 29,816 tokens in.  Each output is still one fmaf after the other in the inputs' order: the same bits.
+constexpr int TILE_TOK = 32, TILE_OUT = 64, TILE_K = 32;
+
+__global__ void __launch_bounds__(TILE_TOK * TILE_OUT / 16)
+gemm_tile_kernel(const float* __restrict__ w, const float* __restrict__ x, float* __restrict__ y, int n_in, int n_out,
+                 int rows) {
+    constexpr int THREADS = TILE_TOK * TILE_OUT / 16;
+    // a step's inputs and weights by input, so a thread reads its 4 tokens' and 4 outputs' values as one float4
+    __shared__ __align__(16) float sx[TILE_K][TILE_TOK + 4], sw[TILE_K][TILE_OUT + 4];
+    const int t0 = blockIdx.x * TILE_TOK, o0 = blockIdx.y * TILE_OUT;
+    const int to = 4 * (threadIdx.x / (TILE_OUT / 4)), oo = 4 * (threadIdx.x % (TILE_OUT / 4));
+    float acc[4][4];
+#pragma unroll
+    for (int i = 0; i < 4; ++i)
+#pragma unroll
+        for (int j = 0; j < 4; ++j) acc[i][j] = 0.0f;
+    for (int k0 = 0; k0 < n_in; k0 += TILE_K) {
+        for (int i = threadIdx.x; i < TILE_TOK * TILE_K; i += THREADS) {
+            const int t = t0 + i / TILE_K, k = k0 + i % TILE_K;
+            sx[i % TILE_K][i / TILE_K] = t < rows && k < n_in ? x[size_t(t) * n_in + k] : 0.0f;
+        }
+        for (int i = threadIdx.x; i < TILE_OUT * TILE_K; i += THREADS) {
+            const int o = o0 + i / TILE_K, k = k0 + i % TILE_K;
+            sw[i % TILE_K][i / TILE_K] = o < n_out && k < n_in ? w[size_t(o) * n_in + k] : 0.0f;
+        }
+        __syncthreads();
+#pragma unroll 8
+        for (int c = 0; c < TILE_K; ++c) {
+            const float4 a = *reinterpret_cast<const float4*>(&sx[c][to]);
+            const float4 b = *reinterpret_cast<const float4*>(&sw[c][oo]);
+            const float av[4] = {a.x, a.y, a.z, a.w}, bv[4] = {b.x, b.y, b.z, b.w};
+#pragma unroll
+            for (int i = 0; i < 4; ++i)
+#pragma unroll
+                for (int j = 0; j < 4; ++j) acc[i][j] = fmaf(av[i], bv[j], acc[i][j]);
+        }
+        __syncthreads();
+    }
+#pragma unroll
+    for (int i = 0; i < 4; ++i)
+#pragma unroll
+        for (int j = 0; j < 4; ++j) {
+            const int t = t0 + to + i, o = o0 + oo + j;
+            if (t < rows && o < n_out) y[size_t(t) * n_out + o] = acc[i][j];
+        }
+}
+
+// Where a row's Q8_1 blocks would keep a sum past the halves' range: a power of two to divide the row by, 1 for
+// most.  The test is on runs of 16 (Q2_K's blocks keep sums of 16, the others of 32) against a quarter of 65504,
+// so a block of 32 stays under half of it, and on the largest value, whose block delta is a half too.
+__global__ void guard_half_sums_kernel(float* x, size_t ld, int width, float* __restrict__ factor) {
+    __shared__ float part[8];
+    float* row = x + size_t(blockIdx.x) * ld;
+    float most = 0.0f;
+    for (int g = threadIdx.x; g < width / 16; g += blockDim.x) {
+        float s = 0.0f, big = 0.0f;
+#pragma unroll
+        for (int j = 0; j < 16; ++j) {
+            const float v = row[g * 16 + j];
+            s += v;
+            big = fmaxf(big, fabsf(v));
+        }
+        most = fmaxf(most, fmaxf(2.0f * fabsf(s), big / 64.0f));
+    }
+    most = block_max(most, part);
+    const int k = most > 32768.0f ? (int) ceilf(log2f(most / 32768.0f)) : 0;
+    if (threadIdx.x == 0) factor[blockIdx.x] = ldexpf(1.0f, k);
+    if (k == 0) return;
+    for (int i = threadIdx.x; i < width; i += blockDim.x) row[i] = ldexpf(row[i], -k);
+}
+
+// Rows of y (row r at place[r] when place is given) times their factor, or divided by it.
+__global__ void scale_rows_kernel(float* y, size_t ld, int width, const int32_t* __restrict__ place,
+                                  const float* __restrict__ factor, bool divide) {
+    const float f = factor[blockIdx.y];
+    if (f == 1.0f) return;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= width) return;
+    float* row = y + size_t(place ? place[blockIdx.y] : blockIdx.y) * ld;
+    row[i] = divide ? row[i] / f : row[i] * f;
 }
 
 __global__ void bf16_to_f32_kernel(const uint16_t* __restrict__ w, float* __restrict__ out, size_t n) {
@@ -381,12 +475,13 @@ __global__ void kda_conv_state_kernel(const float* __restrict__ proj, float* __r
 // One block per head, and a column of the state to every `lanes` threads of it: a thread holds every lanes-th
 // value of its column, so a column's two sums are a few terms a thread and a sum over its threads.  A thread a
 // column read the column's 128 values one after the other, twice, and that was 25 microseconds a token.  The
-// block walks the tokens.  s[i + hd * j] holds key dimension i of column j.  blockDim.x is hd * lanes.
-__global__ void kda_step_kernel(const float* __restrict__ qkv, const float* __restrict__ g1,
-                                const float* __restrict__ a, const float* __restrict__ beta, float* __restrict__ s,
-                                const float* __restrict__ g2, const float* __restrict__ o_norm,
-                                float* __restrict__ out, int hd, int n_head, int rows, float lower_bound,
-                                float norm_eps, float* __restrict__ snap, size_t stride, int n_snap) {
+// block walks the tokens.  s[i + hd * j] holds key dimension i of column j.  blockDim.x is hd * lanes, up to 1024,
+// so the bound: without it sm_70 gave the kernel 72 registers a thread and its launch failed.
+__global__ void __launch_bounds__(1024)
+kda_step_kernel(const float* __restrict__ qkv, const float* __restrict__ g1, const float* __restrict__ a,
+                const float* __restrict__ beta, float* __restrict__ s, const float* __restrict__ g2,
+                const float* __restrict__ o_norm, float* __restrict__ out, int hd, int n_head, int rows,
+                float lower_bound, float norm_eps, float* __restrict__ snap, size_t stride, int n_snap) {
     __shared__ float part[32];
     __shared__ float qn[256], kn[256], decay[256];
     const int lanes = int(blockDim.x) / hd;
@@ -930,6 +1025,14 @@ __global__ void route_kernel(const float* __restrict__ logits, int n_expert, int
         const float inv = 1.0f / warp_sum(sum);
 #pragma unroll
         for (int k = 0; k < PER; ++k) p[k] *= inv;
+    } else if (gate == 3) {   // sigmoid_logit_add (Kolibri 1): the weights are the sigmoid of the scores, but the
+                              // pick is on the scores and the bias, so it is taken before the scores turn to weights
+#pragma unroll
+        for (int k = 0; k < PER; ++k) {
+            const int e = lane + k * WARP;
+            pick[k] = e < n_expert ? p[k] + (bias ? bias[e] : 0.0f) : -INFINITY;
+            p[k] = e < n_expert ? 1.0f / (1.0f + expf(-p[k])) : -INFINITY;
+        }
     } else {
 #pragma unroll
         for (int k = 0; k < PER; ++k) {
@@ -937,10 +1040,12 @@ __global__ void route_kernel(const float* __restrict__ logits, int n_expert, int
             p[k] = gate == 1 ? 1.0f / (1.0f + expf(-x)) : sqrtf(x > 20.0f ? x : logf(1.0f + expf(x)));
         }
     }
+    if (gate != 3) {
 #pragma unroll
-    for (int k = 0; k < PER; ++k) {
-        const int e = lane + k * WARP;
-        pick[k] = e < n_expert ? p[k] + (bias ? bias[e] : 0.0f) : -INFINITY;
+        for (int k = 0; k < PER; ++k) {
+            const int e = lane + k * WARP;
+            pick[k] = e < n_expert ? p[k] + (bias ? bias[e] : 0.0f) : -INFINITY;
+        }
     }
     float sum = 0.0f, mine = 0.0f;
     int my_id = 0;
@@ -1019,6 +1124,12 @@ __global__ void head_norm_rope_kernel(const float* __restrict__ x, int x_stride,
         const float x1 = w ? xr[j + half] * scale * w[j + half] : xr[j + half] * scale;
         yr[i] = i < half ? x0 * cosf(theta) - x1 * sinf(theta) : x0 * sinf(theta) + x1 * cosf(theta);
     }
+}
+
+// A launch's `last` as attn_rows() takes it: -2 is a whole call of one launch whose position is on the card (attend()),
+// which ends at the launch's last token.  p0 is the launch's first token's position.
+__device__ __forceinline__ long long attn_last(long long p0, int tokens, long long last) {
+    return last == -2 ? p0 + tokens - 1 : last;
 }
 
 // The rows the token at position p attends: how many, and the first of them.  They end at its own row, or at row
@@ -1107,6 +1218,7 @@ __global__ void attn_score_kernel(const float* __restrict__ q, const half* __res
                                   const uint16_t* __restrict__ kscales = nullptr) {
     const int unit = blockIdx.x * (blockDim.x / WARP) + threadIdx.x / WARP;   // a row and a group
     const int key = unit / kv_heads, g = unit % kv_heads, per = n_head / kv_heads;
+    last = attn_last((at ? *at : pos) + first, tokens, last);
     long long lo;
     if (key >= attn_span((at ? *at : pos) + first, tokens, window, last, &lo)) return;
     const long long row = ring > 0 ? (lo + key) % ring : lo + key;
@@ -1162,6 +1274,7 @@ attn_score_reg_kernel(const float* __restrict__ q, const half* __restrict__ kcac
     constexpr int dim = SCORE_VALUES * WARP * STEPS;
     const int unit = blockIdx.x * SCORE_WARPS + threadIdx.x / WARP;   // a group's block of rows
     const int g = unit % kv_heads, k0 = unit / kv_heads * SCORE_KEYS, lane = threadIdx.x % WARP;
+    last = attn_last((at ? *at : pos) + first, tokens, last);
     long long lo;
     const int span = attn_span((at ? *at : pos) + first, tokens, window, last, &lo);
     if (k0 >= span) return;
@@ -1219,9 +1332,10 @@ attn_score_reg_kernel(const float* __restrict__ q, const half* __restrict__ kcac
 // a block of the group's queries side by side (per: the group's heads).
 __global__ void attn_softmax_kernel(float* score, int n_keys, long long pos, int first, int tokens, int window,
                                     long long last, const long long* __restrict__ at, float* __restrict__ wt,
-                                    int per) {
+                                    int per, const float* __restrict__ sinks) {
     __shared__ float part[8];
     const long long p = (at ? *at : pos) + first;
+    last = attn_last(p, tokens, last);
     long long lo, lo0;
     const int span = attn_span(p, tokens, window, last, &lo0);
     const int n = attn_rows(p + blockIdx.y, window, last, &lo), own = int(lo - lo0);
@@ -1230,12 +1344,15 @@ __global__ void attn_softmax_kernel(float* score, int n_keys, long long pos, int
     float mx = -INFINITY;
     for (int j = threadIdx.x; j < n; j += blockDim.x) mx = fmaxf(mx, row[j]);
     mx = block_max(mx, part);
+    if (sinks) mx = fmaxf(mx, sinks[blockIdx.x]);
     float sum = 0.0f;
     for (int j = threadIdx.x; j < n; j += blockDim.x) {
         row[j] = expf(row[j] - mx);
         sum += row[j];
     }
-    const float inv = 1.0f / block_sum(sum, part);
+    sum = block_sum(sum, part);
+    if (sinks) sum += expf(sinks[blockIdx.x] - mx);
+    const float inv = 1.0f / sum;
     if (!wt) {
         for (int j = threadIdx.x; j < n; j += blockDim.x) row[j] *= inv;
         for (int j = threadIdx.x; j < own; j += blockDim.x) all[j] = 0.0f;
@@ -1326,6 +1443,7 @@ __global__ void attn_value_kernel(const float* __restrict__ score, const half* _
     const int lane = threadIdx.x % VALUE_DIMS, s = threadIdx.x / VALUE_DIMS;
     const int d = (blockIdx.x % dims) * VALUE_DIMS + lane;
     const long long p = (at ? *at : pos) + first;
+    last = attn_last(p, tokens, last);
     long long lo;
     const int span = attn_span(p, tokens, window, last, &lo);
     // the lane's query, and for a lane past the head's last value a value to read all the same
@@ -1352,39 +1470,40 @@ __global__ void attn_value_kernel(const float* __restrict__ score, const half* _
     }
 }
 
-// attend() for a few tokens over the whole conversation, for heads of 64 values in groups of 4 (LFM2's): the keys
-// in blocks of SPLIT_KEYS, a launch block each with a group and a token, which scores them (half a warp a row),
-// takes the softmax's exponentials of its block for each head (a warp a head) and their values; attn_join_kernel
-// adds the blocks up.  For a token of this shape the score, softmax and value kernels launch 16 and 32 blocks, each
-// walking the whole conversation.  A block's rows are counted from the cache's first, so a token comes out the
-// same whatever tokens the call has beside it.
-constexpr int SPLIT_KEYS = 64, SPLIT_THREADS = 128;
+// attend() for a few tokens over the whole conversation, for heads of 64 values in groups of 4 (LFM2's) or of 128
+// in groups of 8 (Flint's): the keys in blocks of SPLIT_KEYS, a launch block each with a group and a token, which
+// scores them (half a warp a row of 64 values, a warp one of 128), takes the softmax's exponentials of its block for
+// each head (a warp a head) and their values; attn_join_kernel adds the blocks up.  For a token of these shapes the
+// score, softmax and value kernels launch 16 to 32 blocks, each walking the whole conversation.  A block's rows are
+// counted from the cache's first, so a token comes out the same whatever tokens the call has beside it.
+constexpr int SPLIT_KEYS = 64;
 
-__global__ void __launch_bounds__(SPLIT_THREADS)
+template <int DIM, int G>
+__global__ void __launch_bounds__(G * WARP)
 attn_split_kernel(const float* __restrict__ q, const half* __restrict__ kcache, const half* __restrict__ vcache,
                   float* __restrict__ part, int n_head, int kv_heads, long long pos, int first, int tokens, float scale,
                   int blocks, const long long* __restrict__ at) {
-    constexpr int DIM = 64, G = 4, HALF = WARP / 2, WARPS = SPLIT_THREADS / WARP;
-    static_assert(SCORE_VALUES * HALF == DIM && WARPS == G, "half a warp a row, a warp a head");
+    constexpr int ROW = DIM / SCORE_VALUES, ROWS = WARP / ROW, WARPS = G, VALS = DIM / WARP;
+    static_assert(ROW * ROWS == WARP && ROW % G == 0 && VALS % 2 == 0, "a row is half a warp or a warp, a warp a head");
     __shared__ float e[G][SPLIT_KEYS];
     const int g = blockIdx.y, b = blockIdx.x, t = blockIdx.z, lane = threadIdx.x % WARP, w = threadIdx.x / WARP;
-    const int side = lane / HALF, hl = lane % HALF;
+    const int side = lane / ROW, rl = lane % ROW;
     const long long p = (at ? *at : pos) + first;
     const int k0 = b * SPLIT_KEYS, span = int(p) + tokens;   // the call's tokens attend rows [0, span)
     if (k0 >= span) return;
     const int nk = min(SPLIT_KEYS, span - k0);
     const int own = int(p) + t + 1;   // the token attends rows [0, own)
-    const float* qt = q + ((size_t(first) + t) * n_head + g * G) * DIM + SCORE_VALUES * hl;
+    const float* qt = q + ((size_t(first) + t) * n_head + g * G) * DIM + SCORE_VALUES * rl;
     float4 y[G];
 #pragma unroll
     for (int i = 0; i < G; ++i) y[i] = *reinterpret_cast<const float4*>(qt + i * DIM);
-    for (int pair = w; 2 * pair < nk; pair += WARPS) {   // every lane of the warp goes round alike
-        const int r = 2 * pair + side, key = k0 + r;
+    for (int pair = w; ROWS * pair < nk; pair += WARPS) {   // every lane of the warp goes round alike
+        const int r = ROWS * pair + side, key = k0 + r;
         float acc[G];
 #pragma unroll
         for (int i = 0; i < G; ++i) acc[i] = 0.0f;
         if (r < nk && key < own) {
-            const half* k = kcache + (size_t(key) * kv_heads + g) * DIM + SCORE_VALUES * hl;
+            const half* k = kcache + (size_t(key) * kv_heads + g) * DIM + SCORE_VALUES * rl;
             const unsigned long long bits = *reinterpret_cast<const unsigned long long*>(k);
             float x[SCORE_VALUES];
 #pragma unroll
@@ -1399,8 +1518,8 @@ attn_split_kernel(const float* __restrict__ q, const half* __restrict__ kcache, 
             }
         }
         int which;
-        const float sum = scores_sum<G, HALF / 2>(acc, lane, &which);
-        if (r < nk && (hl & (HALF / G - 1)) == 0) e[which][r] = key < own ? sum * scale : -INFINITY;
+        const float sum = scores_sum<G, ROW / 2>(acc, lane, &which);
+        if (r < nk && (rl & (ROW / G - 1)) == 0) e[which][r] = key < own ? sum * scale : -INFINITY;
     }
     __syncthreads();
     float m = -INFINITY;
@@ -1415,33 +1534,41 @@ attn_split_kernel(const float* __restrict__ q, const half* __restrict__ kcache, 
     }
     l = warp_sum(l);
     __syncthreads();
-    // the values: warp w takes every WARPS-th row for all the heads, a lane two values of a row, so a row of
-    // the cache is read once; then warp w adds the warps' sums of head w
-    float o[G][2];
+    // the values: warp w takes every WARPS-th row for all the heads, a lane VALS values of a row, so a row of the
+    // cache is read once; then warp w adds the warps' sums of head w
+    float o[G][VALS];
 #pragma unroll
-    for (int i = 0; i < G; ++i) o[i][0] = o[i][1] = 0.0f;
-    const half* v = vcache + (size_t(k0) * kv_heads + g) * DIM + 2 * lane;
+    for (int i = 0; i < G; ++i)
+#pragma unroll
+        for (int u = 0; u < VALS; ++u) o[i][u] = 0.0f;
+    const half* v = vcache + (size_t(k0) * kv_heads + g) * DIM + VALS * lane;
     for (int j = w; j < nk; j += WARPS) {
-        const float2 x = __half22float2(*reinterpret_cast<const half2*>(v + size_t(j) * kv_heads * DIM));
 #pragma unroll
-        for (int i = 0; i < G; ++i) {
-            o[i][0] += e[i][j] * x.x;
-            o[i][1] += e[i][j] * x.y;
+        for (int u = 0; u < VALS; u += 2) {
+            const float2 x = __half22float2(*reinterpret_cast<const half2*>(v + size_t(j) * kv_heads * DIM + u));
+#pragma unroll
+            for (int i = 0; i < G; ++i) {
+                o[i][u] += e[i][j] * x.x;
+                o[i][u + 1] += e[i][j] * x.y;
+            }
         }
     }
-    __shared__ float2 sums[WARPS][G][WARP];
+    __shared__ float sums[WARPS][G][DIM];
 #pragma unroll
-    for (int i = 0; i < G; ++i) sums[w][i][lane] = make_float2(o[i][0], o[i][1]);
+    for (int i = 0; i < G; ++i)
+#pragma unroll
+        for (int u = 0; u < VALS; ++u) sums[w][i][VALS * lane + u] = o[i][u];
     __syncthreads();
-    float o0 = 0.0f, o1 = 0.0f;
+    float r[VALS];
 #pragma unroll
-    for (int k = 0; k < WARPS; ++k) {
-        o0 += sums[k][w][lane].x;
-        o1 += sums[k][w][lane].y;
-    }
+    for (int u = 0; u < VALS; ++u) r[u] = 0.0f;
+#pragma unroll
+    for (int k = 0; k < WARPS; ++k)
+#pragma unroll
+        for (int u = 0; u < VALS; ++u) r[u] += sums[k][w][VALS * lane + u];
     float* out = part + ((size_t(t) * n_head + g * G + w) * blocks + b) * (DIM + 2);
-    out[2 * lane] = o0;
-    out[2 * lane + 1] = o1;
+#pragma unroll
+    for (int u = 0; u < VALS; ++u) out[VALS * lane + u] = r[u];
     if (lane == 0) {
         out[DIM] = m;
         out[DIM + 1] = l;
@@ -1449,14 +1576,16 @@ attn_split_kernel(const float* __restrict__ q, const half* __restrict__ kcache, 
 }
 
 // The blocks of attn_split_kernel added up for a head of a token: each block's sums scaled to the largest score.  A
-// warp takes every JOIN_WARPS-th block, a lane two values, and the warps' sums are added in their order; a block past
-// the token's own rows has none it attends and is skipped, so the sums are the same whatever tokens the call has.
+// warp takes every JOIN_WARPS-th block, a lane DIM / 32 values, and the warps' sums are added in their order; a block
+// past the token's own rows has none it attends and is skipped, so the sums are the same whatever tokens the call
+// has.  A head's sink, with `sinks`, takes its share of the weight as one more score that weighs no value.
 constexpr int JOIN_WARPS = 16;
 
+template <int DIM>
 __global__ void __launch_bounds__(JOIN_WARPS * WARP)
 attn_join_kernel(const float* __restrict__ part, float* __restrict__ out, int n_head, long long pos, int first,
-                 int tokens, int blocks, const long long* __restrict__ at) {
-    constexpr int DIM = 64;
+                 int tokens, int blocks, const long long* __restrict__ at, const float* __restrict__ sinks) {
+    constexpr int VALS = DIM / WARP;
     __shared__ float top[JOIN_WARPS], sl[JOIN_WARPS], so[JOIN_WARPS][DIM];
     const int h = blockIdx.x, t = blockIdx.y, lane = threadIdx.x % WARP, w = threadIdx.x / WARP;
     const long long p = (at ? *at : pos) + first;
@@ -1465,30 +1594,36 @@ attn_join_kernel(const float* __restrict__ part, float* __restrict__ out, int n_
     float mx = -INFINITY;
     for (int b = threadIdx.x; b < used; b += JOIN_WARPS * WARP) mx = fmaxf(mx, pb[size_t(b) * (DIM + 2) + DIM]);
     mx = block_max(mx, top);
-    float l = 0.0f, o0 = 0.0f, o1 = 0.0f;
+    if (sinks) mx = fmaxf(mx, sinks[h]);
+    float l = 0.0f, o[VALS];
+#pragma unroll
+    for (int u = 0; u < VALS; ++u) o[u] = 0.0f;
 #pragma unroll 4
     for (int b = w; b < used; b += JOIN_WARPS) {
         const float* x = pb + size_t(b) * (DIM + 2);
         if (x[DIM] == -INFINITY) continue;
         const float f = expf(x[DIM] - mx);
         l += f * x[DIM + 1];
-        o0 += f * x[2 * lane];
-        o1 += f * x[2 * lane + 1];
+#pragma unroll
+        for (int u = 0; u < VALS; ++u) o[u] += f * x[VALS * lane + u];
     }
-    so[w][2 * lane] = o0;
-    so[w][2 * lane + 1] = o1;
+#pragma unroll
+    for (int u = 0; u < VALS; ++u) so[w][VALS * lane + u] = o[u];
     if (lane == 0) sl[w] = l;
     __syncthreads();
     if (w != 0) return;
-    float s0 = 0.0f, s1 = 0.0f, sum = 0.0f;
+    float s[VALS], sum = 0.0f;
+#pragma unroll
+    for (int u = 0; u < VALS; ++u) s[u] = 0.0f;
     for (int k = 0; k < JOIN_WARPS; ++k) {
-        s0 += so[k][2 * lane];
-        s1 += so[k][2 * lane + 1];
+#pragma unroll
+        for (int u = 0; u < VALS; ++u) s[u] += so[k][VALS * lane + u];
         sum += sl[k];
     }
+    if (sinks) sum += expf(sinks[h] - mx);
     float* y = out + ((size_t(first) + t) * n_head + h) * DIM;
-    y[2 * lane] = s0 / sum;
-    y[2 * lane + 1] = s1 / sum;
+#pragma unroll
+    for (int u = 0; u < VALS; ++u) y[VALS * lane + u] = s[u] / sum;
 }
 
 // attn_value_kernel with the weights as attn_softmax_kernel leaves them with `wt`: a row's queries side by side,
@@ -1510,6 +1645,7 @@ attn_value_t_kernel(const float* __restrict__ wt, const half* __restrict__ vcach
     const int lane = threadIdx.x % VALUE_DIMS, s = threadIdx.x / VALUE_DIMS;
     const int d = (blockIdx.x % dims) * VALUE_DIMS + lane;
     const long long p = (at ? *at : pos) + first;
+    last = attn_last(p, tokens, last);
     long long lo;
     const int span = attn_span(p, tokens, window, last, &lo);
     const size_t width = size_t(kv_heads) * dim;
@@ -1627,6 +1763,15 @@ __global__ void attn_softmax_block_kernel(const float* __restrict__ score, half*
     shrink[blockIdx.x] = f;
 }
 
+// A head's sink in a token's softmax sum, against the top its rows reached: a logit with no value of its own, which
+// only takes weight from the rows.  b counts as attn_softmax_block_kernel's blocks do, a group's columns together.
+__global__ void attn_sink_sum_kernel(float* sum, const float* __restrict__ top, const float* __restrict__ sinks,
+                                     int n, int per, int cols) {
+    const int b = blockIdx.x * blockDim.x + threadIdx.x;
+    if (b >= n) return;
+    sum[b] += expf(sinks[(b / cols) * per + b % per] - top[b]);
+}
+
 // A chunk's results in the order of the groups, `dim` values a token and head: times its factor, or divided by it.
 __global__ void attn_scale_kernel(float* out, const float* __restrict__ factor, int dim, bool divide) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1636,6 +1781,25 @@ __global__ void attn_scale_kernel(float* out, const float* __restrict__ factor, 
     if (!divide && f == 1.0f) return;
     out[size_t(blockIdx.y) * dim + i] *= divide ? 1.0f / f : f;
 }
+
+// One m16n8k32 on the int8 tensor cores: A is [16][32] row-major (a query's codes), B is [8][32] (a key's codes,
+// and that is the column-major 32x8 the instruction asks for), C comes back as a 16x8 block of int32 in four
+// registers.  Both caches already lie in exactly these shapes, so nothing has to be shuffled into fragments.
+#if defined(__HIPCC__) || (defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800)
+// ROCm and cards before Ampere have no mma.sync.aligned.m16n8k32.s8 (ptxas refuses it below sm_80): attend_int8
+// never launches the tensor-core tier there (int8_tensor_cores()), so the body is never run.
+__device__ __forceinline__ void mma_s8(int&, int&, int&, int&, unsigned, unsigned, unsigned,
+                                       unsigned, unsigned, unsigned) {}
+#else
+__device__ __forceinline__ void mma_s8(int& c0, int& c1, int& c2, int& c3, unsigned a0, unsigned a1, unsigned a2,
+                                       unsigned a3, unsigned b0, unsigned b1) {
+    asm volatile(
+        "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+        : "+r"(c0), "+r"(c1), "+r"(c2), "+r"(c3)
+        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
+}
+#endif
+// attend_batch(): the bytes of a chunk's results, which every block of rows reads and writes once more: in the
 
 // The tensor cores' m16n8k16 step and ldmatrix need Turing; AMD builds have neither, and the host keeps the cuBLAS
 // products there (tensor_cores()).  Turing runs the step as two of k = 8 on the same registers.
@@ -1815,6 +1979,132 @@ attn_flash64_kernel(const float* __restrict__ q, const half* __restrict__ kcache
 #else
     (void) q, (void) kcache, (void) vcache, (void) out, (void) rows, (void) n_head, (void) kv_heads, (void) pos,
         (void) scale_log2;   // a card without the tensor cores' steps never launches it (tensor_cores())
+#endif
+}
+
+// attend_batch() for heads of 128 values in groups of 8 (Flint's), the way attn_flash64_kernel goes, with a window
+// over a ring of rows and a sink a head: a launch block takes FLASH128_TOKENS tokens of a group, 64 rows of queries
+// with a token's 8 heads side by side, a warp two tokens, and walks the keys 64 at a time.  The walk starts at a
+// multiple of 64, so a token's keys go in the same blocks whatever tokens the call has beside it: a block it attends
+// none of changes none of its sums.  The two buffers of keys and values take 68 KiB, past the 48 a block has without
+// asking: the launch asks for them (attend_batch()).
+constexpr int FLASH128_TOKENS = 8, FLASH128_KEYS = 64, FLASH128_ROW = 128 + 8;
+constexpr int FLASH128_SMEM = 2 * 2 * FLASH128_KEYS * FLASH128_ROW * int(sizeof(half));
+
+__global__ void __launch_bounds__(4 * WARP)
+attn_flash128_kernel(const float* __restrict__ q, const half* __restrict__ kcache, const half* __restrict__ vcache,
+                     float* __restrict__ out, int rows, int n_head, int kv_heads, long long pos, float scale_log2,
+                     int window, int ring, const float* __restrict__ sinks) {
+#if STRATA_POLY_MMA
+    constexpr int DIM = 128, G = 8, KEYS = FLASH128_KEYS, ROW = FLASH128_ROW;
+    extern __shared__ __align__(16) half flash_sm[];
+    half(*ks)[KEYS][ROW] = reinterpret_cast<half(*)[KEYS][ROW]>(flash_sm);
+    half(*vs)[KEYS][ROW] = reinterpret_cast<half(*)[KEYS][ROW]>(flash_sm + 2 * KEYS * ROW);
+    const int g = blockIdx.y, t0 = blockIdx.x * FLASH128_TOKENS, lane = threadIdx.x % WARP, w = threadIdx.x / WARP;
+    const int gid = lane / 4, tig = lane % 4, head = g * G + gid;
+    const int tok[2] = {t0 + 2 * w, t0 + 2 * w + 1};   // the thread's rows gid and gid + 8: a head of two tokens
+    uint32_t qa[8][4];   // a block of 16 values a step, in log2 units
+    for (int k = 0; k < 8; ++k)
+        for (int i = 0; i < 2; ++i)
+            for (int hi = 0; hi < 2; ++hi) {
+                float2 x = make_float2(0.0f, 0.0f);
+                if (tok[i] < rows)
+                    x = *reinterpret_cast<const float2*>(q + (size_t(tok[i]) * n_head + head) * DIM + 16 * k +
+                                                         8 * hi + 2 * tig);
+                qa[k][i + 2 * hi] = half2_bits(x.x * scale_log2, x.y * scale_log2);
+            }
+    float o[16][4], m[2] = {-INFINITY, -INFINITY}, l[2] = {0.0f, 0.0f};
+    for (int n = 0; n < 16; ++n) o[n][0] = o[n][1] = o[n][2] = o[n][3] = 0.0f;
+    // the block's tokens attend positions [lo, hi): from the first one's window to the last one
+    const long long hi = pos + min(t0 + FLASH128_TOKENS, rows);
+    const long long lo = window > 0 ? max(0LL, pos + t0 - window + 1) : 0;
+    const auto fetch = [&](int buf, long long k0) {
+        for (int i = threadIdx.x; i < KEYS * DIM / 8; i += 4 * WARP) {
+            const int r = i / (DIM / 8), c = 8 * (i % (DIM / 8));
+            const long long key = k0 + r;
+            const bool whole = key >= lo && key < hi;   // the others are zeros, which no weight reads
+            const size_t at = whole ? (size_t(ring > 0 ? key % ring : key) * kv_heads + g) * DIM + c : 0;
+            flash_copy(&ks[buf][r][c], kcache + at, whole);
+            flash_copy(&vs[buf][r][c], vcache + at, whole);
+        }
+        flash_commit();
+    };
+    const long long first = lo / KEYS * KEYS;
+    fetch(0, first);
+    int buf = 0;
+    for (long long k0 = first; k0 < hi; k0 += KEYS, buf ^= 1) {
+        __syncthreads();   // the buffer the last block was worked on in is free
+        if (k0 + KEYS < hi) {
+            fetch(buf ^ 1, k0 + KEYS);
+            flash_wait<1>();
+        } else {
+            flash_wait<0>();
+        }
+        __syncthreads();
+        float s[8][4];
+        for (int n = 0; n < 8; ++n) {
+            s[n][0] = s[n][1] = s[n][2] = s[n][3] = 0.0f;
+            for (int k = 0; k < 8; k += 2) {
+                uint32_t b[4];   // keys 8 n.., values 16 k.. and 16 (k + 1)..
+                ldmatrix_x4(b, &ks[buf][8 * n + lane % 8][16 * k + 8 * (lane / 8)], false);
+                mma16816(s[n], qa[k], b);
+                mma16816(s[n], qa[k + 1], b + 2);
+            }
+        }
+        for (int i = 0; i < 2; ++i) {
+            const long long own = pos + tok[i];   // the row's token attends positions (own - window, own]
+            float mx = -INFINITY;
+            for (int n = 0; n < 8; ++n)
+                for (int j = 2 * i; j < 2 * i + 2; ++j) {
+                    const long long key = k0 + 8 * n + 2 * tig + j % 2;
+                    if (key > own || (window > 0 && key <= own - window)) s[n][j] = -INFINITY;
+                    mx = fmaxf(mx, s[n][j]);
+                }
+            mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 1));
+            mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 2));
+            const float now = fmaxf(m[i], mx), base = now == -INFINITY ? 0.0f : now;
+            const float f = exp2f(m[i] - base);
+            m[i] = now;
+            l[i] *= f;
+            for (int n = 0; n < 16; ++n) {
+                o[n][2 * i] *= f;
+                o[n][2 * i + 1] *= f;
+            }
+            for (int n = 0; n < 8; ++n)
+                for (int j = 2 * i; j < 2 * i + 2; ++j) {
+                    s[n][j] = exp2f(s[n][j] - base);
+                    l[i] += s[n][j];
+                }
+        }
+        for (int k = 0; k < 4; ++k) {   // keys 16 k..: the weights as an A fragment
+            const uint32_t pa[4] = {half2_bits(s[2 * k][0], s[2 * k][1]), half2_bits(s[2 * k][2], s[2 * k][3]),
+                                    half2_bits(s[2 * k + 1][0], s[2 * k + 1][1]),
+                                    half2_bits(s[2 * k + 1][2], s[2 * k + 1][3])};
+            for (int n = 0; n < 16; n += 2) {
+                uint32_t b[4];   // keys 16 k.., values 8 n.. and 8 (n + 1)..
+                ldmatrix_x4(b, &vs[buf][16 * k + lane % 8 + 8 * (lane / 8 % 2)][8 * n + 8 * (lane / 16)], true);
+                mma16816(o[n], pa, b);
+                mma16816(o[n + 1], pa, b + 2);
+            }
+        }
+    }
+    for (int i = 0; i < 2; ++i) {
+        l[i] += __shfl_xor_sync(0xffffffffu, l[i], 1);
+        l[i] += __shfl_xor_sync(0xffffffffu, l[i], 2);
+        float f = 1.0f;
+        if (sinks) {   // the sink, in log2 units like the scores, as one more weight of no value
+            const float sink = sinks[head] * 1.44269504f, now = fmaxf(m[i], sink);
+            f = exp2f(m[i] - now);
+            l[i] = l[i] * f + exp2f(sink - now);
+        }
+        if (tok[i] >= rows) continue;
+        float* y = out + (size_t(tok[i]) * n_head + head) * DIM + 2 * tig;
+        for (int n = 0; n < 16; ++n)
+            *reinterpret_cast<float2*>(y + 8 * n) = make_float2(o[n][2 * i] * f / l[i], o[n][2 * i + 1] * f / l[i]);
+    }
+#else
+    (void) q, (void) kcache, (void) vcache, (void) out, (void) rows, (void) n_head, (void) kv_heads, (void) pos,
+        (void) scale_log2, (void) window, (void) ring, (void) sinks;   // never launched without the tensor cores
 #endif
 }
 
@@ -2009,6 +2299,19 @@ __global__ void gdn_gates_kernel(float* __restrict__ alpha, float* __restrict__ 
     beta[at] = sigmoid(beta[at]);
 }
 
+#ifdef STRATA_POLY_GDN_MMA
+__global__ void gdn_log_gates_kernel(float* __restrict__ alpha, float* __restrict__ beta, const float* __restrict__ dt,
+                                 const float* __restrict__ a, int n_head, int n) {
+    const int at = blockIdx.x * blockDim.x + threadIdx.x;
+    if (at >= n) return;
+    const int h = at % n_head;
+    const float g = alpha[at] + dt[h];
+    alpha[at] = (g > 20.0f ? g : logf(1.0f + expf(g))) * a[h];
+    beta[at] = sigmoid(beta[at]);
+}
+
+#endif
+
 // The state's update, a warp a column: the blocks of a head share its columns among their warps, and a lane holds
 // every 32nd value of its warp's column, so a column is read and written as whole lines and its two sums are a
 // few terms a lane and a sum over the warp.  The block walks the tokens, and no warp waits for another.
@@ -2053,12 +2356,13 @@ __global__ void gdn_state_kernel(const float* __restrict__ qkv, const float* __r
 // gdn_state_kernel with the warp's column in registers, PER values a lane, for the whole walk over the tokens:
 // a token reads and writes no state.  The sums go in the same order, so the result is the same to the bit.  A
 // token's inputs are read while the token before is computed: a walk that waited for each token's reads took
-// about a microsecond a token, the latency of those reads.
+// about a microsecond a token, the latency of those reads.  A block is 32 warps, so the bound: without it PER 8
+// took 79 registers a thread on sm_70 and 71 on sm_75, more than a 1024-thread launch can have.
 template <int PER>
-__global__ void gdn_state_reg_kernel(const float* __restrict__ qkv, const float* __restrict__ decay,
-                                     const float* __restrict__ share, float* __restrict__ s, float* __restrict__ out,
-                                     int dim, int n_head, int k_heads, int rows, float* __restrict__ snap,
-                                     size_t stride, unsigned snaps) {
+__global__ void __launch_bounds__(1024)
+gdn_state_reg_kernel(const float* __restrict__ qkv, const float* __restrict__ decay, const float* __restrict__ share,
+                     float* __restrict__ s, float* __restrict__ out, int dim, int n_head, int k_heads, int rows,
+                     float* __restrict__ snap, size_t stride, unsigned snaps) {
     const int per_head = dim / int(blockDim.x / WARP);
     const int h = blockIdx.x / per_head, hk = h % k_heads;
     const int j = (blockIdx.x % per_head) * int(blockDim.x / WARP) + int(threadIdx.x / WARP);
@@ -2125,19 +2429,141 @@ __global__ void gdn_out_kernel(float* __restrict__ out, const float* __restrict_
     out[at] = o / sqrtf(os / float(dim) + norm_eps) * o_norm[threadIdx.x] * (gate * sigmoid(gate));
 }
 
+// conv4_silu_kernel for a block of tokens that see each other (Clover): a token's sum adds its next three inputs
+// in the block, input t + d times right[d - 1], to the causal one.  The state is read and left as it was.
+__global__ void conv4_block_silu_kernel(const float* __restrict__ x, const float* __restrict__ state,
+                                        const float* __restrict__ w, const float* __restrict__ right,
+                                        float* __restrict__ out, int channels, int rows) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= channels) return;
+    const float* wc = w + 4 * size_t(c);
+    const float* rc = right + 3 * size_t(c);
+    const float* st = state + 3 * size_t(c);
+    const auto in = [&](int row) { return row < 0 ? st[3 + row] : x[size_t(row) * channels + c]; };
+    for (int row = 0; row < rows; ++row) {
+        float y = in(row - 3) * wc[0] + in(row - 2) * wc[1] + in(row - 1) * wc[2] + in(row) * wc[3];
+        for (int d = 1; d <= 3 && row + d < rows; ++d) y += x[size_t(row + d) * channels + c] * rc[d - 1];
+        out[size_t(row) * channels + c] = y * sigmoid(y);
+    }
+}
+
+// A value head's weights in a block of tokens that see each other (Clover's gated delta net in a block): token
+// i's softmax over the block's tokens j, by the unscaled dot product of their normed query and key times the
+// head's logit scale, and over the head's recurrent state, by bias + c * log(rows / 32).  w gets rows + 1 a token
+// a head, the state's last.  qkv as gdn_norm_kernel left it: its queries are scaled by 1 / sqrt(dim).  A block a
+// head; the queries and keys in shared memory.
+__global__ void gdn_block_weights_kernel(const float* __restrict__ qkv, const float* __restrict__ logit_scale,
+                                         const float* __restrict__ hist_b, const float* __restrict__ hist_c,
+                                         float* __restrict__ w, int dim, int n_head, int k_heads, int rows) {
+    extern __shared__ float sh[];
+    float* q = sh;                      // rows * dim
+    float* k = q + size_t(rows) * dim;  // rows * dim
+    float* sc = k + size_t(rows) * dim; // rows * (rows + 1)
+    const int h = blockIdx.x, hk = h % k_heads, wide = rows + 1;
+    const size_t keys = size_t(dim) * k_heads, row_n = 2 * keys + size_t(dim) * n_head;
+    for (int at = threadIdx.x; at < rows * dim; at += blockDim.x) {
+        const int r = at / dim, i = at % dim;
+        const float* x = qkv + size_t(r) * row_n + size_t(hk) * dim;
+        q[at] = x[i];
+        k[at] = x[keys + i];
+    }
+    __syncthreads();
+    const float scale = logit_scale[h] * sqrtf(float(dim));   // the queries' 1 / sqrt(dim) undone
+    for (int at = threadIdx.x; at < rows * rows; at += blockDim.x) {
+        const int i = at / rows, j = at % rows;
+        float dot = 0.0f;
+        for (int d = 0; d < dim; ++d) dot += q[size_t(i) * dim + d] * k[size_t(j) * dim + d];
+        sc[size_t(i) * wide + j] = dot * scale;
+    }
+    __syncthreads();
+    const float past = hist_b[h] + hist_c[h] * logf(float(rows) / 32.0f);
+    for (int i = threadIdx.x; i < rows; i += blockDim.x) {
+        float* s = sc + size_t(i) * wide;
+        s[rows] = past;
+        float mx = s[0];
+        for (int j = 1; j < wide; ++j) mx = fmaxf(mx, s[j]);
+        float sum = 0.0f;
+        for (int j = 0; j < wide; ++j) sum += s[j] = expf(s[j] - mx);
+        float* o = w + (size_t(h) * rows + i) * wide;
+        for (int j = 0; j < wide; ++j) o[j] = s[j] / sum;
+    }
+}
+
+// The block's output before its norm, a warp a column as gdn_state_kernel: token i's read of the state, S q_i
+// decayed by the token's decay, times its weight on the state, and the block's values by its weights on them.
+// The state is read and left as it was.
+__global__ void gdn_block_out_kernel(const float* __restrict__ qkv, const float* __restrict__ decay,
+                                     const float* __restrict__ s, const float* __restrict__ w,
+                                     float* __restrict__ out, int dim, int n_head, int k_heads, int rows) {
+    const int per_head = dim / int(blockDim.x / WARP);
+    const int h = blockIdx.x / per_head, hk = h % k_heads;
+    const int j = (blockIdx.x % per_head) * int(blockDim.x / WARP) + int(threadIdx.x / WARP);
+    const int lane = threadIdx.x & (WARP - 1);
+    if (j >= dim) return;
+    const size_t keys = size_t(dim) * k_heads, d_inner = size_t(dim) * n_head, row_n = 2 * keys + d_inner;
+    const float* col = s + (size_t(h) * dim + j) * dim;
+    const int wide = rows + 1;
+    for (int row = 0; row < rows; ++row) {
+        const float* qn = qkv + size_t(row) * row_n + size_t(hk) * dim;
+        float o = 0.0f;
+        for (int i = lane; i < dim; i += WARP) o += col[i] * qn[i];
+        o = warp_sum(o);
+        if (lane != 0) continue;
+        const float* wt = w + (size_t(h) * rows + row) * wide;
+        float local = 0.0f;
+        for (int r = 0; r < rows; ++r) local += wt[r] * qkv[size_t(r) * row_n + 2 * keys + size_t(h) * dim + j];
+        out[size_t(row) * d_inner + size_t(h) * dim + j] = o * decay[size_t(row) * n_head + h] * wt[rows] + local;
+    }
+}
+
+// Qwen35::route_block() on the card: a thread an expert, one block for the call's tokens.
+__global__ void coreset_mask_kernel(float* __restrict__ logits, int n_expert, int n_used, int rows, float share) {
+    extern __shared__ float sh[];
+    float* p = sh;               // a token's probabilities before their sum divides them
+    float* mass = sh + n_expert; // each expert's probability, added up over the tokens that took it
+    __shared__ float part[32];
+    const int e = threadIdx.x;
+    mass[e] = 0.0f;
+    for (int t = 0; t < rows; ++t) {
+        const float s = logits[size_t(t) * n_expert + e];
+        const float x = expf(s - block_max(s, part));
+        const float sum = block_sum(x, part);
+        p[e] = x;
+        __syncthreads();
+        int ahead = 0;
+        for (int j = 0; j < n_expert; ++j) ahead += p[j] > x || (p[j] == x && j < e);
+        if (ahead < n_used) mass[e] += x / sum;
+        __syncthreads();
+    }
+    const float m = mass[e], total = block_sum(m, part);
+    int ahead = 0;
+    float before = 0.0f;
+    for (int j = 0; j < n_expert; ++j) {
+        const bool a = mass[j] > m || (mass[j] == m && j < e);
+        ahead += a;
+        before += a ? mass[j] : 0.0f;
+    }
+    if (ahead > 0 && before >= share * total)
+        for (int t = 0; t < rows; ++t) logits[size_t(t) * n_expert + e] = -INFINITY;
+}
+
 inline cudaStream_t cs(void* stream) { return (cudaStream_t) stream; }
 inline int grid(size_t n, int block) { return int((n + block - 1) / block); }
 
-// Whether the tensor-core kernels run as such here: built for Turing or newer (STRATA_POLY_MMA), and not from a PTX
-// of an older card compiled for this one.
-bool tensor_cores() {
+// The PTX version the kernels run from here, 0 under HIP: a card running an older card's PTX has only that card's
+// instructions.
+int kernels_ptx() {
 #if defined(__HIPCC__)
-    return false;
+    return 0;
 #else
     cudaFuncAttributes a{};
-    return cudaFuncGetAttributes(&a, attn_flash64_kernel) == cudaSuccess && a.ptxVersion >= 75;
+    return cudaFuncGetAttributes(&a, attn_flash64_kernel) == cudaSuccess ? a.ptxVersion : 0;
 #endif
 }
+
+// Whether the tensor-core kernels run as such here: built for Turing or newer (STRATA_POLY_MMA), and not from a PTX
+// of an older card compiled for this one.
+bool tensor_cores() { return kernels_ptx() >= 75; }
 
 void blas_ck(cublasStatus_t s, const char* what) {
     if (s != CUBLAS_STATUS_SUCCESS)
@@ -2166,7 +2592,7 @@ void* blas_create(void* stream) {
     const half* a = (const half*) p;
     cublasGemmStridedBatchedEx(h, CUBLAS_OP_T, CUBLAS_OP_N, n, n, n, &one, a, CUDA_R_16F, n, n * n, a + n * n,
                                CUDA_R_16F, n, n * n, &zero, (float*) (a + 2 * n * n), CUDA_R_32F, n, n * n, 1,
-                               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
     cudaStreamSynchronize(cs(stream));
     cudaFree(p);
     return h;
@@ -2194,8 +2620,12 @@ void gemm_f32(void* blas, const float* w, const float* x, float* y, int n_in, in
     if (groups == 1 && n_out <= 8 * SMALL_OUT) {
         cudaStream_t stream = nullptr;
         blas_ck(cublasGetStream(h, &stream), "cublasGetStream");
-        gemm_small_kernel<<<dim3((rows + SMALL_TOK - 1) / SMALL_TOK, (n_out + SMALL_OUT - 1) / SMALL_OUT),
-                            SMALL_TOK * WARP, 0, stream>>>(w, x, y, n_in, n_out, rows);
+        if (n_out > 2 * SMALL_OUT)
+            gemm_tile_kernel<<<dim3((rows + TILE_TOK - 1) / TILE_TOK, (n_out + TILE_OUT - 1) / TILE_OUT),
+                               TILE_TOK * TILE_OUT / 16, 0, stream>>>(w, x, y, n_in, n_out, rows);
+        else
+            gemm_small_kernel<<<dim3((rows + SMALL_TOK - 1) / SMALL_TOK, (n_out + SMALL_OUT - 1) / SMALL_OUT),
+                                SMALL_TOK * WARP, 0, stream>>>(w, x, y, n_in, n_out, rows);
         return;
     }
     if (groups == 1) {
@@ -2207,6 +2637,17 @@ void gemm_f32(void* blas, const float* w, const float* x, float* y, int n_in, in
                                       (long long) rows_per_x * n_in, x, groups * n_in, n_in, &zero, y, n_out,
                                       rows_per_x, groups),
             "a batch's projections");
+}
+
+void guard_half_sums(float* x, int64_t ld, int width, int rows, float* factor, void* stream) {
+    if (rows > 0) guard_half_sums_kernel<<<rows, 256, 0, cs(stream)>>>(x, size_t(ld), width, factor);
+}
+
+void scale_rows(float* y, int64_t ld, int width, int rows, const int32_t* place, const float* factor, bool divide,
+                void* stream) {
+    for (int r = 0; r < rows; r += 65535)   // a grid has at most 65535 rows
+        scale_rows_kernel<<<dim3(grid(width, 256), std::min(65535, rows - r)), 256, 0, cs(stream)>>>(
+            place ? y : y + size_t(r) * ld, size_t(ld), width, place ? place + r : nullptr, factor + r, divide);
 }
 
 void bf16_to_f32(const uint16_t* w, float* out, size_t n, void* stream) {
@@ -2287,6 +2728,85 @@ void store_f16(const float* x, uint16_t* cache, int n, int64_t pos, int rows, vo
 
 void store_f16_at(const float* x, uint16_t* cache, int n, const long long* at, int rows, int ring, void* stream) {
     store_f16_at_kernel<<<grid(size_t(n) * rows, 256), 256, 0, cs(stream)>>>(x, (half*) cache, n, rows, at, ring);
+}
+
+// --------------------------------------------------- int8 attention caches (--kv int8 / int8k, see the header)
+
+// One block of quantize_row_q8_0_ref's rule, one thread: the largest magnitude sets the delta, every value rounds
+// to that delta's units.  roundf, not __float2int_rn - the rule the CPU reference uses, to the bit.  (An all-zero
+// block leaves the delta at 0 and every code 0; llama.cpp writes id = 0 there for the same reason.)  The codes go
+// to their own array, which is what keeps them 4-aligned for every reader.
+__device__ __forceinline__ void quantize_q8_0_block(const float* __restrict__ v, int8_t* __restrict__ code,
+                                                    uint16_t* __restrict__ delta) {
+    float amax = 0.0f;
+#pragma unroll
+    for (int j = 0; j < kQ8_0Values; ++j) amax = fmaxf(amax, fabsf(v[j]));
+    const float d = amax / 127.0f;
+    const float id = d != 0.0f ? 1.0f / d : 0.0f;
+    *delta = __half_as_ushort(__float2half(d));
+#pragma unroll
+    for (int j = 0; j < kQ8_0Values; ++j) code[j] = (int8_t) roundf(v[j] * id);
+}
+
+// One thread, one block.  per_row is the blocks a cache row has (n_kv * head_dim / kQ8_0Values).
+__global__ void store_int8_kernel(const float* __restrict__ x, int8_t* __restrict__ code, uint16_t* __restrict__ delta,
+                                int64_t n_blocks, int per_row) {
+    const int64_t i = blockIdx.x * (int64_t) blockDim.x + threadIdx.x;
+    if (i >= n_blocks) return;
+    const float* v = x + (i / per_row) * ((int64_t) per_row * kQ8_0Values) + (i % per_row) * kQ8_0Values;
+    quantize_q8_0_block(v, code + i * kQ8_0Values, delta + i);
+}
+
+// The row a block goes to comes from what the card holds at `at` (a recorded launch), as store_f16_at's.
+__global__ void store_int8_at_kernel(const float* __restrict__ x, int8_t* __restrict__ code,
+                                   uint16_t* __restrict__ delta, int64_t n_blocks, int per_row,
+                                   const long long* __restrict__ at, int ring) {
+    const int64_t i = blockIdx.x * (int64_t) blockDim.x + threadIdx.x;
+    if (i >= n_blocks) return;
+    const int64_t row = i / per_row, b = i % per_row;
+    const float* v = x + row * ((int64_t) per_row * kQ8_0Values) + b * kQ8_0Values;
+    const int64_t dst_row = ring > 0 ? (*at + row) % ring : *at + row;
+    quantize_q8_0_block(v, code + (dst_row * per_row + b) * kQ8_0Values, delta + dst_row * per_row + b);
+}
+
+// A Q8_0 cache back as halves: a thread a kQ8_0Values-block, its codes read four at a time (back to back inside a
+// block, so every fourth one is 4-aligned) and its delta once.  ggml's own kernel for this
+// (dequantize_block_q8_0_f16) stages 34-byte blocks through shared memory to line the codes up; here they already
+// are, so it is eight half2 multiplies and no shared memory at all.
+__global__ void dequant_int8_f16_kernel(const int8_t* __restrict__ code, const uint16_t* __restrict__ delta,
+                                      half* __restrict__ out, int64_t n_blocks) {
+    const int64_t b = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+    if (b >= n_blocks) return;
+    const half2 d2 = __half2half2(__ushort_as_half(delta[b]));
+    const int8_t* c = code + b * kQ8_0Values;
+    half2* o = reinterpret_cast<half2*>(out + b * kQ8_0Values);
+#pragma unroll
+    for (int j = 0; j < kQ8_0Values / 4; ++j) {
+        const char4 q = *reinterpret_cast<const char4*>(c + 4 * j);
+        o[2 * j] = __hmul2(make_half2(q.x, q.y), d2);
+        o[2 * j + 1] = __hmul2(make_half2(q.z, q.w), d2);
+    }
+}
+
+void dequant_int8_to_f16(const int8_t* code, const uint16_t* delta, uint16_t* out, int64_t n_blocks, void* stream) {
+    if (n_blocks <= 0) return;
+    dequant_int8_f16_kernel<<<grid((size_t) n_blocks, 256), 256, 0, cs(stream)>>>(
+        code, delta, reinterpret_cast<half*>(out), n_blocks);
+}
+
+void store_int8(const float* x, int8_t* code, uint16_t* delta, int n_kv, int head_dim, int64_t pos, int rows,
+              void* stream) {
+    const int per_row = n_kv * head_dim / kQ8_0Values;
+    const int64_t all = (int64_t) per_row * rows;
+    store_int8_kernel<<<grid((size_t) all, 256), 256, 0, cs(stream)>>>(
+        x, code + (size_t) pos * per_row * kQ8_0Values, delta + (size_t) pos * per_row, all, per_row);
+}
+
+void store_int8_at(const float* x, int8_t* code, uint16_t* delta, int n_kv, int head_dim, int rows,
+                 const long long* at, int ring, void* stream) {
+    const int per_row = n_kv * head_dim / kQ8_0Values;
+    const int64_t all = (int64_t) per_row * rows;
+    store_int8_at_kernel<<<grid((size_t) all, 256), 256, 0, cs(stream)>>>(x, code, delta, all, per_row, at, ring);
 }
 
 void store_q8(const float* x, int8_t* codes, uint16_t* scales, int n, int64_t pos, int rows, void* stream) {
@@ -2448,25 +2968,38 @@ void head_norm_rope(const float* x, int x_stride, const float* w, float* y, int 
 
 void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows, float* score,
             int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window,
-            int ring, bool whole, const long long* at, int room, size_t score_floats, Kvq8 kq8, Kvq8 vq8) {
-    if (at && (whole || room < 1)) throw std::invalid_argument("attend: a position on the card needs its room");
+            int ring, bool whole, const long long* at, int room, size_t score_floats, Kvq8 kq8, Kvq8 vq8,
+            const float* sinks) {
+    if (at && (room < 1 || (whole && rows > chunk)))
+        throw std::invalid_argument("attend: a position on the card needs its room, and with `whole` one launch");
     if (dim % SCORE_VALUES || uintptr_t(q) % (SCORE_VALUES * sizeof(float)) || uintptr_t(kcache) % (SCORE_VALUES * 2))
         throw std::invalid_argument("attend: queries and keys are read four values at a time");
-    const long long last = whole ? pos + rows - 1 : -1;
+    const long long last = !whole ? -1 : at ? -2 : pos + rows - 1;   // -2: the launch's last token (attn_last())
     const int per = n_head / kv_heads;
     const bool kq = kq8.codes != nullptr, vq = vq8.codes != nullptr;
-    // attn_split_kernel, where score has room for every block's sums at the longest the call can attend
+    // attn_split_kernel, a launch as many tokens as score has room for every block's sums of at the longest the call
+    // can attend
     const int most = grid(size_t(at ? room : pos + rows), SPLIT_KEYS);
-    if (dim == 64 && per == 4 && window == 0 && ring == 0 && !whole && !kq && !vq &&
-        size_t(chunk) * n_head * most * (dim + 2) <= score_floats) {
-        for (int first = 0; first < rows; first += chunk) {
-            const int c = std::min(chunk, rows - first);
+    const int fit = (int) std::min<size_t>(chunk, score_floats / (size_t(n_head) * most * (dim + 2)));
+    const bool split64 = dim == 64 && per == 4, split128 = dim == 128 && per == 8;
+    if ((split64 || split128) && window == 0 && ring == 0 && !whole && !kq && !vq && fit > 0) {
+        for (int first = 0, c = 0; first < rows; first += c) {
+            c = std::min(fit, rows - first);
             const int blocks = grid(size_t(at ? room : pos + first + c), SPLIT_KEYS);
-            attn_split_kernel<<<dim3(blocks, kv_heads, c), SPLIT_THREADS, 0, cs(stream)>>>(
-                q, (const half*) kcache, (const half*) vcache, score, n_head, kv_heads, (long long) pos, first, c,
-                scale, blocks, at);
-            attn_join_kernel<<<dim3(n_head, c), JOIN_WARPS * WARP, 0, cs(stream)>>>(score, out, n_head, (long long) pos,
-                                                                                first, c, blocks, at);
+            const dim3 split(blocks, kv_heads, c), join(n_head, c);
+            if (split64) {
+                attn_split_kernel<64, 4><<<split, 4 * WARP, 0, cs(stream)>>>(
+                    q, (const half*) kcache, (const half*) vcache, score, n_head, kv_heads, (long long) pos, first, c,
+                    scale, blocks, at);
+                attn_join_kernel<64><<<join, JOIN_WARPS * WARP, 0, cs(stream)>>>(score, out, n_head, (long long) pos,
+                                                                                 first, c, blocks, at, sinks);
+            } else {
+                attn_split_kernel<128, 8><<<split, 8 * WARP, 0, cs(stream)>>>(
+                    q, (const half*) kcache, (const half*) vcache, score, n_head, kv_heads, (long long) pos, first, c,
+                    scale, blocks, at);
+                attn_join_kernel<128><<<join, JOIN_WARPS * WARP, 0, cs(stream)>>>(score, out, n_head, (long long) pos,
+                                                                                  first, c, blocks, at, sinks);
+            }
         }
         return;
     }
@@ -2511,10 +3044,20 @@ void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int6
         float* wt = per >= 4 && size_t(kv_heads) * blocks * VALUE_QUERIES <= size_t(chunk - c) * n_head
                         ? score + size_t(c) * n_head * keys : nullptr;
         attn_softmax_kernel<<<dim3(n_head, c), 256, 0, cs(stream)>>>(score, keys, (long long) pos, first, c, window,
-                                                                    last, at, wt, per);
+                                                                    last, at, wt, per, sinks);
         // Two blocks of queries a launch block read the values half as often, where the launch still has
         // blocks for most of the card's 36 multiprocessors: for Qwen3.6's two tokens they are half as many and
         // slower, for three or four tokens and for Gemma 4's full layers faster.
+        // The scores are dead after softmax. Reuse them for the partial sums,
+        // leaving the transposed weights behind them intact. Off by default.
+#if defined(STRATA_USE_HIP)
+        if (wt && hip_value_split::requested(std::getenv("STRATA_HIP_VALUE_SPLIT")) &&
+            hip_value_split::fits(dim, n_head, kv_heads, keys, c, window, ring, whole, size_t(wt - score))) {
+            hip_value_split::run(wt, vcache, vq8.codes, vq8.scales, score, out, keys, n_head, kv_heads, first, c,
+                                 (long long) pos, at, (hipStream_t) stream);
+            continue;
+        }
+#endif
         const int dims = grid(dim, VALUE_DIMS);
         if (wt && blocks > 1 && kv_heads * dims * grid(blocks, 2) >= 32) {
             if (vq)
@@ -2565,18 +3108,668 @@ size_t attend_split_floats(int chunk, int n_head, int max_rows, int dim) {
     return size_t(chunk) * n_head * grid(size_t(max_rows), SPLIT_KEYS) * (dim + 2);
 }
 
+// ---------------------------------------------- the int8 attention caches' readers (--kv int8 / int8k)
+
+namespace {
+
+// A Q8_0 block's delta (its two leading bytes, fp16) and the code at `within` of the 32 that follow.  A block is
+// 34 bytes - not a power of two - so a value's place in the cache is an arithmetic offset and not a pointer step,
+// which is why every reader below computes its block instead of advancing a typed pointer.
+__device__ __forceinline__ float q8_delta(const uint8_t* __restrict__ blk) {
+    return __half2float(__ushort_as_half(*reinterpret_cast<const uint16_t*>(blk)));
+}
+__device__ __forceinline__ const int8_t* q8_codes(const uint8_t* __restrict__ blk, int within) {
+    return reinterpret_cast<const int8_t*>(blk + 2 + within);
+}
+
+// A block's delta, and the four codes at `at` of a row as an int for __dp4a.  One load: the codes of a row are
+// back to back, so every four of them is 4-aligned (kQ8_0Values is a multiple of four and a row is n_kv *
+// head_dim codes).
+__device__ __forceinline__ float q8_half(uint16_t h) { return __half2float(__ushort_as_half(h)); }
+__device__ __forceinline__ int q8_pack4(const int8_t* __restrict__ code, int at) {
+    return *reinterpret_cast<const int*>(code + at);
+}
+
+// attn_scores() with both sides in --kv int8's form.  A lane owns a run of dim / WARP of the head's values, a
+// whole number of dp4a steps and no more than one block of them (PER is a divisor of kQ8_0Values here), so the
+// delta is multiplied in once a run.  That is the difference from the interleaved four-a-lane form of the fp16
+// kernel: a step there crossed blocks and scaled every product.  llama.cpp's vec_dot_q8_0_q8_1 has this shape,
+// and it is why a quantized cache need not be read more slowly than an fp16 one.
+template <int N, int PER>   // PER = dim / WARP, the values a lane owns
+__device__ __forceinline__ void attn_scores_q8(const int8_t* __restrict__ qc, const uint16_t* __restrict__ qd,
+                                               const int8_t* __restrict__ kc, const uint16_t* __restrict__ kd,
+                                               float* __restrict__ score, int n_keys, float scale) {
+    static_assert(SCORE_VALUES == 4, "a dp4a takes four codes");
+    static_assert(PER % SCORE_VALUES == 0, "a lane's run is a whole number of dp4a steps");
+    static_assert(kQ8_0Values % PER == 0, "a lane's run lies inside one block, so one delta scales it");
+    constexpr int dim = PER * WARP, pd = dim / kQ8_0Values;
+    const int lane = threadIdx.x % WARP;
+    const int base = lane * PER, block = base / kQ8_0Values;
+    const float dk = q8_half(kd[block]);
+    const int* k4 = reinterpret_cast<const int*>(kc + base);
+    int sumi[N];
+#pragma unroll
+    for (int i = 0; i < N; ++i) sumi[i] = 0;
+#pragma unroll
+    for (int j = 0; j < PER / SCORE_VALUES; ++j)
+#pragma unroll
+        for (int i = 0; i < N; ++i) sumi[i] = STRATA_DP4A(q8_pack4(qc + (size_t) i * dim, base + SCORE_VALUES * j),
+                                                     k4[j], sumi[i]);
+    float acc[N];
+#pragma unroll
+    for (int i = 0; i < N; ++i) acc[i] = (float) sumi[i] * (dk * q8_half(qd[(size_t) i * pd + block]));
+#pragma unroll
+    for (int i = 0; i < N; ++i) {
+        for (int off = WARP / 2; off > 0; off >>= 1) acc[i] += __shfl_down_sync(0xffffffffu, acc[i], off);
+        if (lane == 0) score[size_t(i) * n_keys] = acc[i] * scale;
+    }
+}
+
+// attn_scores_by() with both sides in --kv int8's form.
+template <int N, int PER>
+__device__ __forceinline__ void attn_scores_by_q8(int n, const int8_t* __restrict__ qc,
+                                                  const uint16_t* __restrict__ qd, const int8_t* __restrict__ kc,
+                                                  const uint16_t* __restrict__ kd, float* __restrict__ score,
+                                                  int n_keys, float scale) {
+    constexpr int dim = PER * WARP, pd = dim / kQ8_0Values;
+    for (; n >= N; n -= N, qc += (size_t) N * dim, qd += (size_t) N * pd, score += size_t(N) * n_keys)
+        attn_scores_q8<N, PER>(qc, qd, kc, kd, score, n_keys, scale);
+    if constexpr (N > 1) attn_scores_by_q8<N / 2, PER>(n, qc, qd, kc, kd, score, n_keys, scale);
+}
+
+// attn_scores_q8 for a head NARROWER than a warp: LANES of the warp's lanes own a head (dim = PER * LANES), so its
+// lanes cover WARP / LANES of the group's heads at once and a call walks the queries a round of those at a time.
+// The form above cannot describe such a head, and this is why: a lane must own a whole dp4a step - four codes -
+// and no more than one 32-value block, so PER is 4, 8 or 16 and a head of 64 values needs 4, 8 or 16 lanes.
+// LFM2.5's 24B-A2B has 32 heads of 64 values, 8 of them holding keys, so PER = 8 over 8 lanes - the group's four
+// queries are exactly one round of a warp.  The products, the deltas and the sums are the form above's, and so is
+// the order they are added in: a lane's run is one delta's, and the tree is the same with LANES for WARP (an XOR
+// by less than LANES never leaves a head's own lanes).
+template <int PER, int LANES>
+__device__ __forceinline__ void attn_scores_q8_sub(const int8_t* __restrict__ qc, const uint16_t* __restrict__ qd,
+                                                   const int8_t* __restrict__ kc, const uint16_t* __restrict__ kd,
+                                                   float* __restrict__ score, int n_keys, float scale, int n_q) {
+    static_assert(SCORE_VALUES == 4, "a dp4a takes four codes");
+    static_assert(PER % SCORE_VALUES == 0, "a lane's run is a whole number of dp4a steps");
+    static_assert(kQ8_0Values % PER == 0, "a lane's run lies inside one block, so one delta scales it");
+    static_assert(WARP % LANES == 0 && LANES < WARP, "a head is whole lanes and narrower than a warp");
+    constexpr int dim = PER * LANES, pd = dim / kQ8_0Values, HPW = WARP / LANES;
+    const int lane = threadIdx.x % LANES, half = threadIdx.x / LANES % HPW;
+    const int base = lane * PER, block = base / kQ8_0Values;
+    const float dk = q8_half(kd[block]);
+    const int* k4 = reinterpret_cast<const int*>(kc + base);
+    // The rounds are the warp's, not a lane's: a lane whose head is past the call's queries takes the last one and
+    // only the first of that head's lanes writes it, so every lane keeps its place in the shuffles below.
+    for (int h0 = 0; h0 < n_q; h0 += HPW) {
+        const int h = h0 + half, at = h < n_q ? h : n_q - 1;
+        const int8_t* qch = qc + (size_t) at * dim;
+        const uint16_t* qdh = qd + (size_t) at * pd;
+        int sumi = 0;
+#pragma unroll
+        for (int j = 0; j < PER / SCORE_VALUES; ++j)
+            sumi = STRATA_DP4A(q8_pack4(qch, base + SCORE_VALUES * j), k4[j], sumi);
+        float acc = (float) sumi * (dk * q8_half(qdh[block]));
+#pragma unroll
+        for (int off = LANES / 2; off > 0; off >>= 1) acc += __shfl_xor_sync(0xffffffffu, acc, off);
+        if (lane == 0 && h < n_q) score[(size_t) at * n_keys] = acc * scale;
+    }
+}
+
+// attn_scores_by_q8 for such a head: the same blocking of the call's queries, one round of a warp the block.
+template <int PER, int LANES>
+__device__ __forceinline__ void attn_scores_by_q8_sub(int n, const int8_t* __restrict__ qc,
+                                                      const uint16_t* __restrict__ qd, const int8_t* __restrict__ kc,
+                                                      const uint16_t* __restrict__ kd, float* __restrict__ score,
+                                                      int n_keys, float scale) {
+    constexpr int dim = PER * LANES, pd = dim / kQ8_0Values;
+    for (; n >= SCORE_QUERIES; n -= SCORE_QUERIES, qc += (size_t) SCORE_QUERIES * dim, qd += (size_t) SCORE_QUERIES * pd,
+                          score += (size_t) SCORE_QUERIES * n_keys)
+        attn_scores_q8_sub<PER, LANES>(qc, qd, kc, kd, score, n_keys, scale, SCORE_QUERIES);
+    if (n > 0) attn_scores_q8_sub<PER, LANES>(qc, qd, kc, kd, score, n_keys, scale, n);
+}
+
+// attn_score_kernel with both sides in --kv int8's form: the same warps, the same rows, the same sums.  PER is
+// the values a lane owns, so a head is PER * LANES wide: LANES = WARP for the 128, 256 and 512-value heads this
+// engine's own models have, and fewer for a narrower one (attn_scores_q8_sub above; 24B-A2B is 64 over 8 lanes).
+template <int PER, int LANES = WARP>
+__global__ void attn_score_int8_kernel(const KvInt8 q8, const KvInt8 kq, float* __restrict__ score, int n_keys,
+                                     int n_head, int kv_heads, long long pos, int first, int tokens, float scale,
+                                     int window, int ring, long long last, const long long* __restrict__ at) {
+    constexpr int dim = PER * LANES, pd = dim / kQ8_0Values;
+    const int unit = blockIdx.x * (blockDim.x / WARP) + threadIdx.x / WARP;
+    const int key = unit / kv_heads, g = unit % kv_heads, per = n_head / kv_heads;
+    long long lo;
+    if (key >= attn_span((at ? *at : pos) + first, tokens, window, last, &lo)) return;
+    const long long row = ring > 0 ? (lo + key) % ring : lo + key;
+    const int8_t* kc = kq.code + ((size_t) row * kv_heads + g) * dim;
+    const uint16_t* kd = kq.delta + ((size_t) row * kv_heads + g) * pd;
+    const int8_t* qc = q8.code + (size_t)(first * n_head + g * per) * dim;
+    const uint16_t* qd = q8.delta + (size_t)(first * n_head + g * per) * pd;
+    score += size_t(g) * per * n_keys + key;
+    for (int t = 0; t < tokens;
+         ++t, qc += (size_t) n_head * dim, qd += (size_t) n_head * pd, score += size_t(n_head) * n_keys) {
+        if constexpr (LANES == WARP) attn_scores_by_q8<SCORE_QUERIES, PER>(per, qc, qd, kc, kd, score, n_keys, scale);
+        else attn_scores_by_q8_sub<PER, LANES>(per, qc, qd, kc, kd, score, n_keys, scale);
+    }
+}
+
+// attn_score_reg_kernel's counterpart for --kv int8: a warp takes SCORE_KEYS rows of a group and N of the group's
+// heads at a time, and a token's queries - their codes and their deltas - stay in its registers while it walks the
+// rows.  The plain kernel reads each query's codes again for every row; on a prompt batch (8 queries at once, not
+// the 1 of a decode) that re-read is 8x the traffic, which is the case this exists for.
+template <int N, int PER>
+__global__ void __launch_bounds__(SCORE_WARPS * WARP)
+attn_score_reg_int8_kernel(const KvInt8 q8, const KvInt8 kq, float* __restrict__ score, int n_keys, int n_head,
+                         int kv_heads, long long pos, int first, int tokens, float scale, int window, int ring,
+                         long long last, const long long* __restrict__ at) {
+    static_assert(SCORE_VALUES == 4, "a dp4a takes four codes");
+    static_assert(PER % SCORE_VALUES == 0, "a lane's run is a whole number of dp4a steps");
+    static_assert(kQ8_0Values % PER == 0, "a lane's run lies inside one block, so one delta scales it");
+    constexpr int dim = PER * WARP, STEPS = PER / SCORE_VALUES, pd = dim / kQ8_0Values;
+    const int unit = blockIdx.x * SCORE_WARPS + threadIdx.x / WARP;   // a group's block of rows
+    const int g = unit % kv_heads, k0 = unit / kv_heads * SCORE_KEYS, lane = threadIdx.x % WARP;
+    long long lo;
+    const int span = attn_span((at ? *at : pos) + first, tokens, window, last, &lo);
+    if (k0 >= span) return;
+    const int rows = min(SCORE_KEYS, span - k0), per = n_head / kv_heads;
+    const int base = lane * PER, blk = base / kQ8_0Values;
+    for (int th = 0; th < tokens * per; th += N) {
+        const int t = th / per, h = g * per + th % per;
+        const int8_t* qc = q8.code + ((size_t(first) + t) * n_head + h) * dim + base;
+        const uint16_t* qd = q8.delta + ((size_t(first) + t) * n_head + h) * pd + blk;
+        int qcode[N][STEPS];
+        float qdel[N];
+#pragma unroll
+        for (int i = 0; i < N; ++i) {
+#pragma unroll
+            for (int s = 0; s < STEPS; ++s) qcode[i][s] = q8_pack4(qc + (size_t) i * dim, SCORE_VALUES * s);
+            qdel[i] = q8_half(qd[(size_t) i * pd]);
+        }
+        float* st = score + (size_t(t) * n_head + h) * n_keys + k0;
+        long long row = ring > 0 ? (lo + k0) % ring : lo + k0;
+        for (int r = 0; r < rows; ++r) {
+            const int8_t* kc = kq.code + ((size_t) row * kv_heads + g) * dim + base;
+            const float dk = q8_half(kq.delta[((size_t) row * kv_heads + g) * pd + blk]);
+            int kcode[STEPS];   // the row's codes, read once for the N products they take part in
+#pragma unroll
+            for (int s = 0; s < STEPS; ++s) kcode[s] = q8_pack4(kc, SCORE_VALUES * s);
+            float acc[N];
+#pragma unroll
+            for (int i = 0; i < N; ++i) {
+                int sum = 0;
+#pragma unroll
+                for (int s = 0; s < STEPS; ++s) sum = STRATA_DP4A(qcode[i][s], kcode[s], sum);
+                acc[i] = (float) sum * (dk * qdel[i]);
+            }
+            int which;
+            const float sum = scores_sum<N>(acc, lane, &which);
+            if ((lane & (WARP / N - 1)) == 0) st[size_t(which) * n_keys + r] = sum * scale;
+            if (++row == ring) row = 0;
+        }
+    }
+}
+
+// The int8 tensor-core path.  A warp takes 8 keys of a group against 16 of that group's queries, one m16n8k32 a
+// block of 32 channels, so a 256-wide head is 8 instructions where dp4a needs 256 - 3.4x on the arithmetic
+// (measured by probe_mma_speed).  A lane loads the B fragment for key g and the A fragments for query rows g and
+// g+8; the C block comes back as (query g, key 2*tig), (query g, key 2*tig+1), (query g+8, key 2*tig), (query g+8,
+// key 2*tig+1), which is why the deltas of the columns - not of the loaded key - are the ones that scale it.
+// The last key block and the last query block can reach past the end: those lanes read the last valid row instead
+// and their results are dropped, which is cheaper than a second kernel for the tail.
+template <int PER>
+__global__ void __launch_bounds__(SCORE_WARPS * WARP)
+attn_score_mma_int8_kernel(const KvInt8 q8, const KvInt8 kq, float* __restrict__ score, int n_keys, int n_head,
+                         int kv_heads, long long pos, int first, int tokens, float scale, int window, int ring,
+                         long long last, const long long* __restrict__ at) {
+    static_assert(PER == 8, "this path is written for a head of SCORE_KEYS lanes' worth");
+    constexpr int dim = PER * WARP, pd = dim / kQ8_0Values;
+    const int lane = threadIdx.x % WARP, warp = threadIdx.x / WARP;
+    const int g = lane >> 2, tig = lane & 3;
+    long long lo;
+    const int span = attn_span((at ? *at : pos) + first, tokens, window, last, &lo);
+    const int per = n_head / kv_heads, nq = tokens * per;
+    const int kw_all = (span + SCORE_KEYS - 1) / SCORE_KEYS, qw_all = (nq + 15) / 16;
+    const int widx = blockIdx.x * SCORE_WARPS + warp;
+    if (widx >= kw_all * qw_all * kv_heads) return;
+    // the group changes slowest, the key block next: the 16 queries of a block are what the warps around it reuse
+    const int gk = widx % kv_heads, rest = widx / kv_heads;
+    const int kw = rest % kw_all, qw = rest / kw_all;
+    const int key0 = kw * SCORE_KEYS, q0 = qw * 16;
+    const int keys_real = min(SCORE_KEYS, span - key0);
+    const int qa_row = q0 + g, qb_row = q0 + g + 8;   // the rows of the C block this lane owns
+
+    // A: this lane's share of 16 queries x 32 channels, per block
+    const int qa = min(qa_row, nq - 1), qb = min(qb_row, nq - 1);
+    const int8_t* qpa = q8.code + ((size_t) (first + qa / per) * n_head + gk * per + qa % per) * dim;
+    const int8_t* qpb = q8.code + ((size_t) (first + qb / per) * n_head + gk * per + qb % per) * dim;
+    const uint16_t* qda = q8.delta + ((size_t) (first + qa / per) * n_head + gk * per + qa % per) * pd;
+    const uint16_t* qdb = q8.delta + ((size_t) (first + qb / per) * n_head + gk * per + qb % per) * pd;
+    // B: key g of the block; the deltas of the columns (2*tig and 2*tig+1) are read separately
+    const long long krow = lo + min(key0 + g, span - 1);
+    const int8_t* kp = kq.code + ((size_t) (ring > 0 ? krow % ring : krow) * kv_heads + gk) * dim;
+    const long long ka_row = lo + min(key0 + tig * 2, span - 1);
+    const long long kb_row = lo + min(key0 + tig * 2 + 1, span - 1);
+    const uint16_t* kda = kq.delta + ((size_t) (ring > 0 ? ka_row % ring : ka_row) * kv_heads + gk) * pd;
+    const uint16_t* kdb = kq.delta + ((size_t) (ring > 0 ? kb_row % ring : kb_row) * kv_heads + gk) * pd;
+
+    float acc0 = 0.0f, acc1 = 0.0f, acc2 = 0.0f, acc3 = 0.0f;
+#pragma unroll
+    for (int b = 0; b < pd; ++b) {
+        const unsigned a0 = *reinterpret_cast<const unsigned*>(qpa + b * kQ8_0Values + tig * 4);
+        const unsigned a1 = *reinterpret_cast<const unsigned*>(qpb + b * kQ8_0Values + tig * 4);
+        const unsigned a2 = *reinterpret_cast<const unsigned*>(qpa + b * kQ8_0Values + 16 + tig * 4);
+        const unsigned a3 = *reinterpret_cast<const unsigned*>(qpb + b * kQ8_0Values + 16 + tig * 4);
+        const unsigned b0 = *reinterpret_cast<const unsigned*>(kp + b * kQ8_0Values + tig * 4);
+        const unsigned b1 = *reinterpret_cast<const unsigned*>(kp + b * kQ8_0Values + 16 + tig * 4);
+        int c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+        mma_s8(c0, c1, c2, c3, a0, a1, a2, a3, b0, b1);
+        const float dq0 = q8_half(qda[b]), dq1 = q8_half(qdb[b]);
+        const float dk0 = q8_half(kda[b]), dk1 = q8_half(kdb[b]);
+        acc0 += (float) c0 * (dq0 * dk0);
+        acc1 += (float) c1 * (dq0 * dk1);
+        acc2 += (float) c2 * (dq1 * dk0);
+        acc3 += (float) c3 * (dq1 * dk1);
+    }
+    const int key_hi = key0 + keys_real;
+    const auto put = [&](int qrow, int key, float v) {
+        if (qrow >= nq || key >= key_hi) return;
+        score[(size_t) ((size_t) (qrow / per) * n_head + gk * per + qrow % per) * n_keys + key] = v * scale;
+    };
+    put(qa_row, key0 + tig * 2, acc0);
+    put(qa_row, key0 + tig * 2 + 1, acc1);
+    put(qb_row, key0 + tig * 2, acc2);
+    put(qb_row, key0 + tig * 2 + 1, acc3);
+}
+
+// attn_values() with the values in --kv int8's form: the thread's value is one code and its block's delta.  vc and
+// vd are the cache's two arrays, head_c/head_d the head's start in each, d the value within the head.
+template <int N>
+__device__ __forceinline__ void attn_values_q8(const float* __restrict__ w, const int8_t* __restrict__ vc,
+                                               const uint16_t* __restrict__ vd, size_t row_c, size_t row_d,
+                                               size_t head_c, size_t head_d, long long row, int ring, int d,
+                                               int span, float* sums) {
+    float acc[N];
+#pragma unroll
+    for (int i = 0; i < N; ++i) acc[i] = 0.0f;
+    const int8_t* c = vc + size_t(row) * row_c + head_c + d;
+    const uint16_t* q = vd + size_t(row) * row_d + head_d + d / kQ8_0Values;
+    for (int j = threadIdx.x / VALUE_DIMS; j < span; j += VALUE_SHARES) {
+        const float x = (float) (*c) * q8_half(*q);
+        const float weight = w[j];
+#pragma unroll
+        for (int i = 0; i < N; ++i) acc[i] += __shfl_sync(0xffffffffu, weight, i) * x;
+        c += VALUE_SHARES * row_c;
+        q += VALUE_SHARES * row_d;
+        row += VALUE_SHARES;
+        if (ring > 0 && row >= ring) row -= ring, c -= size_t(ring) * row_c, q -= size_t(ring) * row_d;
+    }
+#pragma unroll
+    for (int i = 0; i < N; ++i) sums[i] = acc[i];
+}
+
+template <int N>
+__device__ __forceinline__ void attn_values_for_int8(int n, const float* __restrict__ w, const int8_t* __restrict__ vc,
+                                                   const uint16_t* __restrict__ vd, size_t row_c, size_t row_d,
+                                                   size_t head_c, size_t head_d, long long row, int ring, int d,
+                                                   int span, float* sums) {
+    if constexpr (N > 1)
+        if (n <= N / 2)
+            return attn_values_for_int8<N / 2>(n, w, vc, vd, row_c, row_d, head_c, head_d, row, ring, d, span, sums);
+    attn_values_q8<N>(w, vc, vd, row_c, row_d, head_c, head_d, row, ring, d, span, sums);
+}
+
+// attn_value_kernel with the values in --kv int8's form: a head's row is dim codes and dim / kQ8_0Values deltas.
+__global__ void attn_value_int8_kernel(const float* __restrict__ score, const KvInt8 v, float* __restrict__ out,
+                                     int n_keys, int dim, int n_head, int kv_heads, long long pos, int first,
+                                     int tokens, int window, int ring, long long last,
+                                     const long long* __restrict__ at) {
+    static_assert(VALUE_DIMS == WARP && VALUE_QUERIES <= WARP, "a warp is a share and reads a query's weight a lane");
+    __shared__ float share[VALUE_QUERIES][VALUE_SHARES][VALUE_DIMS];
+    const int pd = dim / kQ8_0Values;
+    const int per = n_head / kv_heads, dims = (dim + VALUE_DIMS - 1) / VALUE_DIMS;
+    const int g = blockIdx.x / dims, q0 = blockIdx.y * VALUE_QUERIES;
+    const int live = min(VALUE_QUERIES, tokens * per - q0);
+    const int lane = threadIdx.x % VALUE_DIMS, s = threadIdx.x / VALUE_DIMS;
+    const int d = (blockIdx.x % dims) * VALUE_DIMS + lane;
+    const long long p = (at ? *at : pos) + first;
+    long long lo;
+    const int span = attn_span(p, tokens, window, last, &lo);
+    const int mine = q0 + min(lane % VALUE_QUERIES, live - 1);
+    const size_t row_c = (size_t) kv_heads * dim, row_d = (size_t) kv_heads * pd;
+    float sums[VALUE_QUERIES];
+    attn_values_for_int8<VALUE_QUERIES>(live, score + (size_t(mine / per) * n_head + g * per + mine % per) * n_keys,
+                                     v.code, v.delta, row_c, row_d, (size_t) g * dim, (size_t) g * pd,
+                                     ring > 0 ? (lo + s) % ring : lo + s, ring, min(d, dim - 1), span, sums);
+    for (int i = 0; i < live; ++i) {
+        long long own;
+        attn_rows(p + (q0 + i) / per, window, last, &own);
+        share[i][(s + VALUE_SHARES - int((own - lo) % VALUE_SHARES)) % VALUE_SHARES][lane] = sums[i];
+    }
+    __syncthreads();
+    if (s != 0 || d >= dim) return;
+    for (int i = 0; i < live; ++i) {
+        float sum = share[i][0][lane];
+        for (int k = 1; k < VALUE_SHARES; ++k) sum += share[i][k][lane];
+        const int query = q0 + i;
+        out[((size_t(first) + query / per) * n_head + g * per + query % per) * dim + d] = sum;
+    }
+}
+
+}  // namespace
+
+void attend_int8(const float* q, KvInt8 q8, KvInt8 k, KvInt8 v, int64_t pos, int rows, float* score, int chunk,
+               float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window, int ring,
+               bool whole, const long long* at, int room) {
+    if (at && (whole || room < 1)) throw std::invalid_argument("attend_int8: a position on the card needs its room");
+    if (uintptr_t(q) % (SCORE_VALUES * sizeof(float)))
+        throw std::invalid_argument("attend_int8: queries are read four values at a time");
+    const long long last = whole ? pos + rows - 1 : -1;
+    const int per = n_head / kv_heads;
+    for (int first = 0; first < rows; first += chunk) {
+        const int c = std::min(chunk, rows - first);
+        // this chunk's queries in the cache's own form, at the rows the score kernel will look them up at
+        store_int8(q + (size_t) first * n_head * dim, const_cast<int8_t*>(q8.code),
+                   const_cast<uint16_t*>(q8.delta), n_head, dim, first, c, stream);
+        const long long p = pos + first, lo = window > 0 && p >= window ? p - window + 1 : 0;
+        const int keys = at ? room : int((whole ? last : p + c - 1) - lo) + 1;
+        // One warp is a (key, group) pair, so the grid is the pairs over the warps a block holds - the plain
+        // kernel's own sizing.  (The register-blocked fp16 kernel also wrote `grid(units, SCORE_WARPS)` there,
+        // but its `units` was already a warp count; copying that line here sized the grid a quarter too small
+        // and left every key past the fourth without a score at all.)
+        const unsigned threads = SCORE_WARPS * WARP;
+        const auto go = [&](auto kernel) {
+            kernel<<<grid(size_t(keys) * kv_heads, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+        };
+        // The head's size is the template: a lane owns dim / WARP of the head's values, the run the dp4a walks.
+        // go is the plain kernel, kept as the fallback for a group whose heads do not divide by 4.
+        {
+            const auto reg = [&](auto kernel) {   // this one's units are a warp count, not a block count
+                const unsigned units = grid(size_t(keys), SCORE_KEYS) * kv_heads;
+                kernel<<<grid(units, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                    q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+            };
+            // The register-blocked kernel is the default: a warp walks SCORE_KEYS rows while a token's queries (and
+            // their codes and deltas) stay in its registers, which on a prompt batch - 8 queries at once rather than
+            // a decode's 1 - takes q8 from 1.37x of fp16 to 0.99x at 8k keys and from 1.24x to 0.88x at 32k.
+            // (An earlier note here said the plain kernel won; that comparison ran the plain one with a grid a
+            // quarter too small, so it was doing a quarter of the work.  Set STRATA_KV_REG=0 to get it back.)
+            // The tensor-core path is the default up to 16k keys: the A/B has it 5~7% ahead of the register-blocked
+            // one there (the gap is widest on a prompt batch of 8 queries) and level with it past that, where the
+            // register-blocked one also uses fewer registers.  STRATA_KV_MMA=1 forces it everywhere, =0 turns it
+            // off; unset means pick by size.  A card whose int8 mma is missing should answer probe_mma_layout()
+            // instead, once that is wired in.
+            static const char* mma_env = std::getenv("STRATA_KV_MMA");
+            const int mma_choice = mma_env ? std::atoi(mma_env) : -1;
+            // a card without the int8 mma steps (HIP, or a PTX version below 8.0) takes the dp4a tiers instead:
+            // STRATA_KV_MMA cannot force it there, since the kernel would not load
+            const bool use_mma = int8_tensor_cores() && dim == 256 && mma_choice != 0 &&
+                                     (mma_choice > 0 || keys <= 16384);
+            const auto mgo = [&](auto kernel) {
+                const unsigned warps =
+                    grid(size_t(keys), SCORE_KEYS) * grid(size_t(c * per), 16) * kv_heads;   // a warp: 8 keys x 16
+                kernel<<<grid(warps, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                    q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+            };
+            static const char* reg_env = std::getenv("STRATA_KV_REG");
+            const bool use_reg = !reg_env || std::atoi(reg_env) != 0;
+            if (use_mma) mgo(attn_score_mma_int8_kernel<256 / WARP>);
+            else if (use_reg && dim == 256 && per % 8 == 0) reg(attn_score_reg_int8_kernel<8, 256 / WARP>);
+            else if (use_reg && dim == 256 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 256 / WARP>);
+            else if (use_reg && dim == 128 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 128 / WARP>);
+            else if (use_reg && dim == 512 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 512 / WARP>);
+            else if (dim == 128) go(attn_score_int8_kernel<128 / WARP>);
+            else if (dim == 256) go(attn_score_int8_kernel<256 / WARP>);
+            else if (dim == 512) go(attn_score_int8_kernel<512 / WARP>);
+            // a head narrower than a warp: 8 lanes own it, a lane's run is 8 codes (two dp4a steps, inside one
+            // 32-value block), and the warp's 32 lanes cover the group's four queries in one round
+            else if (dim == 64) go(attn_score_int8_kernel<8, 8>);
+            else throw std::invalid_argument("attend_int8: a head is 64, 128, 256 or 512 values");
+        }
+        // the weights in place: attn_value_int8_kernel reads them from the scores' buffer, so no transposed copy
+        attn_softmax_kernel<<<dim3(n_head, c), 256, 0, cs(stream)>>>(score, keys, (long long) pos, first, c,
+                                                                     window, last, at, nullptr, per, nullptr);
+        {
+            const int dims = grid(dim, VALUE_DIMS), blocks = grid(c * per, VALUE_QUERIES);
+            attn_value_int8_kernel<<<dim3(kv_heads * dims, blocks), VALUE_DIMS * VALUE_SHARES, 0, cs(stream)>>>(
+                score, v, out, keys, dim, n_head, kv_heads, (long long) pos, first, c, window, ring, last, at);
+        }
+    }
+}
+
+// attend_int8 with the values' side left in fp16 (--kv int8k): everything is the one above but the weighted
+// sums, which read the fp16 cache the way attend() does.  `v_h` is `n_kv * dim` halves a row, the ring's.
+void attend_int8_mixed(const float* q, KvInt8 q8, KvInt8 k, const uint16_t* v_h, int64_t pos, int rows, float* score, int chunk,
+               float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window, int ring,
+               bool whole, const long long* at, int room) {
+    if (at && (whole || room < 1)) throw std::invalid_argument("attend_int8: a position on the card needs its room");
+    if (uintptr_t(q) % (SCORE_VALUES * sizeof(float)))
+        throw std::invalid_argument("attend_int8: queries are read four values at a time");
+    const long long last = whole ? pos + rows - 1 : -1;
+    const int per = n_head / kv_heads;
+    for (int first = 0; first < rows; first += chunk) {
+        const int c = std::min(chunk, rows - first);
+        // this chunk's queries in the cache's own form, at the rows the score kernel will look them up at
+        store_int8(q + (size_t) first * n_head * dim, const_cast<int8_t*>(q8.code),
+                   const_cast<uint16_t*>(q8.delta), n_head, dim, first, c, stream);
+        const long long p = pos + first, lo = window > 0 && p >= window ? p - window + 1 : 0;
+        const int keys = at ? room : int((whole ? last : p + c - 1) - lo) + 1;
+        // One warp is a (key, group) pair, so the grid is the pairs over the warps a block holds - the plain
+        // kernel's own sizing.  (The register-blocked fp16 kernel also wrote `grid(units, SCORE_WARPS)` there,
+        // but its `units` was already a warp count; copying that line here sized the grid a quarter too small
+        // and left every key past the fourth without a score at all.)
+        const unsigned threads = SCORE_WARPS * WARP;
+        const auto go = [&](auto kernel) {
+            kernel<<<grid(size_t(keys) * kv_heads, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+        };
+        // The head's size is the template: a lane owns dim / WARP of the head's values, the run the dp4a walks.
+        // go is the plain kernel, kept as the fallback for a group whose heads do not divide by 4.
+        {
+            const auto reg = [&](auto kernel) {   // this one's units are a warp count, not a block count
+                const unsigned units = grid(size_t(keys), SCORE_KEYS) * kv_heads;
+                kernel<<<grid(units, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                    q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+            };
+            // The register-blocked kernel is the default: a warp walks SCORE_KEYS rows while a token's queries (and
+            // their codes and deltas) stay in its registers, which on a prompt batch - 8 queries at once rather than
+            // a decode's 1 - takes q8 from 1.37x of fp16 to 0.99x at 8k keys and from 1.24x to 0.88x at 32k.
+            // (An earlier note here said the plain kernel won; that comparison ran the plain one with a grid a
+            // quarter too small, so it was doing a quarter of the work.  Set STRATA_KV_REG=0 to get it back.)
+            // The tensor-core path is the default up to 16k keys: the A/B has it 5~7% ahead of the register-blocked
+            // one there (the gap is widest on a prompt batch of 8 queries) and level with it past that, where the
+            // register-blocked one also uses fewer registers.  STRATA_KV_MMA=1 forces it everywhere, =0 turns it
+            // off; unset means pick by size.  A card whose int8 mma is missing should answer probe_mma_layout()
+            // instead, once that is wired in.
+            static const char* mma_env = std::getenv("STRATA_KV_MMA");
+            const int mma_choice = mma_env ? std::atoi(mma_env) : -1;
+            // a card without the int8 mma steps (HIP, or a PTX version below 8.0) takes the dp4a tiers instead:
+            // STRATA_KV_MMA cannot force it there, since the kernel would not load
+            const bool use_mma = int8_tensor_cores() && dim == 256 && mma_choice != 0 &&
+                                     (mma_choice > 0 || keys <= 16384);
+            const auto mgo = [&](auto kernel) {
+                const unsigned warps =
+                    grid(size_t(keys), SCORE_KEYS) * grid(size_t(c * per), 16) * kv_heads;   // a warp: 8 keys x 16
+                kernel<<<grid(warps, SCORE_WARPS), threads, 0, cs(stream)>>>(
+                    q8, k, score, keys, n_head, kv_heads, (long long) pos, first, c, scale, window, ring, last, at);
+            };
+            static const char* reg_env = std::getenv("STRATA_KV_REG");
+            const bool use_reg = !reg_env || std::atoi(reg_env) != 0;
+            if (use_mma) mgo(attn_score_mma_int8_kernel<256 / WARP>);
+            else if (use_reg && dim == 256 && per % 8 == 0) reg(attn_score_reg_int8_kernel<8, 256 / WARP>);
+            else if (use_reg && dim == 256 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 256 / WARP>);
+            else if (use_reg && dim == 128 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 128 / WARP>);
+            else if (use_reg && dim == 512 && per % 4 == 0) reg(attn_score_reg_int8_kernel<4, 512 / WARP>);
+            else if (dim == 128) go(attn_score_int8_kernel<128 / WARP>);
+            else if (dim == 256) go(attn_score_int8_kernel<256 / WARP>);
+            else if (dim == 512) go(attn_score_int8_kernel<512 / WARP>);
+            // a head narrower than a warp: 8 lanes own it, a lane's run is 8 codes (two dp4a steps, inside one
+            // 32-value block), and the warp's 32 lanes cover the group's four queries in one round
+            else if (dim == 64) go(attn_score_int8_kernel<8, 8>);
+            else throw std::invalid_argument("attend_int8: a head is 64, 128, 256 or 512 values");
+        }
+        // the weights in place: attn_value_kernel reads them from the scores' buffer, so no transposed copy
+        attn_softmax_kernel<<<dim3(n_head, c), 256, 0, cs(stream)>>>(score, keys, (long long) pos, first, c,
+                                                                     window, last, at, nullptr, per, nullptr);
+        {
+            const int dims = grid(dim, VALUE_DIMS), blocks = grid(c * per, VALUE_QUERIES);
+            attn_value_kernel<<<dim3(kv_heads * dims, blocks), VALUE_DIMS * VALUE_SHARES, 0, cs(stream)>>>(
+                score, (const half*) v_h, out, keys, dim, n_head, kv_heads, (long long) pos, first, c, window, ring,
+                last, at);
+        }
+    }
+}
+
+namespace {
+
+__global__ void mma_probe_kernel(const int8_t* __restrict__ A, const int8_t* __restrict__ B, int* __restrict__ C) {
+    const int lane = threadIdx.x % 32, g = lane >> 2, tig = lane & 3;
+    const unsigned a0 = *reinterpret_cast<const unsigned*>(A + g * 32 + tig * 4);
+    const unsigned a1 = *reinterpret_cast<const unsigned*>(A + (g + 8) * 32 + tig * 4);
+    const unsigned a2 = *reinterpret_cast<const unsigned*>(A + g * 32 + 16 + tig * 4);
+    const unsigned a3 = *reinterpret_cast<const unsigned*>(A + (g + 8) * 32 + 16 + tig * 4);
+    const unsigned b0 = *reinterpret_cast<const unsigned*>(B + g * 32 + tig * 4);
+    const unsigned b1 = *reinterpret_cast<const unsigned*>(B + g * 32 + 16 + tig * 4);
+    int c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+    mma_s8(c0, c1, c2, c3, a0, a1, a2, a3, b0, b1);
+    C[g * 8 + tig * 2] = c0;
+    C[g * 8 + tig * 2 + 1] = c1;
+    C[(g + 8) * 8 + tig * 2] = c2;
+    C[(g + 8) * 8 + tig * 2 + 1] = c3;
+}
+
+}  // namespace
+
+bool int8_tensor_cores() { return kernels_ptx() >= 80; }
+
+bool probe_mma_layout() {
+    int8_t A[16 * 32], B[8 * 32];
+    for (int i = 0; i < 16 * 32; ++i) A[i] = (int8_t) ((i % 17) - 8);
+    for (int i = 0; i < 8 * 32; ++i) B[i] = (int8_t) ((i % 13) - 6);
+    int want[16 * 8], got[16 * 8];
+    for (int m = 0; m < 16; ++m)
+        for (int n = 0; n < 8; ++n) {
+            int s = 0;
+            for (int k = 0; k < 32; ++k) s += (int) A[m * 32 + k] * (int) B[n * 32 + k];
+            want[m * 8 + n] = s;
+        }
+    int8_t *dA = nullptr, *dB = nullptr;
+    int* dC = nullptr;
+    cudaMalloc(&dA, sizeof A);
+    cudaMalloc(&dB, sizeof B);
+    cudaMalloc(&dC, sizeof got);
+    cudaMemcpy(dA, A, sizeof A, cudaMemcpyHostToDevice);
+    cudaMemcpy(dB, B, sizeof B, cudaMemcpyHostToDevice);
+    mma_probe_kernel<<<1, 32>>>(dA, dB, dC);
+    cudaMemcpy(got, dC, sizeof got, cudaMemcpyDeviceToHost);   // an implicit sync
+    cudaFree(dA);
+    cudaFree(dB);
+    cudaFree(dC);
+    int bad = 0;
+    for (int i = 0; i < 128; ++i)
+        if (got[i] != want[i]) ++bad;
+    std::fprintf(stderr, "[mma probe] %d of 128 wrong\n", bad);
+    return bad == 0;
+}
+
+// The same 16x8x256 product twice over: eight m16n8k32 on the tensor cores, against the 256 dp4a it takes to do
+// the same number of multiply-accumulates on the CUDA cores.
+__global__ void mma_speed_kernel(const int8_t* __restrict__ A, const int8_t* __restrict__ B, int* __restrict__ C,
+                                 int iters) {
+    const int lane = threadIdx.x % 32, g = lane >> 2, tig = lane & 3;
+    const unsigned a0 = *reinterpret_cast<const unsigned*>(A + g * 32 + tig * 4);
+    const unsigned a1 = *reinterpret_cast<const unsigned*>(A + (g + 8) * 32 + tig * 4);
+    const unsigned a2 = *reinterpret_cast<const unsigned*>(A + g * 32 + 16 + tig * 4);
+    const unsigned a3 = *reinterpret_cast<const unsigned*>(A + (g + 8) * 32 + 16 + tig * 4);
+    const unsigned b0 = *reinterpret_cast<const unsigned*>(B + g * 32 + tig * 4);
+    const unsigned b1 = *reinterpret_cast<const unsigned*>(B + g * 32 + 16 + tig * 4);
+    int c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+    for (int i = 0; i < iters; ++i) {
+#pragma unroll
+        for (int j = 0; j < 8; ++j) mma_s8(c0, c1, c2, c3, a0, a1, a2, a3, b0, b1);
+    }
+    C[g * 8 + tig * 2] = c0 + c1 + c2 + c3;
+}
+
+__global__ void dp4a_speed_kernel(const int8_t* __restrict__ A, const int8_t* __restrict__ B, int* __restrict__ C,
+                                  int iters) {
+    const int lane = threadIdx.x % 32;
+    const int xa = *reinterpret_cast<const int*>(A + (lane % 16) * 32 + (lane % 8) * 4);
+    const int xb = *reinterpret_cast<const int*>(B + (lane % 8) * 32 + (lane % 8) * 4);
+    int a0 = 0, a1 = 0, a2 = 0, a3 = 0;   // four chains, so the result is not one long dependency
+    for (int i = 0; i < iters; ++i) {
+#pragma unroll
+        for (int j = 0; j < 64; ++j) {
+            a0 = STRATA_DP4A(xa, xb, a0);
+            a1 = STRATA_DP4A(xa, xb, a1);
+            a2 = STRATA_DP4A(xa, xb, a2);
+            a3 = STRATA_DP4A(xa, xb, a3);
+        }
+    }
+    C[lane] = (a0 + a1) + (a2 + a3);
+}
+
+void probe_mma_speed(double* mma_ms, double* dp4a_ms) {
+    int8_t A[16 * 32], B[8 * 32];
+    for (int i = 0; i < 16 * 32; ++i) A[i] = (int8_t) ((i % 17) - 8);
+    for (int i = 0; i < 8 * 32; ++i) B[i] = (int8_t) ((i % 13) - 6);
+    int8_t *dA = nullptr, *dB = nullptr;
+    int* dC = nullptr;
+    cudaMalloc(&dA, sizeof A);
+    cudaMalloc(&dB, sizeof B);
+    cudaMalloc(&dC, 32 * sizeof(int));
+    cudaMemcpy(dA, A, sizeof A, cudaMemcpyHostToDevice);
+    cudaMemcpy(dB, B, sizeof B, cudaMemcpyHostToDevice);
+    const int iters = 20000, blocks = 384;   // 384 warps: enough to fill the card
+    cudaEvent_t e0, e1;
+    cudaEventCreate(&e0);
+    cudaEventCreate(&e1);
+    mma_speed_kernel<<<blocks, 32>>>(dA, dB, dC, 10);
+    dp4a_speed_kernel<<<blocks, 32>>>(dA, dB, dC, 10);
+    float tm = 0.0f, td = 0.0f;
+    cudaEventRecord(e0, nullptr);
+    mma_speed_kernel<<<blocks, 32>>>(dA, dB, dC, iters);
+    cudaEventRecord(e1, nullptr);
+    cudaEventSynchronize(e1);
+    cudaEventElapsedTime(&tm, e0, e1);
+    cudaEventRecord(e0, nullptr);
+    dp4a_speed_kernel<<<blocks, 32>>>(dA, dB, dC, iters);
+    cudaEventRecord(e1, nullptr);
+    cudaEventSynchronize(e1);
+    cudaEventElapsedTime(&td, e0, e1);
+    *mma_ms = tm;
+    *dp4a_ms = td;
+    cudaEventDestroy(e0);
+    cudaEventDestroy(e1);
+    cudaFree(dA);
+    cudaFree(dB);
+    cudaFree(dC);
+}
+
 void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows,
                   float* score, size_t score_floats, float* work, float* out, int dim, int n_head, int kv_heads,
                   float scale, void* stream, int window, int ring, bool whole, Kvq8 kq8, Kvq8 vq8, uint16_t* kwork,
-                  uint16_t* vwork, size_t work_halves) {
+                  uint16_t* vwork, size_t work_halves, const float* sinks) {
     const int per = n_head / kv_heads, width = kv_heads * dim;
     // The fp16-only dim==64 fast path reads the fp16 caches, which are null under q8 (a q8 cache is load-restricted
     // to qwen35moe's head_dim 128, so it never reaches here); guard explicitly so it is provably not taken for q8.
-    if (dim == 64 && per == 4 && window == 0 && ring == 0 && !whole && kq8.codes == nullptr && vq8.codes == nullptr &&
+    if (dim == 64 && per == 4 && window == 0 && ring == 0 && !whole && !sinks && kq8.codes == nullptr &&
+        vq8.codes == nullptr &&
         tensor_cores()) {
         attn_flash64_kernel<<<dim3(grid(rows, FLASH_TOKENS), kv_heads), 4 * WARP, 0, cs(stream)>>>(
             q, (const half*) kcache, (const half*) vcache, out, rows, n_head, kv_heads, (long long) pos,
             scale * 1.44269504f);
+        return;
+    }
+    if (dim == 128 && per == 8 && !whole && kq8.codes == nullptr && vq8.codes == nullptr && kernels_ptx() >= 80) {
+        // the device's own setting: asked on whichever card the call is for
+        const cudaError_t e =
+            cudaFuncSetAttribute(attn_flash128_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, FLASH128_SMEM);
+        if (e != cudaSuccess)
+            throw std::runtime_error(std::string("attend_batch: shared memory: ") + cudaGetErrorString(e));
+        attn_flash128_kernel<<<dim3(grid(rows, FLASH128_TOKENS), kv_heads), 4 * WARP, FLASH128_SMEM, cs(stream)>>>(
+            q, (const half*) kcache, (const half*) vcache, out, rows, n_head, kv_heads, (long long) pos,
+            scale * 1.44269504f, window, ring, sinks);
         return;
     }
     const cublasHandle_t h = (cublasHandle_t) blas;
@@ -2636,7 +3829,7 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
             blas_ck(cublasGemmStridedBatchedEx(h, CUBLAS_OP_T, CUBLAS_OP_N, m, (int) cols, dim, &scale,
                                                krow, CUDA_R_16F, width, dim, qg,
                                                CUDA_R_16F, dim, cols * dim, &zero, score, CUDA_R_32F, m, cols * m,
-                                               kv_heads, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                                               kv_heads, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT),
                     "attention scores");
             attn_softmax_block_kernel<<<c * n_head, 128, 0, cs(stream)>>>(score, weight, m, lo0 + k0, (long long) pos,
                                                                          first, window, c, per, last, top, sum,
@@ -2647,9 +3840,12 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
                                                vrow, CUDA_R_16F, width, dim,
                                                weight, CUDA_R_16F, m, cols * m, k0 > 0 ? &one : &zero, og, CUDA_R_32F,
                                                dim, cols * dim, kv_heads, CUBLAS_COMPUTE_32F,
-                                               CUBLAS_GEMM_DEFAULT_TENSOR_OP),
+                                               CUBLAS_GEMM_DEFAULT),
                     "attention values");
         }
+        if (sinks)
+            attn_sink_sum_kernel<<<grid(c * n_head, 256), 256, 0, cs(stream)>>>(sum, top, sinks, c * n_head, per,
+                                                                              int(cols));
         attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, sum, dim, true);
         attn_ungroup_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(
             og, out + size_t(first) * n_head * dim, dim, n_head, kv_heads, c);
@@ -2696,6 +3892,40 @@ void shortconv(const float* bcx, float* state, const float* w, float* out, int c
         throw std::runtime_error(std::string("shortconv: ") + cudaGetErrorString(e));
 }
 
+#ifdef STRATA_POLY_GDN_MMA
+bool gdn_mma_step(float* qkv, float* alpha, float* beta, const float* dt, const float* a, float* s,
+                  const float* z, const float* o_norm, float* out, int dim, int n_head, int k_heads, int rows,
+                  float norm_eps, void* stream, bool snapshots) {
+    if (!kernels::gdn_mma_shape(dim, n_head, k_heads, rows, snapshots)) return false;
+    const size_t keys = size_t(k_heads) * dim, row = (2 * size_t(k_heads) + n_head) * dim;
+    kernels::GdnMmaArgs args{};
+    args.q = qkv;
+    args.k = qkv + keys;
+    args.v = qkv + 2 * keys;
+    args.log_decay = alpha;
+    args.beta = beta;
+    args.state = args.state_out = s;
+    args.output = out;
+    args.dim = dim;
+    args.heads = n_head;
+    args.key_heads = k_heads;
+    args.rows = rows;
+    args.qk_row_stride = args.v_row_stride = row;
+    args.gate_row_stride = n_head;
+    // Poly's normalization already includes 1/sqrt(dim) in Q.
+    args.query_scale = 1.f;
+    if (!kernels::gdn_mma_supported(args) || !kernels::gdn_mma_available(dim, n_head, k_heads)) return false;
+    gdn_norm_kernel<<<rows * k_heads, dim, 0, cs(stream)>>>(qkv, dim, k_heads, row, norm_eps);
+    gdn_log_gates_kernel<<<grid(rows * n_head, 256), 256, 0, cs(stream)>>>(alpha, beta, dt, a, n_head, rows * n_head);
+    // Preparation mutates Q/K and gates. Never run stock on these modified inputs
+    // if device availability unexpectedly changes after the preflight above.
+    if (!kernels::gdn_mma_try(args, stream))
+        throw std::runtime_error("GDN MMA: prepared execution became unavailable");
+    gdn_out_kernel<<<rows * n_head, dim, 0, cs(stream)>>>(out, z, o_norm, dim, norm_eps);
+    return true;
+}
+#endif
+
 void gdn_step(float* qkv, float* alpha, float* beta, const float* dt, const float* a, float* s, const float* z,
               const float* o_norm, float* out, int dim, int n_head, int k_heads, int rows, float norm_eps, void* stream,
               float* snap, size_t stride, unsigned snaps) {
@@ -2719,6 +3949,37 @@ void gdn_step(float* qkv, float* alpha, float* beta, const float* dt, const floa
                                                                   snap, stride, sn);
     }
     gdn_out_kernel<<<rows * n_head, dim, 0, cs(stream)>>>(out, z, o_norm, dim, norm_eps);
+}
+
+void conv4_block_silu(const float* x, const float* state, const float* w, const float* right, float* out,
+                      int channels, int rows, void* stream) {
+    if (rows <= 0) return;
+    conv4_block_silu_kernel<<<grid(channels, 256), 256, 0, cs(stream)>>>(x, state, w, right, out, channels, rows);
+}
+
+void gdn_block(float* qkv, float* alpha, float* beta, const float* dt, const float* a, const float* s,
+               const float* z, const float* o_norm, const float* logit_scale, const float* hist_b,
+               const float* hist_c, float* out, float* w, int dim, int n_head, int k_heads, int rows,
+               float norm_eps, void* stream) {
+    if (dim % WARP != 0 || dim > 256) throw std::invalid_argument("gdn_block: a head of 32 to 256 values, in 32s");
+    const size_t shared = (2 * size_t(rows) * dim + size_t(rows) * (rows + 1)) * sizeof(float);
+    if (rows < 1 || rows > 32 || shared > 48 * 1024)
+        throw std::invalid_argument("gdn_block: 1 to 32 tokens whose queries and keys fit 48 KiB");
+    const size_t row_n = (2 * size_t(k_heads) + n_head) * dim;
+    const int gates = rows * n_head, columns = std::min(dim, 1024 / WARP);
+    gdn_norm_kernel<<<rows * k_heads, dim, 0, cs(stream)>>>(qkv, dim, k_heads, row_n, norm_eps);
+    gdn_gates_kernel<<<grid(gates, 256), 256, 0, cs(stream)>>>(alpha, beta, dt, a, n_head, gates);
+    gdn_block_weights_kernel<<<n_head, 256, shared, cs(stream)>>>(qkv, logit_scale, hist_b, hist_c, w, dim, n_head,
+                                                                 k_heads, rows);
+    const int blocks = n_head * ((dim + columns - 1) / columns), threads = columns * WARP;
+    gdn_block_out_kernel<<<blocks, threads, 0, cs(stream)>>>(qkv, alpha, s, w, out, dim, n_head, k_heads, rows);
+    gdn_out_kernel<<<rows * n_head, dim, 0, cs(stream)>>>(out, z, o_norm, dim, norm_eps);
+}
+
+void coreset_mask(float* logits, int n_expert, int n_used, int rows, float share, void* stream) {
+    if (n_expert % WARP != 0 || n_expert > 1024) throw std::invalid_argument("coreset_mask: 32 to 1024 experts, in 32s");
+    coreset_mask_kernel<<<1, n_expert, 2 * size_t(n_expert) * sizeof(float), cs(stream)>>>(logits, n_expert, n_used,
+                                                                                         rows, share);
 }
 
 }  // namespace strata::poly

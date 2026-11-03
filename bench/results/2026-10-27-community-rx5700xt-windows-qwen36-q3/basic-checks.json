@@ -1,0 +1,155 @@
+[
+  {
+    "name": "arithmetic",
+    "prompt": "What is 17 multiplied by 23? Reply with only the integer.",
+    "response": {
+      "first": 0.8610418000025675,
+      "total": 0.9826330000068992,
+      "text": "391",
+      "usage": {
+        "prompt_tokens": 29,
+        "completion_tokens": 4,
+        "total_tokens": 33,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 29,
+        "prompt_ms": 857.2,
+        "prompt_per_token_ms": 29.559,
+        "prompt_per_second": 33.8,
+        "predicted_n": 4,
+        "predicted_ms": 121.7,
+        "predicted_per_token_ms": 30.425,
+        "predicted_per_second": 32.9,
+        "draft_n": 2,
+        "draft_n_accepted": 2
+      },
+      "err": null,
+      "pieces": 3
+    },
+    "metrics": {
+      "ok": true,
+      "err": null,
+      "ttft_s": 0.861,
+      "total_s": 0.983,
+      "prompt_tokens": 29,
+      "reused_tokens": 0,
+      "read_tokens": 29,
+      "generated_tokens": 4,
+      "prompt_tps": 33.8,
+      "prompt_tps_source": "engine",
+      "decode_tps": 32.9,
+      "decode_tps_source": "engine",
+      "prompt_ms": 857.2,
+      "decode_ms": 121.7,
+      "drafts_offered": 2,
+      "drafts_accepted": 2
+    },
+    "passed": true
+  },
+  {
+    "name": "json_sort",
+    "prompt": "Return only JSON with exactly the key \"sorted\" holding [9, 2, 7, 1] sorted in ascending order.",
+    "response": {
+      "first": 0.7414034000830725,
+      "total": 1.226848000078462,
+      "text": "{\"sorted\": [1, 2, 7, 9]}",
+      "usage": {
+        "prompt_tokens": 40,
+        "completion_tokens": 16,
+        "total_tokens": 56,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 40,
+        "prompt_ms": 735.9,
+        "prompt_per_token_ms": 18.398,
+        "prompt_per_second": 54.4,
+        "predicted_n": 16,
+        "predicted_ms": 485.6,
+        "predicted_per_token_ms": 30.35,
+        "predicted_per_second": 32.9,
+        "draft_n": 11,
+        "draft_n_accepted": 11
+      },
+      "err": null,
+      "pieces": 15
+    },
+    "metrics": {
+      "ok": true,
+      "err": null,
+      "ttft_s": 0.741,
+      "total_s": 1.227,
+      "prompt_tokens": 40,
+      "reused_tokens": 0,
+      "read_tokens": 40,
+      "generated_tokens": 16,
+      "prompt_tps": 54.4,
+      "prompt_tps_source": "engine",
+      "decode_tps": 32.9,
+      "decode_tps_source": "engine",
+      "prompt_ms": 735.9,
+      "decode_ms": 485.6,
+      "drafts_offered": 11,
+      "drafts_accepted": 11
+    },
+    "passed": true
+  },
+  {
+    "name": "retrieval",
+    "prompt": "The project access code is MAPLE-7392.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\nThe archive contains meeting records and ordinary reference notes.\n\nWhat is the project access code? Reply with only that code.",
+    "response": {
+      "first": 5.522928099962883,
+      "total": 5.7666017999872565,
+      "text": "MAPLE-7392",
+      "usage": {
+        "prompt_tokens": 2789,
+        "completion_tokens": 8,
+        "total_tokens": 2797,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 2789,
+        "prompt_ms": 5494.1,
+        "prompt_per_token_ms": 1.97,
+        "prompt_per_second": 507.6,
+        "predicted_n": 8,
+        "predicted_ms": 243.8,
+        "predicted_per_token_ms": 30.475,
+        "predicted_per_second": 32.8,
+        "draft_n": 6,
+        "draft_n_accepted": 5
+      },
+      "err": null,
+      "pieces": 7
+    },
+    "metrics": {
+      "ok": true,
+      "err": null,
+      "ttft_s": 5.523,
+      "total_s": 5.767,
+      "prompt_tokens": 2789,
+      "reused_tokens": 0,
+      "read_tokens": 2789,
+      "generated_tokens": 8,
+      "prompt_tps": 507.6,
+      "prompt_tps_source": "engine",
+      "decode_tps": 32.8,
+      "decode_tps_source": "engine",
+      "prompt_ms": 5494.1,
+      "decode_ms": 243.8,
+      "drafts_offered": 6,
+      "drafts_accepted": 5
+    },
+    "passed": true
+  }
+]

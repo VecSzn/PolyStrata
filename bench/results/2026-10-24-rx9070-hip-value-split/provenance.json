@@ -1,0 +1,116 @@
+{
+  "measured_by": "leakedd",
+  "measured_at_utc": "2026-10-24/2026-10-25",
+  "source_commit": "c174f35c2a5e20a4fe7ac236063d6513fcc07179",
+  "engine": "strata-poly",
+  "build_type": "Release, source build",
+  "candidate_binary_sha256": "0f8e4b2ae3e73131d30d8685f620d0ed6c5b0000ba181a34126d30a7c5971b6b",
+  "hardware": {
+    "gpu": "AMD Radeon RX 9070 XT, 16 GiB, gfx1201",
+    "cpu": "AMD Ryzen 5 9600X, 6 cores / 12 threads",
+    "system_ram_kib": 31941664,
+    "pcie_observed": "32 GT/s x16"
+  },
+  "software": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "Linux 7.0.0-38-generic",
+    "hip_runtime": "7.16.26385",
+    "hip_compiler": "AMD clang 24.0.0git (ROCm llvm-project d6f6cb691863e9258034ab48c1dfce21689d5606)",
+    "rocm_sdk": "10.1.0 redistributable SDK",
+    "llama_cpp": "3cf03257f219afbe7334045ff7c6a06ac68c627d"
+  },
+  "build": {
+    "generator": "Ninja",
+    "build_type": "Release",
+    "backend": "HIP",
+    "hip_architecture": "gfx1201",
+    "parallel_jobs": 2,
+    "tests_enabled": true,
+    "prefill_mmq": true,
+    "cuda_compile_check": {
+      "passed": true,
+      "architecture": "sm_86",
+      "runtime_tested": false,
+      "reason": "No NVIDIA GPU on the host."
+    }
+  },
+  "model": {
+    "name": "cybertiel-35b-a3b-ud-q4_k_xl",
+    "architecture": "qwen35moe",
+    "support_status": "community derivative; not the project-pinned Tiel Coder artifact",
+    "artifacts": [
+      {
+        "option": "--model",
+        "file": "Cyber-Tiel-Coder-35B-A3B-UD-Q4_K_XL.gguf",
+        "bytes": 22360478720,
+        "sha256": "21bff5a96fa051809f4a8260befe977771c9927cae9c32eadfcb0718bae960cd"
+      }
+    ],
+    "tokenizer_files": [
+      {
+        "file": "chat_template.jinja",
+        "sha256": "b629ec1ffdcf88bd8b547f3eb7d5dbde61002fe2a2727c5720b2f48f5b6545e7"
+      },
+      {
+        "file": "merges.txt",
+        "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+      },
+      {
+        "file": "token_type.json",
+        "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+      },
+      {
+        "file": "tokenizer.json",
+        "sha256": "05e6d9456f9a04bf63fdb35af01c82c0116988eae33927e744b16a42936a78cd"
+      },
+      {
+        "file": "vocab.json",
+        "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+      }
+    ],
+    "expert_profile": {
+      "bytes": 138369,
+      "sha256": "e7c5026e19349072ea5363da8523063d53e7036b2e68ce797bdc73c8322ffcb8"
+    }
+  },
+  "server_arguments": [
+    "--model",
+    "<FILE>/Cyber-Tiel-Coder-35B-A3B-UD-Q4_K_XL.gguf",
+    "--max-context",
+    "163840",
+    "--expert-profile",
+    "<FILE>/off_A-profile.txt",
+    "--conversation-cache-mib",
+    "2048",
+    "--tail-skip",
+    "0",
+    "--kv-whole",
+    "--threads",
+    "6",
+    "--kv",
+    "q8_0",
+    "--prompt-batch",
+    "2048",
+    "--vram-reserve-mib",
+    "1536",
+    "--window",
+    "1",
+    "--no-graphs",
+    "--expert-swaps",
+    "0",
+    "--cpu-share",
+    "0",
+    "--lookup",
+    "0",
+    "--no-draft"
+  ],
+  "environment": {
+    "benchmark": "STRATA_HIP_VALUE_SPLIT=0 or 1; STRATA_FREEZE_EXPERTS=1",
+    "gpu_visible": "HIP_VISIBLE_DEVICES=0",
+    "graphs": "disabled",
+    "sampling": "temperature 0, top_p 1, top_k 1, seed 42, repetition_penalty 1, thinking disabled",
+    "suffix_lookup": "disabled",
+    "expert_swaps": 0,
+    "cpu_share": 0
+  }
+}

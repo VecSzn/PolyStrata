@@ -542,6 +542,7 @@ START-HERE.bat --setup                          install another model, or change
 SETUP.bat                                       the same (double-click it)
 START-HERE.bat --model IQ2_XS --context 32768 --vision yes --yes     no questions
 START-HERE.bat --gguf-dir D:\models\IQ2_XS       use GGUF files you already have
+START-HERE.bat --custom-gguf D:\models          install one custom GGUF: a file, or a folder of its shards
 START-HERE.bat --data-dir E:\PolyStrata-data         keep the model files somewhere else
 START-HERE.bat --port 8081                      another port
 START-HERE.bat --gpu 1                          another GPU (numbered as nvidia-smi; setup picks the one with the most VRAM)
@@ -1684,15 +1685,19 @@ like `nvidia-smi`) to the `"vision"` section of `strata-<model>.json`: the encod
 `--vram-reserve-mib` in `"args"` to 700 as well, so the engine's cards keep that VRAM for the expert cache. The
 encoder's card needs code in the ready-made encoder (RTX 20/30/40/50).
 
-**The encoder only while there are pictures (opt-in, `"elastic": true` in the `"vision"` section, with the config's
-`"vram_elastic": true`; [VRAM_ELASTIC.md](VRAM_ELASTIC.md#the-image-encoder-on-demand)):** the GPU encoder does not start
+**The encoder only while there are pictures (the default on the CPU; on the GPU opt-in, `"elastic": true` in the
+`"vision"` section, with the config's `"vram_elastic": true`;
+[VRAM_ELASTIC.md](VRAM_ELASTIC.md#the-image-encoder-on-demand)):** an encoder on the CPU (`"gpu": false`, what setup
+writes for a card under 24 GB) starts with the first picture and stops after `"elastic_idle_s"` (default 120) without
+one; `"elastic": false` keeps it running. Qwen3.6's held 1.08 GiB of RAM and started in 1 to 2 s on the laptop
+(i7-14700HX). The GPU encoder does not start
 with the server, so the expert cache keeps all of the VRAM. The first picture's turn makes the cache keep
 `"elastic_mib"` (default 2048) free and starts the encoder there (a few seconds); later pictures use it as it is, and
 after `"elastic_idle_s"` (default 120) without a picture it stops and the cache takes the VRAM back. Measured on an R9700
 32 GB (gfx1201, Linux, UD-IQ4_XS, the BF16 encoder at up to 1,024 tokens, #2189 for HIP's virtual memory): the encoder
 took 1,339 MiB and started in 4.7 s (2.7 s the next time); a request with one picture took 8.6 s with the start and
 5.0 s on a later cold start, and 2 / 5 / 10 pictures with the encoder running took 3.8 / 5.6 / 9.0 s (~0.45 s to encode
-each, the same as on a second card). Without the key nothing changes.
+each, the same as on a second card). Without the key a GPU encoder runs as before.
 
 ### Sending a picture
 
@@ -2094,6 +2099,67 @@ model's.
 changes at 10% of positions, mean KL from the stock model 0.063 nats (max 4.1), perplexity +15% on code, +2.3% on
 the document, +0.4% on the chat. Details: `bench/results/2026-09-27-esp/`.
 
+## strata-poly: flash attention for prompt reading (on by default; `STRATA_FATTN=0` turns it off)
+
+For strata-poly's Qwen3.6 family, including Ornith 122B (heads of 256 values, 8 or 16 heads a group), on an
+Ampere or later NVIDIA card. A prompt batch's attention runs through llama.cpp's flash-attention kernel
+(`src/poly/fattn_mma.cuh`, a copy of `fattn-mma-f16.cuh` with the causal mask computed in the kernel) instead of
+two cuBLAS products and a softmax over scores in memory. Under the q8_0 cache (`--kv int8`) blocks of keys are
+dequantized to fp16 in the attention's existing score scratch; an fp16 cache is read where it lies. No VRAM is added.
+The server logs `STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel`. Decode, Turing, HIP and
+other models keep the old path, and so does `STRATA_FATTN=0`. It was opt-in (`STRATA_FATTN=1`) until two cards beside
+the one below showed the same gain ([issue 107](https://github.com/VecSzn/PolyStrata/issues/107) and the measurement at
+the end of the next section).
+
+**Measured** on an RTX 3070 8 GB (PCIe 3.0 x16; Ryzen 5 2600X, 32 GB DDR4-3200; Cyber-Tiel-Coder 35B-A3B
+UD-Q4_K_XL, `--max-context 262144`, q8_0 cache), a coding-agent conversation of growing turns: prompt read 1,437 -> 1,824 tokens/s at 32K of context, 749 -> 1,268 at 103K,
+610 -> 1,066 at 143K (+65-85% at 103-143K against the range of earlier control runs); decode the same within 1
+token/s; a 107K recall test 3 of 3. The kernel sums the value products in halves, so its results are further from
+the arithmetic in doubles (up to 7.7e-3 on results up to 2.9) than the old path's (2.3e-3); `poly_fattn_test` checks
+both caches. Greedy answers part from the old path's after a few dozen characters, at near-ties where the old path
+also parts from itself between runs.
+
+## strata-poly: tensor-core decode attention (on by default from 4,096 tokens of context; `STRATA_FDEC=0` turns it off)
+
+The decode side of the same layers: the few tokens of an answer's step (one, or a window of guesses). Once the cache
+holds 4,096 positions they go through a kernel of this project's own (`fdec_q8()` / `fdec_f16()` in `src/poly/fattn.cu`)
+instead of `attend()`'s score, softmax and value kernels, which write every score to memory and read it back twice.
+One CUDA block takes 1,024 keys of a KV head's group for up to 4 tokens (group 8) or 2 tokens (group 16) as flash
+attention on the tensor cores. The cache is read once for those tokens, and the blocks are merged by their softmax
+max and sum. q8_0 and fp16 caches, heads of 256 values, 8 or 16 heads a group, Ampere or later NVIDIA.
+A token gets the same bits alone or in a window, as
+with `attend()`. No VRAM is added. The server logs `STRATA_FDEC: decode attention through the tensor-core decode
+kernel from 4,096 tokens of context`; Turing, HIP and other models keep the old path, and so does `STRATA_FDEC=0`.
+Below 4,096 positions the old path stays, since its kernel is the faster one there (below); `STRATA_FDEC=1` uses
+the new one from the first position, as the opt-in did.
+
+**Measured** on the RTX 3070 setup above (q8_0 cache, 256K, with `STRATA_FATTN=1`), the same conversation, two runs
+each: decode 53.8 -> 63.9 tokens/s at 32K of context, 35.1 -> 53.0 at 103K, 29.3 -> 48.7 at 143K, 26.6 -> 45.6 at
+174K; short prompts the same (62-78 tokens/s either way). With an fp16 cache at 128K (one run): 53.0 -> 62.6 at
+32K, 32.5 -> 43.2 at 103K. One layer's attention at 140K of context (`poly_fattn_test dec`): 0.45 ms against 1.94
+for one token with q8_0, 0.72 against 1.82 with fp16; below about 4K of context it is the slower one (0.05 against
+0.02 ms a layer). The scores and values go through the tensor cores as halves, so results are within 1.8e-3 of the
+arithmetic in doubles where `attend()` is within 1e-6. A long-context question set (39K to 196K tokens of this
+repository's source, temperature 0) got the same 11 of 12 checkable answers right with and without it, and its
+answers part from the old path's about as early as two runs of the old path part from each other. The 107K and a
+247K recall test passed.
+
+**Both, measured again before they became the default** on an RTX PRO 6000 (sm_120, CUDA 12.8) held to 12 GB with
+`--vram-reserve-mib`, Qwen3.6-35B-A3B UD-Q3_K_M with setup's own flags, fp16 cache, the expert split frozen, a
+prompt of this repository's documentation with a code hidden in its middle and a question about it at the end,
+the median of two runs:
+
+| Prompt | Neither: reads / writes, tokens/s | Both: reads / writes |
+| --- | ---: | ---: |
+| 21 tokens | 129 / 226 | 131 / 225 |
+| 4,833 | 3,911 / 178 | 4,216 / 188 |
+| 32,046 | 7,039 / 188 | 8,555 / 252 |
+| 100,046 | 5,837 / 106 | 8,210 / 230 |
+
+Every run at 32K and 100K answered the hidden code. With the fixed flags of a regression run the greedy answers of
+both and of neither were the same 128 tokens at 32K and parted at token 85 at 100K. The RTX 4060 Laptop of
+[issue 107](https://github.com/VecSzn/PolyStrata/issues/107) at 118K: 1.62x reading, 1.60x writing.
+
 ---
 
 ## Troubleshooting
@@ -2314,3 +2380,33 @@ CUDA card, where it measured +1..3 % prompt speed on a Tesla P100 at 30-60K toke
 Options that change answers (other summation order) are separate and explicit: `STRATA_SELECT_SIMT=1|2` (FP32 tiled block scorer,
 KL 0.01 against the warp scorer per #2071), `STRATA_PA_V2T=1` (v2 prompt attention, #2092/#2146), `STRATA_PF_FUSED=1
 STRATA_PF_FUSED_SM75=1` (fused int8 prompt experts for the Q2_0 pack, #2145; only on a 7.5 card, sm_80+ is unchanged), `STRATA_BF16_TC=1` with `STRATA_XN_F16` (#2091).
+
+## strata-poly: chunked GDN prefill
+
+`STRATA_GDN_MMA=1` requests the shared CUDA tensor-core GDN kernel for eligible reads in the Qwen35 backend.
+Unset or `0` keeps the stock recurrence. The request is captured at engine initialization; restart to change
+it. The server's existing model `env` map accepts the same setting, and an explicit `"0"` overrides an
+inherited `1`. There is no new API parameter or installer default.
+
+The capability decision is logged once per engine, including fallback on unsupported shapes, devices or
+backends. Eligible calls have 128 values per head, 16 key heads, 16/32/48/64 value heads and at least 64
+contiguous rows from one sequence. Decode, short reads, separate sequence rows, recorded launches and MTP
+intermediate snapshots keep the stock path. No extra persistent GPU buffer is added.
+
+The shared `strata_gdn_mma` library exposes prepared inputs through `include/strata/kernels/gdn_mma.hpp`
+in `strata::kernels`. Qwen35 (`qwen35moe`) is currently the only integrated caller; other compatible models
+can add thin adapters using the same kernel and capability checks. The original `strata` engine is unchanged.
+
+Supported CUDA targets are SM 86/89/120/121, subject to sufficient shared memory; SM100 is not enabled.
+Runtime measurements used SM89. CUDA 13.3 compilation was checked for the SM120/121 kernel and SM120
+adapter, but Blackwell runtime testing is still needed. HIP and SYCL were not built here; the CUDA library
+is excluded on those backends. This experimental opt-in changes floating-point accumulation and can change
+outputs. Prefill gains do not guarantee faster generation; some measured long-response TG runs regressed.
+
+## strata-poly: streaming CPU copies for expert staging
+
+`STRATA_POLY_STREAM_STAGE=1` uses SSE2 streaming stores when packing experts into the existing host upload
+buffers during prefill. Unset or `0` keeps the stock copies. The setting is captured at engine initialization;
+restart to change it. It can also be set in the server model's `env` map. Builds without SSE2 keep stock copies.
+This applies to the shared strata-poly staging path; the original strata engine and background expert swaps
+are unchanged. No extra host or GPU buffer is allocated, and the model file mapping is unchanged.

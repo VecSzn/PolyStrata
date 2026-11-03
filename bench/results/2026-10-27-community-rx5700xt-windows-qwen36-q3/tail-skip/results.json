@@ -1,0 +1,3684 @@
+{
+  "arms": [
+    {
+      "arm": "pair1-tail6",
+      "pair": 1,
+      "tail": 6,
+      "budgets_mib": [
+        [
+          "6369",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "495621768e0468523aac00630389b16e587611e54a154ebbf73505574096fd2f"
+      },
+      "memory": {
+        "samples": 105,
+        "system_baseline_bytes": 18987995136,
+        "system_peak_bytes": 38517661696,
+        "system_after_bytes": 19108737024,
+        "engine_rss_peak_bytes": 19122470912,
+        "engine_private_peak_bytes": 2515791872,
+        "system_commit_peak_bytes": 30915809280,
+        "gpu_dedicated_peak_bytes": 6588489728,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 121
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.0179715999402106,
+            "total": 1.1570493000326678,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1013.4,
+              "prompt_per_token_ms": 38.977,
+              "prompt_per_second": 25.7,
+              "predicted_n": 3,
+              "predicted_ms": 140.2,
+              "predicted_per_token_ms": 46.733,
+              "predicted_per_second": 21.4,
+              "draft_n": 2,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.018,
+            "total_s": 1.157,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 25.7,
+            "prompt_tps_source": "engine",
+            "decode_tps": 21.4,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1013.4,
+            "decode_ms": 140.2,
+            "drafts_offered": 2,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 17.4
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 1.0281186000211164,
+            "total": 2.0236803999869153,
+            "text": "```json\n{\"sorted\": [1, 2, 7, 9]}\n```",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 21,
+              "total_tokens": 61,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 953.3,
+              "prompt_per_token_ms": 23.832,
+              "prompt_per_second": 42.0,
+              "predicted_n": 21,
+              "predicted_ms": 996.1,
+              "predicted_per_token_ms": 47.433,
+              "predicted_per_second": 21.1,
+              "draft_n": 22,
+              "draft_n_accepted": 14
+            },
+            "err": null,
+            "pieces": 18
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.028,
+            "total_s": 2.024,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 21,
+            "prompt_tps": 42.0,
+            "prompt_tps_source": "engine",
+            "decode_tps": 21.1,
+            "decode_tps_source": "engine",
+            "prompt_ms": 953.3,
+            "decode_ms": 996.1,
+            "drafts_offered": 22,
+            "drafts_accepted": 14
+          },
+          "strict_pass": false,
+          "reported_expert_cache_hit_percent": 22.9
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.2282027000328526,
+            "total": 5.537237000069581,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 148,
+              "total_tokens": 281,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1223.8,
+              "prompt_per_token_ms": 9.202,
+              "prompt_per_second": 108.7,
+              "predicted_n": 148,
+              "predicted_ms": 4309.3,
+              "predicted_per_token_ms": 29.117,
+              "predicted_per_second": 34.3,
+              "draft_n": 101,
+              "draft_n_accepted": 93
+            },
+            "err": null,
+            "pieces": 145
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.228,
+            "total_s": 5.537,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 148,
+            "prompt_tps": 108.7,
+            "prompt_tps_source": "engine",
+            "decode_tps": 34.3,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1223.8,
+            "decode_ms": 4309.3,
+            "drafts_offered": 101,
+            "drafts_accepted": 93
+          },
+          "grade": {
+            "status": "tested",
+            "passed": true,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 37.1
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.8003721999702975,
+            "total": 13.246874999953434,
+            "text": "A hash table is a data structure that maps keys to values for efficient retrieval. When two different keys produce the same hash index, a collision occurs. Separate chaining is a common strategy to resolve these collisions. Instead of storing only one value per index, each slot in the underlying array points to a linked list. When a collision happens, the new key-value pair is simply appended to the list at that index. This approach allows multiple entries to coexist at the same hash position without overwriting previous data.\n\nInsertion begins by hashing the key to determine the target bucket. If the bucket is empty, a new node is created and placed there. If the bucket already contains a list, the new node is added to the end or beginning of that list. In the worst-case scenario, where all keys hash to the same index, the table degrades into a single linked list, resulting in linear time complexity for operations. However, with a good hash function and proper sizing, the average case remains constant time.\n\nLookup follows a similar path. The hash function identifies the correct bucket, and the system traverses the linked list at that index to find the matching key. Deletion requires locating the specific node within the list and removing it by adjusting the pointers of the surrounding nodes. If the node is at the head of the list, the bucket pointer is updated to point to the next node. If it is in the middle or end, the previous node’s pointer is updated to skip the deleted node.\n\nThe load factor is a critical metric defined as the number of entries divided by the number of buckets. It indicates how full the hash table is. As the load factor increases, collisions become more frequent, leading to longer linked lists and slower performance. To maintain efficiency, hash tables typically resize when the load factor exceeds a threshold, often one. Resizing involves creating a new, larger array and rehashing",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 796.5,
+              "prompt_per_token_ms": 14.223,
+              "prompt_per_second": 70.3,
+              "predicted_n": 384,
+              "predicted_ms": 12446.9,
+              "predicted_per_token_ms": 32.414,
+              "predicted_per_second": 30.9,
+              "draft_n": 246,
+              "draft_n_accepted": 204
+            },
+            "err": null,
+            "pieces": 381
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.8,
+            "total_s": 13.247,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 70.3,
+            "prompt_tps_source": "engine",
+            "decode_tps": 30.9,
+            "decode_tps_source": "engine",
+            "prompt_ms": 796.5,
+            "decode_ms": 12446.9,
+            "drafts_offered": 246,
+            "drafts_accepted": 204
+          },
+          "reported_expert_cache_hit_percent": 51.9
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.34396899992134,
+            "total": 170.20894439995755,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 168290.3,
+              "prompt_per_token_ms": 2.896,
+              "prompt_per_second": 345.3,
+              "predicted_n": 48,
+              "predicted_ms": 1866.8,
+              "predicted_per_token_ms": 38.892,
+              "predicted_per_second": 25.7,
+              "draft_n": 33,
+              "draft_n_accepted": 32
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.344,
+            "total_s": 170.209,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 345.3,
+            "prompt_tps_source": "engine",
+            "decode_tps": 25.7,
+            "decode_tps_source": "engine",
+            "prompt_ms": 168290.3,
+            "decode_ms": 1866.8,
+            "drafts_offered": 33,
+            "drafts_accepted": 32
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 6.6,
+          "keyed_facts_correct": 3
+        }
+      ]
+    },
+    {
+      "arm": "pair1-tail0",
+      "pair": 1,
+      "tail": 0,
+      "budgets_mib": [
+        [
+          "6374",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "81764f3549a6a5bd5ec967901a05694fffd1a88c7d7c3b04725575ac612b5864"
+      },
+      "memory": {
+        "samples": 105,
+        "system_baseline_bytes": 19036311552,
+        "system_peak_bytes": 38522576896,
+        "system_after_bytes": 19107835904,
+        "engine_rss_peak_bytes": 19124584448,
+        "engine_private_peak_bytes": 2517929984,
+        "system_commit_peak_bytes": 30867202048,
+        "gpu_dedicated_peak_bytes": 6588489728,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 132
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.1683648000471294,
+            "total": 1.3130205000052229,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1163.3,
+              "prompt_per_token_ms": 44.742,
+              "prompt_per_second": 22.4,
+              "predicted_n": 3,
+              "predicted_ms": 146.2,
+              "predicted_per_token_ms": 48.733,
+              "predicted_per_second": 20.5,
+              "draft_n": 1,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.168,
+            "total_s": 1.313,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 22.4,
+            "prompt_tps_source": "engine",
+            "decode_tps": 20.5,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1163.3,
+            "decode_ms": 146.2,
+            "drafts_offered": 1,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 14.9
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 0.9453040999360383,
+            "total": 1.9066341000143439,
+            "text": "```json\n{\"sorted\": [1, 2, 7, 9]}\n```",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 21,
+              "total_tokens": 61,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 891.7,
+              "prompt_per_token_ms": 22.293,
+              "prompt_per_second": 44.9,
+              "predicted_n": 21,
+              "predicted_ms": 961.8,
+              "predicted_per_token_ms": 45.8,
+              "predicted_per_second": 21.8,
+              "draft_n": 22,
+              "draft_n_accepted": 14
+            },
+            "err": null,
+            "pieces": 18
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.945,
+            "total_s": 1.907,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 21,
+            "prompt_tps": 44.9,
+            "prompt_tps_source": "engine",
+            "decode_tps": 21.8,
+            "decode_tps_source": "engine",
+            "prompt_ms": 891.7,
+            "decode_ms": 961.8,
+            "drafts_offered": 22,
+            "drafts_accepted": 14
+          },
+          "strict_pass": false,
+          "reported_expert_cache_hit_percent": 20.5
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.191763500100933,
+            "total": 5.831151700112969,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 148,
+              "total_tokens": 281,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1177.3,
+              "prompt_per_token_ms": 8.852,
+              "prompt_per_second": 113.0,
+              "predicted_n": 148,
+              "predicted_ms": 4639.7,
+              "predicted_per_token_ms": 31.349,
+              "predicted_per_second": 31.9,
+              "draft_n": 103,
+              "draft_n_accepted": 96
+            },
+            "err": null,
+            "pieces": 145
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.192,
+            "total_s": 5.831,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 148,
+            "prompt_tps": 113.0,
+            "prompt_tps_source": "engine",
+            "decode_tps": 31.9,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1177.3,
+            "decode_ms": 4639.7,
+            "drafts_offered": 103,
+            "drafts_accepted": 96
+          },
+          "grade": {
+            "status": "tested",
+            "passed": true,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 33.0
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.843936900026165,
+            "total": 13.597803500015289,
+            "text": "A hash table is a data structure that maps keys to values for efficient access. When multiple keys hash to the same index, a collision occurs. Separate chaining resolves this by allowing each bucket in the underlying array to hold a linked list of entries. Instead of overwriting existing data, new entries are appended to the list at the collided index. This approach simplifies collision handling compared to open addressing methods, as it does not require probing for the next available slot.\n\nInsertion begins by hashing the key to determine the target bucket index. If the bucket is empty, a new node containing the key-value pair is created and placed there. If the bucket already contains a list, the new node is added to the head or tail of that list. In many implementations, if the key already exists, the value is simply updated rather than creating a duplicate node. This process is generally efficient, with an average time complexity of O(1) for insertion, assuming a good hash function distributes keys uniformly.\n\nLookup follows a similar path. The hash function computes the index, and the corresponding linked list is traversed. Each node in the list is checked to see if its key matches the search key. If a match is found, the associated value is returned. If the end of the list is reached without a match, the key is not present in the table. Like insertion, average lookup time is O(1), but it degrades to O(n) in the worst case if all keys hash to the same bucket, resulting in a single long list.\n\nDeletion involves locating the key within the specific bucket’s list and removing the corresponding node. This requires adjusting the pointers of the preceding and succeeding nodes to maintain the list’s integrity. If the key is not found, no action is taken.\n\nThe load factor is a critical metric defined as the ratio of the number of stored entries to the total number of buckets",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 816.4,
+              "prompt_per_token_ms": 14.579,
+              "prompt_per_second": 68.6,
+              "predicted_n": 384,
+              "predicted_ms": 12754.3,
+              "predicted_per_token_ms": 33.214,
+              "predicted_per_second": 30.1,
+              "draft_n": 257,
+              "draft_n_accepted": 219
+            },
+            "err": null,
+            "pieces": 380
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.844,
+            "total_s": 13.598,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 68.6,
+            "prompt_tps_source": "engine",
+            "decode_tps": 30.1,
+            "decode_tps_source": "engine",
+            "prompt_ms": 816.4,
+            "decode_ms": 12754.3,
+            "drafts_offered": 257,
+            "drafts_accepted": 219
+          },
+          "reported_expert_cache_hit_percent": 44.7
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.27406429999974,
+            "total": 170.2727498000022,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 168220.0,
+              "prompt_per_token_ms": 2.895,
+              "prompt_per_second": 345.5,
+              "predicted_n": 48,
+              "predicted_ms": 2000.1,
+              "predicted_per_token_ms": 41.669,
+              "predicted_per_second": 24.0,
+              "draft_n": 33,
+              "draft_n_accepted": 32
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.274,
+            "total_s": 170.273,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 345.5,
+            "prompt_tps_source": "engine",
+            "decode_tps": 24.0,
+            "decode_tps_source": "engine",
+            "prompt_ms": 168220.0,
+            "decode_ms": 2000.1,
+            "drafts_offered": 33,
+            "drafts_accepted": 32
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 5.6,
+          "keyed_facts_correct": 3
+        }
+      ]
+    },
+    {
+      "arm": "pair2-tail0",
+      "pair": 2,
+      "tail": 0,
+      "budgets_mib": [
+        [
+          "6374",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "e7c908413dc8d3a0fbd4a17c5b616d9fea0bd732ab74253802c3a09eb2eba76f"
+      },
+      "memory": {
+        "samples": 105,
+        "system_baseline_bytes": 19038928896,
+        "system_peak_bytes": 38519861248,
+        "system_after_bytes": 19100016640,
+        "engine_rss_peak_bytes": 19124215808,
+        "engine_private_peak_bytes": 2517266432,
+        "system_commit_peak_bytes": 30869479424,
+        "gpu_dedicated_peak_bytes": 6590603264,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 121
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.1931935000466183,
+            "total": 1.3248110000276938,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1165.7,
+              "prompt_per_token_ms": 44.835,
+              "prompt_per_second": 22.3,
+              "predicted_n": 3,
+              "predicted_ms": 132.4,
+              "predicted_per_token_ms": 44.133,
+              "predicted_per_second": 22.7,
+              "draft_n": 1,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.193,
+            "total_s": 1.325,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 22.3,
+            "prompt_tps_source": "engine",
+            "decode_tps": 22.7,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1165.7,
+            "decode_ms": 132.4,
+            "drafts_offered": 1,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 14.9
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 0.9652838000329211,
+            "total": 1.9504371000221,
+            "text": "```json\n{\"sorted\": [1, 2, 7, 9]}\n```",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 21,
+              "total_tokens": 61,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 910.9,
+              "prompt_per_token_ms": 22.773,
+              "prompt_per_second": 43.9,
+              "predicted_n": 21,
+              "predicted_ms": 985.7,
+              "predicted_per_token_ms": 46.938,
+              "predicted_per_second": 21.3,
+              "draft_n": 22,
+              "draft_n_accepted": 14
+            },
+            "err": null,
+            "pieces": 18
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.965,
+            "total_s": 1.95,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 21,
+            "prompt_tps": 43.9,
+            "prompt_tps_source": "engine",
+            "decode_tps": 21.3,
+            "decode_tps_source": "engine",
+            "prompt_ms": 910.9,
+            "decode_ms": 985.7,
+            "drafts_offered": 22,
+            "drafts_accepted": 14
+          },
+          "strict_pass": false,
+          "reported_expert_cache_hit_percent": 20.5
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.1755179000319913,
+            "total": 5.845316100050695,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 148,
+              "total_tokens": 281,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1171.1,
+              "prompt_per_token_ms": 8.805,
+              "prompt_per_second": 113.6,
+              "predicted_n": 148,
+              "predicted_ms": 4670.1,
+              "predicted_per_token_ms": 31.555,
+              "predicted_per_second": 31.7,
+              "draft_n": 106,
+              "draft_n_accepted": 97
+            },
+            "err": null,
+            "pieces": 145
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.176,
+            "total_s": 5.845,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 148,
+            "prompt_tps": 113.6,
+            "prompt_tps_source": "engine",
+            "decode_tps": 31.7,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1171.1,
+            "decode_ms": 4670.1,
+            "drafts_offered": 106,
+            "drafts_accepted": 97
+          },
+          "grade": {
+            "status": "tested",
+            "passed": true,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 32.8
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.8088319000089541,
+            "total": 13.423692099982873,
+            "text": "A hash table is a data structure that maps keys to values for efficient access. When multiple keys hash to the same index, a collision occurs. Separate chaining resolves this by allowing each bucket in the underlying array to hold a linked list of entries. Instead of overwriting existing data, new entries are appended to the list at the collided index. This approach simplifies collision handling compared to open addressing methods, as it does not require probing for the next available slot.\n\nInsertion begins by computing the hash of the key to determine the target bucket. If the bucket is empty, a new node is created and placed there. If the bucket already contains a list, the new node is added to the head or tail of that list. In many implementations, duplicate keys are either rejected or updated in place, depending on specific requirements. This process ensures that all entries mapping to the same index are stored contiguously in memory via pointers, maintaining the integrity of the hash table structure.\n\nLookup involves hashing the search key to find the correct bucket. The algorithm then traverses the linked list at that index, comparing the search key with each node’s key until a match is found or the end of the list is reached. If a match is found, the corresponding value is returned. If the list is exhausted without a match, the key does not exist in the table. The time complexity for lookup depends heavily on the length of the linked lists. In the best case, with few collisions, lookup is nearly constant time. In the worst case, where all keys hash to the same bucket, lookup degrades to linear time relative to the number of entries.\n\nDeletion follows a similar path. The algorithm locates the bucket via hashing and then searches the linked list for the node with the matching key. Once found, the node is removed from the list by adjusting the pointers of the preceding and succeeding nodes. Special care must",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 805.0,
+              "prompt_per_token_ms": 14.375,
+              "prompt_per_second": 69.6,
+              "predicted_n": 384,
+              "predicted_ms": 12615.3,
+              "predicted_per_token_ms": 32.852,
+              "predicted_per_second": 30.4,
+              "draft_n": 273,
+              "draft_n_accepted": 222
+            },
+            "err": null,
+            "pieces": 381
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.809,
+            "total_s": 13.424,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 69.6,
+            "prompt_tps_source": "engine",
+            "decode_tps": 30.4,
+            "decode_tps_source": "engine",
+            "prompt_ms": 805.0,
+            "decode_ms": 12615.3,
+            "drafts_offered": 273,
+            "drafts_accepted": 222
+          },
+          "reported_expert_cache_hit_percent": 46.5
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.11684279993642,
+            "total": 170.0707575000124,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 168041.2,
+              "prompt_per_token_ms": 2.891,
+              "prompt_per_second": 345.8,
+              "predicted_n": 48,
+              "predicted_ms": 1955.4,
+              "predicted_per_token_ms": 40.738,
+              "predicted_per_second": 24.5,
+              "draft_n": 34,
+              "draft_n_accepted": 33
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.117,
+            "total_s": 170.071,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 345.8,
+            "prompt_tps_source": "engine",
+            "decode_tps": 24.5,
+            "decode_tps_source": "engine",
+            "prompt_ms": 168041.2,
+            "decode_ms": 1955.4,
+            "drafts_offered": 34,
+            "drafts_accepted": 33
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 5.6,
+          "keyed_facts_correct": 3
+        }
+      ]
+    },
+    {
+      "arm": "pair2-tail6",
+      "pair": 2,
+      "tail": 6,
+      "budgets_mib": [
+        [
+          "6372",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "0cee9f8b983b6841c68fef299d1f9e534c2cc79264ad3554cab965c7c137aca0"
+      },
+      "memory": {
+        "samples": 104,
+        "system_baseline_bytes": 19025387520,
+        "system_peak_bytes": 38536314880,
+        "system_after_bytes": 19105808384,
+        "engine_rss_peak_bytes": 19124408320,
+        "engine_private_peak_bytes": 2517970944,
+        "system_commit_peak_bytes": 30852218880,
+        "gpu_dedicated_peak_bytes": 6589087744,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 120
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.0299181999871507,
+            "total": 1.1719875000417233,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1024.9,
+              "prompt_per_token_ms": 39.419,
+              "prompt_per_second": 25.4,
+              "predicted_n": 3,
+              "predicted_ms": 143.6,
+              "predicted_per_token_ms": 47.867,
+              "predicted_per_second": 20.9,
+              "draft_n": 2,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.03,
+            "total_s": 1.172,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 25.4,
+            "prompt_tps_source": "engine",
+            "decode_tps": 20.9,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1024.9,
+            "decode_ms": 143.6,
+            "drafts_offered": 2,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 17.4
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 0.989054900011979,
+            "total": 1.529376900056377,
+            "text": "{\"sorted\": [1, 2, 7, 9]}",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 16,
+              "total_tokens": 56,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 919.7,
+              "prompt_per_token_ms": 22.992,
+              "prompt_per_second": 43.5,
+              "predicted_n": 16,
+              "predicted_ms": 540.7,
+              "predicted_per_token_ms": 33.794,
+              "predicted_per_second": 29.6,
+              "draft_n": 11,
+              "draft_n_accepted": 11
+            },
+            "err": null,
+            "pieces": 15
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.989,
+            "total_s": 1.529,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 16,
+            "prompt_tps": 43.5,
+            "prompt_tps_source": "engine",
+            "decode_tps": 29.6,
+            "decode_tps_source": "engine",
+            "prompt_ms": 919.7,
+            "decode_ms": 540.7,
+            "drafts_offered": 11,
+            "drafts_accepted": 11
+          },
+          "strict_pass": true,
+          "reported_expert_cache_hit_percent": 16.9
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.2259237999096513,
+            "total": 5.799945499980822,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end + 1:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 151,
+              "total_tokens": 284,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1221.5,
+              "prompt_per_token_ms": 9.184,
+              "prompt_per_second": 108.9,
+              "predicted_n": 151,
+              "predicted_ms": 4574.5,
+              "predicted_per_token_ms": 30.295,
+              "predicted_per_second": 33.0,
+              "draft_n": 110,
+              "draft_n_accepted": 94
+            },
+            "err": null,
+            "pieces": 148
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.226,
+            "total_s": 5.8,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 151,
+            "prompt_tps": 108.9,
+            "prompt_tps_source": "engine",
+            "decode_tps": 33.0,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1221.5,
+            "decode_ms": 4574.5,
+            "drafts_offered": 110,
+            "drafts_accepted": 94
+          },
+          "grade": {
+            "status": "tested",
+            "passed": false,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": false
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": false
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 39.3
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.8297555999597535,
+            "total": 13.103052099933848,
+            "text": "A hash table is a data structure that maps keys to values for efficient retrieval. When two different keys produce the same hash index, a collision occurs. Separate chaining is a common strategy to resolve these collisions. Instead of forcing a single value into each bucket, separate chaining allows each bucket to hold a collection of entries, typically implemented as a linked list or a dynamic array. This means that multiple keys can coexist in the same bucket without overwriting each other.\n\nInsertion begins by hashing the key to determine the target bucket. If the bucket is empty, the new entry is added directly. If the bucket already contains elements, the new entry is appended to the existing chain. In a well-implemented system, the chain might be sorted or use a more advanced structure like a balanced tree to maintain performance, but the fundamental concept remains adding to the end of the list.\n\nLookup follows a similar path. The hash function identifies the correct bucket, and then the system traverses the chain within that bucket. It compares the target key with each key in the list until a match is found or the end of the chain is reached. If a match is found, the associated value is returned. If the end is reached without a match, the key does not exist in the table.\n\nDeletion involves locating the specific entry within the chain and removing it. This requires updating the pointers of the preceding node to skip over the deleted node, effectively unlinking it from the list. Care must be taken to handle edge cases, such as deleting the head of the list or the only element in a bucket.\n\nThe load factor is a critical metric defined as the ratio of the number of stored entries to the total number of buckets. It indicates how full the hash table is. A low load factor suggests few collisions and fast operations, while a high load factor implies many collisions and slower performance due to longer chains. To maintain",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 825.7,
+              "prompt_per_token_ms": 14.745,
+              "prompt_per_second": 67.8,
+              "predicted_n": 384,
+              "predicted_ms": 12273.6,
+              "predicted_per_token_ms": 31.963,
+              "predicted_per_second": 31.3,
+              "draft_n": 261,
+              "draft_n_accepted": 205
+            },
+            "err": null,
+            "pieces": 380
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.83,
+            "total_s": 13.103,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 67.8,
+            "prompt_tps_source": "engine",
+            "decode_tps": 31.3,
+            "decode_tps_source": "engine",
+            "prompt_ms": 825.7,
+            "decode_ms": 12273.6,
+            "drafts_offered": 261,
+            "drafts_accepted": 205
+          },
+          "reported_expert_cache_hit_percent": 51.5
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.11041259998456,
+            "total": 169.98078969994094,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 168054.9,
+              "prompt_per_token_ms": 2.892,
+              "prompt_per_second": 345.8,
+              "predicted_n": 48,
+              "predicted_ms": 1871.9,
+              "predicted_per_token_ms": 38.998,
+              "predicted_per_second": 25.6,
+              "draft_n": 35,
+              "draft_n_accepted": 33
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.11,
+            "total_s": 169.981,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 345.8,
+            "prompt_tps_source": "engine",
+            "decode_tps": 25.6,
+            "decode_tps_source": "engine",
+            "prompt_ms": 168054.9,
+            "decode_ms": 1871.9,
+            "drafts_offered": 35,
+            "drafts_accepted": 33
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 5.8,
+          "keyed_facts_correct": 3
+        }
+      ]
+    },
+    {
+      "arm": "pair3-tail6",
+      "pair": 3,
+      "tail": 6,
+      "budgets_mib": [
+        [
+          "6374",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "a9c6b6ea127a6247d71c416235e520b2f8081476d0a6ae01a275d5f4d790baba"
+      },
+      "memory": {
+        "samples": 104,
+        "system_baseline_bytes": 19035734016,
+        "system_peak_bytes": 38530826240,
+        "system_after_bytes": 19105325056,
+        "engine_rss_peak_bytes": 19123531776,
+        "engine_private_peak_bytes": 2516406272,
+        "system_commit_peak_bytes": 30806560768,
+        "gpu_dedicated_peak_bytes": 6588489728,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 126
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.0507907000137493,
+            "total": 1.2240378999849781,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1046.3,
+              "prompt_per_token_ms": 40.242,
+              "prompt_per_second": 24.8,
+              "predicted_n": 3,
+              "predicted_ms": 174.0,
+              "predicted_per_token_ms": 58.0,
+              "predicted_per_second": 17.2,
+              "draft_n": 2,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.051,
+            "total_s": 1.224,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 24.8,
+            "prompt_tps_source": "engine",
+            "decode_tps": 17.2,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1046.3,
+            "decode_ms": 174.0,
+            "drafts_offered": 2,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 17.4
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 0.9873374999733642,
+            "total": 1.5737593999365345,
+            "text": "{\"sorted\": [1, 2, 7, 9]}",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 16,
+              "total_tokens": 56,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 911.0,
+              "prompt_per_token_ms": 22.775,
+              "prompt_per_second": 43.9,
+              "predicted_n": 16,
+              "predicted_ms": 586.9,
+              "predicted_per_token_ms": 36.681,
+              "predicted_per_second": 27.3,
+              "draft_n": 11,
+              "draft_n_accepted": 11
+            },
+            "err": null,
+            "pieces": 15
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.987,
+            "total_s": 1.574,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 16,
+            "prompt_tps": 43.9,
+            "prompt_tps_source": "engine",
+            "decode_tps": 27.3,
+            "decode_tps_source": "engine",
+            "prompt_ms": 911.0,
+            "decode_ms": 586.9,
+            "drafts_offered": 11,
+            "drafts_accepted": 11
+          },
+          "strict_pass": true,
+          "reported_expert_cache_hit_percent": 17.2
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.2317836999427527,
+            "total": 5.653242400032468,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 148,
+              "total_tokens": 281,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1227.5,
+              "prompt_per_token_ms": 9.229,
+              "prompt_per_second": 108.4,
+              "predicted_n": 148,
+              "predicted_ms": 4422.0,
+              "predicted_per_token_ms": 29.878,
+              "predicted_per_second": 33.5,
+              "draft_n": 98,
+              "draft_n_accepted": 88
+            },
+            "err": null,
+            "pieces": 145
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.232,
+            "total_s": 5.653,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 148,
+            "prompt_tps": 108.4,
+            "prompt_tps_source": "engine",
+            "decode_tps": 33.5,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1227.5,
+            "decode_ms": 4422.0,
+            "drafts_offered": 98,
+            "drafts_accepted": 88
+          },
+          "grade": {
+            "status": "tested",
+            "passed": true,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 39.1
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.7923570000566542,
+            "total": 12.974468700005673,
+            "text": "A hash table is a data structure that maps keys to values for efficient access. When two different keys produce the same hash index, a collision occurs. Separate chaining is a common strategy to resolve these collisions. Instead of forcing a single value into each bucket, separate chaining allows each bucket to hold a collection of entries, typically implemented as a linked list or a dynamic array. This means that multiple keys can coexist in the same bucket without overwriting each other.\n\nInsertion begins by hashing the key to determine the target bucket. If the bucket is empty, the new entry is placed there directly. If the bucket already contains a list, the new entry is appended to the end of that list. In more advanced implementations, the list might be replaced by a balanced binary search tree if the number of elements in a bucket becomes large, ensuring that operations remain efficient even in worst-case scenarios.\n\nLookup follows a similar path. The hash function identifies the correct bucket, and then the system traverses the linked list within that bucket to find the entry with the matching key. If the key is found, the associated value is returned. If the traversal reaches the end of the list without a match, the key does not exist in the table.\n\nDeletion involves locating the specific entry within the bucket’s list and removing it. This requires updating the pointers of the neighboring nodes to maintain the integrity of the list. If the list becomes empty after deletion, the bucket effectively becomes vacant again.\n\nThe load factor is a critical metric defined as the ratio of the number of stored entries to the total number of buckets. It indicates how full the hash table is. A low load factor suggests few collisions and fast operations, while a high load factor implies many collisions and slower performance due to longer lists. To maintain efficiency, hash tables automatically resize when the load factor exceeds a predefined threshold, usually around 0.75. Res",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 788.4,
+              "prompt_per_token_ms": 14.079,
+              "prompt_per_second": 71.0,
+              "predicted_n": 384,
+              "predicted_ms": 12182.6,
+              "predicted_per_token_ms": 31.726,
+              "predicted_per_second": 31.5,
+              "draft_n": 269,
+              "draft_n_accepted": 209
+            },
+            "err": null,
+            "pieces": 380
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.792,
+            "total_s": 12.974,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 71.0,
+            "prompt_tps_source": "engine",
+            "decode_tps": 31.5,
+            "decode_tps_source": "engine",
+            "prompt_ms": 788.4,
+            "decode_ms": 12182.6,
+            "drafts_offered": 269,
+            "drafts_accepted": 209
+          },
+          "reported_expert_cache_hit_percent": 52.5
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.03054570010863,
+            "total": 169.93269640009385,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 167976.7,
+              "prompt_per_token_ms": 2.89,
+              "prompt_per_second": 346.0,
+              "predicted_n": 48,
+              "predicted_ms": 1903.7,
+              "predicted_per_token_ms": 39.66,
+              "predicted_per_second": 25.2,
+              "draft_n": 34,
+              "draft_n_accepted": 32
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.031,
+            "total_s": 169.933,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 346.0,
+            "prompt_tps_source": "engine",
+            "decode_tps": 25.2,
+            "decode_tps_source": "engine",
+            "prompt_ms": 167976.7,
+            "decode_ms": 1903.7,
+            "drafts_offered": 34,
+            "drafts_accepted": 32
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 6.9,
+          "keyed_facts_correct": 3
+        }
+      ]
+    },
+    {
+      "arm": "pair3-tail0",
+      "pair": 3,
+      "tail": 0,
+      "budgets_mib": [
+        [
+          "6372",
+          "8176"
+        ]
+      ],
+      "profiles": {
+        "before": "1cfe73631867a7cf28fabb5fbfa4079c7793b14129316d8d1f6ede0e7e550a07",
+        "after": "181be8578432fa6c7287d29e89a5f6207c2cba4a42d66afd6fdf43ef14570149"
+      },
+      "memory": {
+        "samples": 105,
+        "system_baseline_bytes": 19029147648,
+        "system_peak_bytes": 38517276672,
+        "system_after_bytes": 19102978048,
+        "engine_rss_peak_bytes": 19123548160,
+        "engine_private_peak_bytes": 2516897792,
+        "system_commit_peak_bytes": 30830882816,
+        "gpu_dedicated_peak_bytes": 6588039168,
+        "gpu_shared_peak_bytes": 1953247232,
+        "gpu_activity_max_raw_percent": 117
+      },
+      "results": [
+        {
+          "name": "warmup",
+          "response": {
+            "first": 1.1803450000006706,
+            "total": 1.299563999986276,
+            "text": "15",
+            "usage": {
+              "prompt_tokens": 26,
+              "completion_tokens": 3,
+              "total_tokens": 29,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 26,
+              "prompt_ms": 1175.8,
+              "prompt_per_token_ms": 45.223,
+              "prompt_per_second": 22.1,
+              "predicted_n": 3,
+              "predicted_ms": 120.2,
+              "predicted_per_token_ms": 40.067,
+              "predicted_per_second": 25.0,
+              "draft_n": 1,
+              "draft_n_accepted": 1
+            },
+            "err": null,
+            "pieces": 2
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.18,
+            "total_s": 1.3,
+            "prompt_tokens": 26,
+            "reused_tokens": 0,
+            "read_tokens": 26,
+            "generated_tokens": 3,
+            "prompt_tps": 22.1,
+            "prompt_tps_source": "engine",
+            "decode_tps": 25.0,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1175.8,
+            "decode_ms": 120.2,
+            "drafts_offered": 1,
+            "drafts_accepted": 1
+          },
+          "reported_expert_cache_hit_percent": 14.9
+        },
+        {
+          "name": "structured",
+          "response": {
+            "first": 0.9807624999666587,
+            "total": 1.9991070999531075,
+            "text": "```json\n{\"sorted\": [1, 2, 7, 9]}\n```",
+            "usage": {
+              "prompt_tokens": 40,
+              "completion_tokens": 21,
+              "total_tokens": 61,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 40,
+              "prompt_ms": 923.9,
+              "prompt_per_token_ms": 23.098,
+              "prompt_per_second": 43.3,
+              "predicted_n": 21,
+              "predicted_ms": 1019.0,
+              "predicted_per_token_ms": 48.524,
+              "predicted_per_second": 20.6,
+              "draft_n": 22,
+              "draft_n_accepted": 14
+            },
+            "err": null,
+            "pieces": 18
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.981,
+            "total_s": 1.999,
+            "prompt_tokens": 40,
+            "reused_tokens": 0,
+            "read_tokens": 40,
+            "generated_tokens": 21,
+            "prompt_tps": 43.3,
+            "prompt_tps_source": "engine",
+            "decode_tps": 20.6,
+            "decode_tps_source": "engine",
+            "prompt_ms": 923.9,
+            "decode_ms": 1019.0,
+            "drafts_offered": 22,
+            "drafts_accepted": 14
+          },
+          "strict_pass": false,
+          "reported_expert_cache_hit_percent": 21.1
+        },
+        {
+          "name": "coding",
+          "response": {
+            "first": 1.1601145000895485,
+            "total": 6.011168600060046,
+            "text": "{\n  \"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = []\\n    current_start, current_end = sorted_intervals[0]\\n    for i in range(1, len(sorted_intervals)):\\n        next_start, next_end = sorted_intervals[i]\\n        if next_start <= current_end:\\n            current_end = max(current_end, next_end)\\n        else:\\n            merged.append([current_start, current_end])\\n            current_start, current_end = next_start, next_end\\n    merged.append([current_start, current_end])\\n    return merged\"\n}",
+            "usage": {
+              "prompt_tokens": 133,
+              "completion_tokens": 148,
+              "total_tokens": 281,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 133,
+              "prompt_ms": 1155.8,
+              "prompt_per_token_ms": 8.69,
+              "prompt_per_second": 115.1,
+              "predicted_n": 148,
+              "predicted_ms": 4851.3,
+              "predicted_per_token_ms": 32.779,
+              "predicted_per_second": 30.5,
+              "draft_n": 101,
+              "draft_n_accepted": 95
+            },
+            "err": null,
+            "pieces": 145
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 1.16,
+            "total_s": 6.011,
+            "prompt_tokens": 133,
+            "reused_tokens": 0,
+            "read_tokens": 133,
+            "generated_tokens": 148,
+            "prompt_tps": 115.1,
+            "prompt_tps_source": "engine",
+            "decode_tps": 30.5,
+            "decode_tps_source": "engine",
+            "prompt_ms": 1155.8,
+            "decode_ms": 4851.3,
+            "drafts_offered": 101,
+            "drafts_accepted": 95
+          },
+          "grade": {
+            "status": "tested",
+            "passed": true,
+            "cases": [
+              {
+                "input": [],
+                "expected": [],
+                "actual": [],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    3
+                  ],
+                  [
+                    2,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    6
+                  ],
+                  [
+                    8,
+                    10
+                  ],
+                  [
+                    15,
+                    18
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    5,
+                    7
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    4
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    4
+                  ],
+                  [
+                    5,
+                    7
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    1,
+                    10
+                  ],
+                  [
+                    2,
+                    3
+                  ],
+                  [
+                    4,
+                    8
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    -5,
+                    -1
+                  ],
+                  [
+                    -3,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "expected": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "actual": [
+                  [
+                    -5,
+                    0
+                  ],
+                  [
+                    1,
+                    1
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    2,
+                    2
+                  ],
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "expected": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "actual": [
+                  [
+                    2,
+                    2
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    9,
+                    10
+                  ],
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ]
+                ],
+                "expected": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "actual": [
+                  [
+                    1,
+                    1
+                  ],
+                  [
+                    4,
+                    5
+                  ],
+                  [
+                    9,
+                    10
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              },
+              {
+                "input": [
+                  [
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    2
+                  ],
+                  [
+                    2,
+                    3
+                  ]
+                ],
+                "expected": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "actual": [
+                  [
+                    0,
+                    3
+                  ]
+                ],
+                "input_preserved": true,
+                "passed": true
+              }
+            ]
+          },
+          "reported_expert_cache_hit_percent": 33.5
+        },
+        {
+          "name": "generation",
+          "response": {
+            "first": 0.8346214001066983,
+            "total": 14.149290700093843,
+            "text": "A hash table is a data structure that maps keys to values for efficient access. When multiple keys hash to the same index, a collision occurs. Separate chaining resolves this by associating each bucket in the hash table with a linked list. Instead of storing a single value at each index, the table stores the head of a list. All keys that hash to the same index are appended to that specific list. This approach allows the hash table to handle an arbitrary number of collisions without overwriting existing data, making it robust against high collision rates.\n\nInsertion begins by hashing the key to determine the target bucket. The new key-value pair is then added to the linked list at that index. This operation is typically efficient, often taking constant time on average, provided the hash function distributes keys uniformly. However, if many keys collide, the list grows longer, degrading performance.\n\nLookup follows a similar path. The hash function identifies the correct bucket, and the system traverses the linked list at that index to find the matching key. In the best case, with few collisions, this is fast. In the worst case, where all keys hash to the same bucket, the lookup degrades to linear time, effectively becoming a search through a single long list.\n\nDeletion involves locating the key within the appropriate linked list and removing the node. This requires traversing the list to find the target, updating the previous node’s pointer to skip the deleted node, and freeing the memory. Like lookup, deletion performance depends heavily on the length of the chain.\n\nThe load factor is a critical metric defined as the ratio of the number of stored elements to the total number of buckets. It indicates how full the hash table is. A low load factor suggests few collisions and fast operations, while a high load factor implies many collisions and slower performance. To maintain efficiency, hash tables implement resizing. When the load factor exceeds a predefined",
+            "usage": {
+              "prompt_tokens": 56,
+              "completion_tokens": 384,
+              "total_tokens": 440,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 56,
+              "prompt_ms": 830.8,
+              "prompt_per_token_ms": 14.836,
+              "prompt_per_second": 67.4,
+              "predicted_n": 384,
+              "predicted_ms": 13315.1,
+              "predicted_per_token_ms": 34.675,
+              "predicted_per_second": 28.8,
+              "draft_n": 229,
+              "draft_n_accepted": 198
+            },
+            "err": null,
+            "pieces": 380
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 0.835,
+            "total_s": 14.149,
+            "prompt_tokens": 56,
+            "reused_tokens": 0,
+            "read_tokens": 56,
+            "generated_tokens": 384,
+            "prompt_tps": 67.4,
+            "prompt_tps_source": "engine",
+            "decode_tps": 28.8,
+            "decode_tps_source": "engine",
+            "prompt_ms": 830.8,
+            "decode_ms": 13315.1,
+            "drafts_offered": 229,
+            "drafts_accepted": 198
+          },
+          "reported_expert_cache_hit_percent": 45.2
+        },
+        {
+          "name": "long",
+          "response": {
+            "first": 168.096326900064,
+            "total": 170.35187020001467,
+            "text": "{\n  \"alpha\": \"CEDAR-5187\",\n  \"beta\": \"HARBOR-2649\",\n  \"gamma\": \"QUARTZ-9036\"\n}",
+            "usage": {
+              "prompt_tokens": 58117,
+              "completion_tokens": 48,
+              "total_tokens": 58165,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 58117,
+              "prompt_ms": 168041.0,
+              "prompt_per_token_ms": 2.891,
+              "prompt_per_second": 345.9,
+              "predicted_n": 48,
+              "predicted_ms": 2257.9,
+              "predicted_per_token_ms": 47.04,
+              "predicted_per_second": 21.3,
+              "draft_n": 33,
+              "draft_n_accepted": 28
+            },
+            "err": null,
+            "pieces": 43
+          },
+          "metrics": {
+            "ok": true,
+            "err": null,
+            "ttft_s": 168.096,
+            "total_s": 170.352,
+            "prompt_tokens": 58117,
+            "reused_tokens": 0,
+            "read_tokens": 58117,
+            "generated_tokens": 48,
+            "prompt_tps": 345.9,
+            "prompt_tps_source": "engine",
+            "decode_tps": 21.3,
+            "decode_tps_source": "engine",
+            "prompt_ms": 168041.0,
+            "decode_ms": 2257.9,
+            "drafts_offered": 33,
+            "drafts_accepted": 28
+          },
+          "strict_pass": true,
+          "facts_exact": 3,
+          "zero_reuse_assertion": true,
+          "reported_expert_cache_hit_percent": 5.5,
+          "keyed_facts_correct": 3
+        }
+      ]
+    }
+  ],
+  "statistics": {
+    "6": {
+      "generation": {
+        "prompt_tps": {
+          "values": [
+            70.3,
+            67.8,
+            71.0
+          ],
+          "mean": 69.7,
+          "sample_stdev": 1.6822603841260733,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            30.9,
+            31.3,
+            31.5
+          ],
+          "mean": 31.233333333333334,
+          "sample_stdev": 0.30550504633039016,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            0.8,
+            0.83,
+            0.792
+          ],
+          "mean": 0.8073333333333333,
+          "sample_stdev": 0.02003330560175558,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            13.247,
+            13.103,
+            12.974
+          ],
+          "mean": 13.108,
+          "sample_stdev": 0.13656866404852894,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            384,
+            384,
+            384
+          ],
+          "mean": 384,
+          "sample_stdev": 0.0,
+          "n": 3
+        }
+      },
+      "long": {
+        "prompt_tps": {
+          "values": [
+            345.3,
+            345.8,
+            346.0
+          ],
+          "mean": 345.7,
+          "sample_stdev": 0.3605551275463942,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            25.7,
+            25.6,
+            25.2
+          ],
+          "mean": 25.5,
+          "sample_stdev": 0.26457513110645947,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            168.344,
+            168.11,
+            168.031
+          ],
+          "mean": 168.16166666666666,
+          "sample_stdev": 0.16277080000212193,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            170.209,
+            169.981,
+            169.933
+          ],
+          "mean": 170.041,
+          "sample_stdev": 0.14745846872933968,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            48,
+            48,
+            48
+          ],
+          "mean": 48,
+          "sample_stdev": 0.0,
+          "n": 3
+        }
+      },
+      "coding": {
+        "prompt_tps": {
+          "values": [
+            108.7,
+            108.9,
+            108.4
+          ],
+          "mean": 108.66666666666667,
+          "sample_stdev": 0.25166114784235816,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            34.3,
+            33.0,
+            33.5
+          ],
+          "mean": 33.6,
+          "sample_stdev": 0.6557438524301985,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            1.228,
+            1.226,
+            1.232
+          ],
+          "mean": 1.2286666666666666,
+          "sample_stdev": 0.0030550504633038962,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            5.537,
+            5.8,
+            5.653
+          ],
+          "mean": 5.663333333333333,
+          "sample_stdev": 0.13180414763327186,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            148,
+            151,
+            148
+          ],
+          "mean": 149,
+          "sample_stdev": 1.7320508075688772,
+          "n": 3
+        }
+      }
+    },
+    "0": {
+      "generation": {
+        "prompt_tps": {
+          "values": [
+            68.6,
+            69.6,
+            67.4
+          ],
+          "mean": 68.53333333333333,
+          "sample_stdev": 1.1015141094572145,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            30.1,
+            30.4,
+            28.8
+          ],
+          "mean": 29.766666666666666,
+          "sample_stdev": 0.8504900548115376,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            0.844,
+            0.809,
+            0.835
+          ],
+          "mean": 0.8293333333333334,
+          "sample_stdev": 0.01817507450695407,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            13.598,
+            13.424,
+            14.149
+          ],
+          "mean": 13.723666666666666,
+          "sample_stdev": 0.37848425770873617,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            384,
+            384,
+            384
+          ],
+          "mean": 384,
+          "sample_stdev": 0.0,
+          "n": 3
+        }
+      },
+      "long": {
+        "prompt_tps": {
+          "values": [
+            345.5,
+            345.8,
+            345.9
+          ],
+          "mean": 345.73333333333335,
+          "sample_stdev": 0.208166599946606,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            24.0,
+            24.5,
+            21.3
+          ],
+          "mean": 23.266666666666666,
+          "sample_stdev": 1.7214335111567138,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            168.274,
+            168.117,
+            168.096
+          ],
+          "mean": 168.16233333333332,
+          "sample_stdev": 0.09727452561351115,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            170.273,
+            170.071,
+            170.352
+          ],
+          "mean": 170.232,
+          "sample_stdev": 0.14491721774861893,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            48,
+            48,
+            48
+          ],
+          "mean": 48,
+          "sample_stdev": 0.0,
+          "n": 3
+        }
+      },
+      "coding": {
+        "prompt_tps": {
+          "values": [
+            113.0,
+            113.6,
+            115.1
+          ],
+          "mean": 113.89999999999999,
+          "sample_stdev": 1.0816653826391944,
+          "n": 3
+        },
+        "decode_tps": {
+          "values": [
+            31.9,
+            31.7,
+            30.5
+          ],
+          "mean": 31.366666666666667,
+          "sample_stdev": 0.7571877794400358,
+          "n": 3
+        },
+        "ttft_s": {
+          "values": [
+            1.192,
+            1.176,
+            1.16
+          ],
+          "mean": 1.176,
+          "sample_stdev": 0.016000000000000014,
+          "n": 3
+        },
+        "total_s": {
+          "values": [
+            5.831,
+            5.845,
+            6.011
+          ],
+          "mean": 5.895666666666667,
+          "sample_stdev": 0.10012658654589865,
+          "n": 3
+        },
+        "generated_tokens": {
+          "values": [
+            148,
+            148,
+            148
+          ],
+          "mean": 148,
+          "sample_stdev": 0.0,
+          "n": 3
+        }
+      }
+    }
+  },
+  "paired_ratios": [
+    {
+      "pair": 1,
+      "generation_tail6_over_tail0_decode": 1.026578073089701,
+      "long_tail6_over_tail0_decode": 1.0708333333333333,
+      "identical_raw_output_by_task": {
+        "structured": true,
+        "coding": true,
+        "generation": false,
+        "long": true
+      }
+    },
+    {
+      "pair": 2,
+      "generation_tail6_over_tail0_decode": 1.029605263157895,
+      "long_tail6_over_tail0_decode": 1.0448979591836736,
+      "identical_raw_output_by_task": {
+        "structured": false,
+        "coding": false,
+        "generation": false,
+        "long": true
+      }
+    },
+    {
+      "pair": 3,
+      "generation_tail6_over_tail0_decode": 1.09375,
+      "long_tail6_over_tail0_decode": 1.1830985915492958,
+      "identical_raw_output_by_task": {
+        "structured": false,
+        "coding": true,
+        "generation": false,
+        "long": true
+      }
+    }
+  ],
+  "all_configurations_equivalent_except_profile_and_log_paths": true,
+  "same_frozen_profile_all_arms": true,
+  "long_actual_tokens_all_arms": 58117,
+  "zero_reused_tokens_all_long_requests": true,
+  "scope": "Three pairs, one coding/structured/retrieval fixture; no statistical significance or general quality claim. Generation cap384 may truncate. Warmup and filesystem cache not cold. WDDM budgets/placement vary; see per-arm evidence. Memory categories overlap; never add."
+}

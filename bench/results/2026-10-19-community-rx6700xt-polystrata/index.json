@@ -1,0 +1,111 @@
+{
+  "source_commit": "26e4cb5df7996edfb5ff549a63b82d8581e1e658",
+  "runs": [
+    {
+      "profile": "qwen36-ud-q3_k_m-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q3_k_m-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "qwen36-ud-q3_k_m-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q3_k_m-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "ornith-apex-i-compact-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/ornith-apex-i-compact-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "ornith-apex-i-compact-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/ornith-apex-i-compact-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "tiel-ud-q3_k_xl-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/tiel-ud-q3_k_xl-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "tiel-ud-q3_k_xl-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/tiel-ud-q3_k_xl-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "gemma4-ud-q4_k_m-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/gemma4-ud-q4_k_m-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "gemma4-ud-q4_k_m-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/gemma4-ud-q4_k_m-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "minicpmv-mix_q3gud_im-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/minicpmv-mix_q3gud_im-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "minicpmv-mix_q3gud_im-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/minicpmv-mix_q3gud_im-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "lfm25-ud-q4_k_xl-reserve1024-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/lfm25-ud-q4_k_xl-reserve1024-ctx32768/official-standard"
+    },
+    {
+      "profile": "lfm25-ud-q4_k_xl-reserve1024-ctx65536",
+      "stage": "official-long",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/lfm25-ud-q4_k_xl-reserve1024-ctx65536/official-long"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_m-control-reserve1024-ctx32768",
+      "stage": "official-control",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_m-control-reserve1024-ctx32768/official-control"
+    },
+    {
+      "profile": "qwen36-ud-q4_k_m-control-reserve1024-ctx65536",
+      "stage": "official-control",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q4_k_m-control-reserve1024-ctx65536/official-control"
+    },
+    {
+      "profile": "qwen36-ud-q3_k_m-ctx32768",
+      "stage": "official-standard",
+      "status": "completed",
+      "reports": 1,
+      "path": "runs/qwen36-ud-q3_k_m-ctx32768/official-standard"
+    }
+  ],
+  "tool_sha256": "58f2c493d940501401fa34b250cd4c982fcce6f5078e97725270519a3f08ee55"
+}

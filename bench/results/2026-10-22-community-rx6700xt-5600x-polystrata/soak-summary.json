@@ -1,0 +1,10 @@
+{
+ "finished_at": 1792615294.8604295,
+ "hours": 6,
+ "health_ok": 483,
+ "health_fails": 0,
+ "hourly_ok": 8,
+ "hourly_failed": 0,
+ "max_server_rss_kB": 169568,
+ "note": "day-desktop soak (user active in Chrome/webchat); summary rebuilt from soak.log (writer argv bug fixed)"
+}

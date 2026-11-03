@@ -47,6 +47,7 @@ class RocmPick(unittest.TestCase):
         self.assertFalse([v for v in LISTINGS["gfx103X-all"] if v.startswith("7.10")])
         self.assertEqual(self.want("gfx1030"), ("7.13.0a20260515", None))
         self.assertEqual(self.want("gfx1031"), ("7.13.0a20260515", None))
+        self.assertEqual(self.want("gfx1032"), ("7.13.0a20260515", None))
 
     def test_gfx120X_and_gfx110X_keep_the_tested_version(self):
         for arch in ("gfx1201", "gfx1200", "gfx1100", "gfx1101", "gfx1102"):

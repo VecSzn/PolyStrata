@@ -22,7 +22,8 @@ namespace strata::poly {
 constexpr uint32_t kTypeF32 = 0, kTypeBF16 = 30;
 constexpr int kMaxUsed = 32;
 constexpr int kSumRows = 32;        // routed experts one launch adds into their tokens' rows (ScaledRows)
-constexpr int kSlots = 8;           // cached experts one launch multiplies (kernels::MmvqSlots)
+constexpr int kSlots = 32;          // the most cached experts one launch multiplies (kernels::MmvqSlots), = kSumRows:
+                                    // 32 where kernels::native_mmvq_slots_wide(), 8 otherwise (engine.cpp)
 constexpr int kCpuRows = 8;         // tokens whose CPU experts one call computes; a window has no more
 // From this many tokens, a call runs its routed experts on the GPU alone and copies the ones that are not cached
 // through VRAM.  Below it, that copy costs more than the CPU takes to compute the few experts.
@@ -34,7 +35,7 @@ constexpr int kStageRows = 32;
 // of more than two calls keeps those rows in pinned host memory, 64 KiB a token for GLM and 8 for Qwen3.6: this
 // much is 8,192 tokens of GLM's and 65,536 of Qwen3.6's.
 constexpr size_t kReadBytes = size_t(512) << 20;
-constexpr size_t kChunkBytes = size_t(512) << 20;   // one upload, and each of the two pinned buffers
+constexpr size_t kChunkBytes = size_t(64) << 20;   // one upload, and each of the two pinned buffers
 // Zero bytes behind every matrix the batched kernels may multiply (Mmq::fits): they read up to a step of 256
 // columns past a row that ends inside one, which is at most 7 blocks of 34 bytes.
 constexpr size_t kTail = 256;
@@ -153,6 +154,29 @@ public:
         return it == where_.end() ? nullptr : it->second.t;
     }
     const uint8_t* data(const TensorInfo& t) const { return where_.at(t.name).file->tensor_data(t); }
+    /// Each file's mapped bytes, in the order of paths(); {nullptr, 0} for a file without tensors.
+    std::vector<std::pair<const uint8_t*, size_t>> views() const {
+        std::vector<std::pair<const uint8_t*, size_t>> out;
+        for (const auto& f : files_) {
+            if (f->tensors().empty()) {
+                out.emplace_back(nullptr, 0);
+                continue;
+            }
+            const TensorInfo& t = f->tensors()[0];
+            out.emplace_back(f->tensor_data(t) - f->data_start() - t.offset, (size_t) f->file_size());
+        }
+        return out;
+    }
+    /// The file a byte of the mapped model is in, by its place in paths(), and its offset from that file's first
+    /// byte; {-1, 0} when it is in none of them.
+    std::pair<int, uint64_t> place(const uint8_t* p) const {
+        const auto v = views();
+        for (size_t i = 0; i < v.size(); ++i) {
+            const uintptr_t at = (uintptr_t) p, base = (uintptr_t) v[i].first;
+            if (v[i].first && at >= base && at - base < v[i].second) return {(int) i, (uint64_t) (at - base)};
+        }
+        return {-1, 0};
+    }
     /// The files' bytes together.
     uint64_t bytes() const {
         uint64_t n = 0;

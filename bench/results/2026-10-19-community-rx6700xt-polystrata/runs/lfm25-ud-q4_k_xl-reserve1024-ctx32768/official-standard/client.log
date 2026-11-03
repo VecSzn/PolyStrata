@@ -1,0 +1,49 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-standard", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/out,dst=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--out", "/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/out/official"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.30 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 78.6 tok/s, first token 0.191 s, 100 tokens
+  run 1 q2: decode 75.6 tok/s, first token 0.199 s, 100 tokens
+  run 1 q3: decode 74.2 tok/s, first token 0.184 s, 100 tokens
+  run 2 q1: decode 84.0 tok/s, first token 0.173 s, 100 tokens
+  run 2 q2: decode 91.4 tok/s, first token 0.184 s, 100 tokens
+  run 2 q3: decode 83.4 tok/s, first token 0.18 s, 100 tokens
+  run 3 q1: decode 86.6 tok/s, first token 0.195 s, 100 tokens
+  run 3 q2: decode 86.0 tok/s, first token 0.194 s, 100 tokens
+  run 3 q3: decode 86.9 tok/s, first token 0.193 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4126 tokens, prompt 1613.9 tok/s (0 reused), first token 2.573 s
+  run 2: 4126 tokens, prompt 1638.8 tok/s (0 reused), first token 2.535 s
+  run 3: 4126 tokens, prompt 1664.2 tok/s (0 reused), first token 2.498 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16490 tokens, prompt 1484.8 tok/s (0 reused), first token 11.135 s
+  run 2: 16490 tokens, prompt 1503.5 tok/s (0 reused), first token 10.996 s
+  run 3: 16490 tokens, prompt 1501.2 tok/s (0 reused), first token 11.013 s
+agent: a session of 6 turns with four tools, x 3 runs
+  run 1 turn 0: prompt 396, reused 0, read 396, first token 0.623 s
+  run 1 turn 1: prompt 3730, reused 391, read 3339, first token 2.047 s
+  run 1 turn 2: prompt 5384, reused 3725, read 1659, first token 1.819 s
+  run 1 turn 3: prompt 8550, reused 5379, read 3171, first token 2.775 s
+  run 1 turn 4: prompt 11577, reused 8545, read 3032, first token 2.66 s
+  run 1 turn 5: prompt 14430, reused 11572, read 2858, first token 3.062 s
+    FAILED: no token came back
+    FAILED: no token came back
+
+Results (median, range over the runs):
+  chat decode tok/s                     84.00   (74.20 - 91.40, n=9)
+  chat first token (s)                   0.19   (0.17 - 0.20, n=9)
+  4K prompt tok/s                     1638.80   (1613.90 - 1664.20, n=3)
+  4K first token (s)                     2.54   (2.50 - 2.57, n=3)
+  16K prompt tok/s                    1501.20   (1484.80 - 1503.50, n=3)
+  16K first token (s)                   11.01   (11.00 - 11.13, n=3)
+  agent cache hit %                     67.81   (67.81 - 67.81, n=1)
+  agent re-read tokens/session           0.00   (0.00 - 311.00, n=3)
+  agent turn first token (s)             2.66   (1.82 - 3.06, n=5)
+  agent decode tok/s                    72.60   (62.30 - 75.10, n=5)
+  (2 failed request(s), 0 skipped test(s): see the report)
+
+Report: /opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/out/official/2026-10-19-community-cpu-lfm2-5-24b-a2b-ud-q4-k-xl/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx32768/out/official/2026-10-19-community-cpu-lfm2-5-24b-a2b-ud-q4-k-xl (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

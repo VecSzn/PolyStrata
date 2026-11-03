@@ -1,0 +1,30 @@
+{
+ "exe": "E:\\Projects\\PolyStrata\\engine-poly\\strata-poly.exe",
+ "args": [
+  "--model",
+  "E:\\Projects\\PolyStrata\\models\\flint-UD-Q3_K_XL\\flint-UD-Q3_K_XL.gguf",
+  "--max-context",
+  "36864",
+  "--expert-profile",
+  "E:\\Projects\\PolyStrata\\packs\\flint-ud-q3_k_xl\\expert-profile.txt",
+  "--conversation-cache-mib",
+  "8192",
+  "--prompt-batch",
+  "2048",
+  "--threads",
+  "13"
+ ],
+ "cwd": "E:\\Projects\\PolyStrata",
+ "tokenizer": "E:\\Projects\\PolyStrata\\packs\\flint-ud-q3_k_xl\\tokenizer",
+ "model_name": "flint-40b-a2.5b-ud-q3_k_xl",
+ "display_name": "Flint 40B-A2.5B UD-Q3_K_XL",
+ "log": "E:\\Projects\\PolyStrata\\strata-flint-ud-q3_k_xl.log",
+ "lib_dirs": [
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.0\\bin",
+  "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.0\\bin\\x64",
+  "E:\\Projects\\PolyStrata\\.venv\\Lib\\site-packages\\nvidia\\cu13\\bin\\x86_64"
+ ],
+ "port": 8190,
+ "gpu": 0,
+ "gpus_asked": true
+}

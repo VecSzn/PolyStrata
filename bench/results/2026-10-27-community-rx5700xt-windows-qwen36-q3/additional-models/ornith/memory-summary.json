@@ -1,0 +1,46 @@
+{
+  "sample_count": 305,
+  "system_before_launch_in_use_bytes": 19026931712.0,
+  "system_sampled_peak_in_use_bytes": 41527427072,
+  "system_min_available_bytes": 232883965952,
+  "system_sampled_peak_commit_bytes": 33921859584,
+  "engine_sampled_peak_rss_bytes": 21817720832,
+  "engine_sampled_peak_private_commit_bytes": 4741677056,
+  "system_after_cleanup_in_use_bytes": 19164794880,
+  "gpu_sampled_peak_dedicated_bytes": 7210639360,
+  "gpu_sampled_peak_shared_bytes": 2431193088,
+  "contexts": {
+    "standard32k": {
+      "sample_count": 198,
+      "system_peak_in_use_bytes": 41527427072,
+      "engine_peak_rss_bytes": 21817720832,
+      "engine_peak_private_commit_bytes": 4741677056,
+      "gpu_peak_dedicated_bytes": 7210639360,
+      "gpu_peak_shared_bytes": 2083524608,
+      "startup_wddm_budget_mib": 7383
+    },
+    "context64k": {
+      "sample_count": 100,
+      "system_peak_in_use_bytes": 39512485888,
+      "engine_peak_rss_bytes": 19712045056,
+      "engine_peak_private_commit_bytes": 2636009472,
+      "gpu_peak_dedicated_bytes": 7197671424,
+      "gpu_peak_shared_bytes": 2431193088,
+      "startup_wddm_budget_mib": 7383
+    }
+  },
+  "stage_counts": {
+    "after_cleanup": 3,
+    "before_launch": 4,
+    "coding": 3,
+    "context64-retrieval": 95,
+    "context64_calibration": 2,
+    "loading_context64": 3,
+    "loading_standard": 3,
+    "model_complete": 1,
+    "official_suite": 186,
+    "probe-json_sort": 1,
+    "standard_cleanup": 4
+  },
+  "scope": "Whole-system sampled peaks across both standard32K and64K phases; private commit/mapped RSS/GPU shared overlap. Raw stage-labelled samples retained."
+}

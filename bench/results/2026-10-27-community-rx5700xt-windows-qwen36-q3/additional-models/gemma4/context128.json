@@ -1,0 +1,72 @@
+{
+  "configured_context": 131072,
+  "kv": "fp16 default",
+  "expected": {
+    "alpha": "CEDAR-8462",
+    "beta": "HARBOR-1753",
+    "gamma": "QUARTZ-9207"
+  },
+  "output_allowance": 128,
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 533.509,
+    "total_s": 536.089,
+    "prompt_tokens": 119038,
+    "reused_tokens": 0,
+    "read_tokens": 119038,
+    "generated_tokens": 52,
+    "prompt_tps": 224.9,
+    "prompt_tps_source": "engine",
+    "decode_tps": 20.1,
+    "decode_tps_source": "engine",
+    "prompt_ms": 529203.1,
+    "decode_ms": 2582.4,
+    "drafts_offered": 42,
+    "drafts_accepted": 38
+  },
+  "response": {
+    "first": 533.5093873000005,
+    "total": 536.088665899937,
+    "text": "```json\n{\n  \"alpha\": \"CEDAR-8462\",\n  \"beta\": \"HARBOR-1753\",\n  \"gamma\": \"QUARTZ-9207\"\n}\n```",
+    "usage": {
+      "prompt_tokens": 119038,
+      "completion_tokens": 52,
+      "total_tokens": 119090,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 119038,
+      "prompt_ms": 529203.1,
+      "prompt_per_token_ms": 4.446,
+      "prompt_per_second": 224.9,
+      "predicted_n": 52,
+      "predicted_ms": 2582.4,
+      "predicted_per_token_ms": 49.662,
+      "predicted_per_second": 20.1,
+      "draft_n": 42,
+      "draft_n_accepted": 38
+    },
+    "err": null,
+    "pieces": 45
+  },
+  "passed": false,
+  "filler_words": 118944,
+  "seed": 219,
+  "prompt_utf8_lf_sha256": "6d4e01a616d860e58e7e15cfff8c94c97479f79a14ee47f078f9290dc1b5cc06",
+  "scope": "One bounded three-fact recall; not broad full-window quality",
+  "fixture": {
+    "generator": "reproduce-additional.py",
+    "seed": 219,
+    "filler_words": 118944,
+    "utf8_lf_sha256": "6d4e01a616d860e58e7e15cfff8c94c97479f79a14ee47f078f9290dc1b5cc06",
+    "expected": {
+      "alpha": "CEDAR-8462",
+      "beta": "HARBOR-1753",
+      "gamma": "QUARTZ-9207"
+    }
+  }
+}

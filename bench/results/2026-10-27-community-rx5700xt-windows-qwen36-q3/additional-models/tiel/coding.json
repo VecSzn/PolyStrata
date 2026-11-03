@@ -1,0 +1,318 @@
+{
+  "prompt": "Return only JSON with exactly the key \"code\", a string containing one Python function named merge_intervals(intervals). Input is a list of [start,end] integer pairs with start<=end. Return sorted merged intervals as a list of lists. Merge overlaps AND touching endpoints. Handle empty input, nested/duplicate intervals, negative integers and point intervals. Do not mutate input. Use sorted(intervals), no imports, no decorators, no type annotations, no lambda; calls may use only sorted, list, len, min, max, range, enumerate, tuple and list append/copy. No explanatory text.",
+  "response": {
+    "first": 1.8891989999683574,
+    "total": 5.678459299961105,
+    "text": "```json\n{\n  \"code\": \"def merge_intervals(intervals):\\n    result = []\\n    for interval in sorted(intervals):\\n        if not result:\\n            result.append(list(interval))\\n            continue\\n        last = result[-1]\\n        if interval[0] <= last[1] + 1:\\n            if interval[1] > last[1]:\\n                last[1] = interval[1]\\n        else:\\n            result.append(list(interval))\\n    return result\"\n}\n```",
+    "usage": {
+      "prompt_tokens": 311,
+      "completion_tokens": 118,
+      "total_tokens": 429,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 311,
+      "prompt_ms": 1878.4,
+      "prompt_per_token_ms": 6.04,
+      "prompt_per_second": 165.6,
+      "predicted_n": 118,
+      "predicted_ms": 3789.5,
+      "predicted_per_token_ms": 32.114,
+      "predicted_per_second": 31.1,
+      "draft_n": 83,
+      "draft_n_accepted": 69
+    },
+    "err": null,
+    "pieces": 113
+  },
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 1.889,
+    "total_s": 5.678,
+    "prompt_tokens": 311,
+    "reused_tokens": 0,
+    "read_tokens": 311,
+    "generated_tokens": 118,
+    "prompt_tps": 165.6,
+    "prompt_tps_source": "engine",
+    "decode_tps": 31.1,
+    "decode_tps_source": "engine",
+    "prompt_ms": 1878.4,
+    "decode_ms": 3789.5,
+    "drafts_offered": 83,
+    "drafts_accepted": 69
+  },
+  "primary_grade": {
+    "status": "format_failure",
+    "passed": false
+  },
+  "secondary_offline_grade": {
+    "status": "tested",
+    "passed": false,
+    "cases": [
+      {
+        "input": [],
+        "expected": [],
+        "actual": [],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            5,
+            7
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            4
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            4
+          ],
+          [
+            5,
+            7
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            7
+          ]
+        ],
+        "input_preserved": true,
+        "passed": false
+      },
+      {
+        "input": [
+          [
+            1,
+            10
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            4,
+            8
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            10
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            10
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            -5,
+            -1
+          ],
+          [
+            -3,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "expected": [
+          [
+            -5,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "actual": [
+          [
+            -5,
+            1
+          ]
+        ],
+        "input_preserved": true,
+        "passed": false
+      },
+      {
+        "input": [
+          [
+            2,
+            2
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "expected": [
+          [
+            2,
+            2
+          ]
+        ],
+        "actual": [
+          [
+            2,
+            2
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            9,
+            10
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            9,
+            10
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            9,
+            10
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          [
+            0,
+            3
+          ]
+        ],
+        "actual": [
+          [
+            0,
+            3
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      }
+    ],
+    "primary_strict_format_pass": false,
+    "postprocessing": "One level of literal newline escapes decoded; Markdown fence removed; code logic unchanged. No model retry."
+  }
+}

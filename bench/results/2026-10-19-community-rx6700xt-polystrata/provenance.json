@@ -1,0 +1,309 @@
+{
+  "source_commit": "26e4cb5df7996edfb5ff549a63b82d8581e1e658",
+  "build": {
+    "source": "local-hip",
+    "backend": "hip",
+    "version": "0.1.45",
+    "archs": [
+      "gfx1031"
+    ],
+    "vision": "none",
+    "lib_dirs": [
+      "<experiment>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+      "<experiment>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+    ],
+    "src": "ad576bed60fbf2b5"
+  },
+  "installer_hf_revisions": {
+    "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF": "ed59f92082b1e93c0e96d60a8b11aab089b52f09",
+    "ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF": "b22d729eae29b5796f76fb70f91aef549b9fc52c",
+    "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF": "5348543e0147355ac9cbcb031184a3546350988e",
+    "unsloth/Qwen3.8-Flash-Next-GGUF": "38bb39ee97821de2c9009abb7e93950eec396e66",
+    "neuralll/GLM-5.3-Flash-GSQ-RCO-3.0bit-Q4Kattn-GGUF": "7feedfeb5ee924bfbe0064c63b124728b443ddc0",
+    "patrickbdevaney/GLM-5.3-Flash-REAP50-GGUF": "46cb1bb887721d919e978d2f3eb18da245fecd77",
+    "unsloth/GLM-5.3-Flash-GGUF": "621d456e93e926e4b52f85cff5f634358c1828f9",
+    "mudler/Ornith-1.5-35B-A3B-APEX-MTP-GGUF": "4c326713c52d13fdb40983a2a09a46cca8e88739",
+    "unsloth/gemma-4-26B-A4B-it-GGUF": "c099eb48e663fd284577b04978a94ffccb261841",
+    "peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP": "bbe9e566f39e4fc9652ac66b71968289a03c520a",
+    "unsloth/Qwen3.6-35B-A3B-MTP-GGUF": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "unsloth/DeepSeek-V4-Flash-0731-GGUF": "fbbb5b93fb787c21338159b0af3318bb3f4d9768",
+    "unsloth/LFM2.5-24B-A2B-GGUF": "faa77113e93335b63423e9e8d33395f86eaf8946",
+    "LiquidAI/LFM2.5-24B-A2B-GGUF": "0912d33141f77e10705345a6732bfd83f0252fdc",
+    "openbmb/MiniCPM-V-4.7-35B-A3B-gguf": "77f6d8cb08b2b115ce27d2e2ac1359e126921689"
+  },
+  "profiles": [
+    {
+      "profile": "qwen36-ud-q3_k_m-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/chat_template.jinja",
+          "bytes": 8057,
+          "sha256": "55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/token_type.json",
+          "bytes": 744960,
+          "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/tokenizer.json",
+          "bytes": 589,
+          "sha256": "5e89589848ca155b6d1583b8b4ec52670558d1bf368b0ece589201290898c874"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/vocab.json",
+          "bytes": 5737005,
+          "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/qwen36-ud-q3_k_m/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "ornith-apex-i-compact-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/ornith-apex-i-compact/tokenizer/chat_template.jinja",
+          "bytes": 7764,
+          "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259"
+        },
+        {
+          "path": "data/packs/ornith-apex-i-compact/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/ornith-apex-i-compact/tokenizer/token_type.json",
+          "bytes": 744960,
+          "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+        },
+        {
+          "path": "data/packs/ornith-apex-i-compact/tokenizer/tokenizer.json",
+          "bytes": 589,
+          "sha256": "0f07678e69a0f3eab2d69875163e602b8f9efb3fae836967d173104e3534b7ee"
+        },
+        {
+          "path": "data/packs/ornith-apex-i-compact/tokenizer/vocab.json",
+          "bytes": 5737005,
+          "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/ornith-apex-i-compact/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "tiel-ud-q3_k_xl-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/tiel-ud-q3_k_xl/tokenizer/chat_template.jinja",
+          "bytes": 30517,
+          "sha256": "a41d3a6495c7531e85a45b665ae99c0251a68eaef5fada66cfa283827d3f6422"
+        },
+        {
+          "path": "data/packs/tiel-ud-q3_k_xl/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/tiel-ud-q3_k_xl/tokenizer/token_type.json",
+          "bytes": 744960,
+          "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+        },
+        {
+          "path": "data/packs/tiel-ud-q3_k_xl/tokenizer/tokenizer.json",
+          "bytes": 589,
+          "sha256": "0f07678e69a0f3eab2d69875163e602b8f9efb3fae836967d173104e3534b7ee"
+        },
+        {
+          "path": "data/packs/tiel-ud-q3_k_xl/tokenizer/vocab.json",
+          "bytes": 5737005,
+          "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/tiel-ud-q3_k_xl/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "gemma4-ud-q4_k_m-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/gemma4-ud-q4_k_m/tokenizer/chat_template.jinja",
+          "bytes": 18924,
+          "sha256": "845f1ee48e39fc942fe190da9df6a1c5db229e17a96ea08966ad1c9274e73d1b"
+        },
+        {
+          "path": "data/packs/gemma4-ud-q4_k_m/tokenizer/merges.json",
+          "bytes": 7215682,
+          "sha256": "5559bcf26deec637ff8107e4379b90ae35ad59469b25e0b3bad610ae6c7c6bc4"
+        },
+        {
+          "path": "data/packs/gemma4-ud-q4_k_m/tokenizer/token_type.json",
+          "bytes": 786432,
+          "sha256": "5a1960565004f4ec12210cc671c9dfd2cbe8ce30c575469128d342dc4db26cbd"
+        },
+        {
+          "path": "data/packs/gemma4-ud-q4_k_m/tokenizer/tokenizer.json",
+          "bytes": 487,
+          "sha256": "869d2eeee353e0af375d6b0f1bde01350da5652d241312e71b1b387961db9b4c"
+        },
+        {
+          "path": "data/packs/gemma4-ud-q4_k_m/tokenizer/vocab.json",
+          "bytes": 5353679,
+          "sha256": "680c1dc49f8c7ed3a76006aea67942f6c6359413e03098d02b87de30ef77944a"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/gemma4-ud-q4_k_m/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "minicpmv-mix_q3gud_im-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/minicpmv-mix_q3gud_im/tokenizer/chat_template.jinja",
+          "bytes": 7250,
+          "sha256": "c4531cacbf2a0ab65170433d7a4f371d11b7599cf96c04b192e6372432636c70"
+        },
+        {
+          "path": "data/packs/minicpmv-mix_q3gud_im/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/minicpmv-mix_q3gud_im/tokenizer/token_type.json",
+          "bytes": 744432,
+          "sha256": "c4bfd0a6b37ab167f0de06b4461515a228da06aa929fba6d4dbcfed159e7a6c0"
+        },
+        {
+          "path": "data/packs/minicpmv-mix_q3gud_im/tokenizer/tokenizer.json",
+          "bytes": 634,
+          "sha256": "98d1716071b00f9c6d86d126c133868044ba8e2b52ab9a839aed7af03bae5129"
+        },
+        {
+          "path": "data/packs/minicpmv-mix_q3gud_im/tokenizer/vocab.json",
+          "bytes": 5732971,
+          "sha256": "9e395f65168a6e3130b33949e0e311f787115e3f90cd7826b2004b71ed8f9348"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/minicpmv-mix_q3gud_im/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "lfm25-ud-q4_k_xl-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/lfm25-ud-q4_k_xl/tokenizer/chat_template.jinja",
+          "bytes": 5443,
+          "sha256": "ea663864491de7ade391839479860ca95541f892f72665c73251fbd4643b1bef"
+        },
+        {
+          "path": "data/packs/lfm25-ud-q4_k_xl/tokenizer/merges.txt",
+          "bytes": 3478678,
+          "sha256": "5470d099a8f5dfa5a52567c73afeea16d4a018b85ee93242d92d7025bec772a1"
+        },
+        {
+          "path": "data/packs/lfm25-ud-q4_k_xl/tokenizer/token_type.json",
+          "bytes": 384000,
+          "sha256": "f8ef9886ad75cfbea968c64222f35d68fb3cd039a35ddabe261b784d0937a246"
+        },
+        {
+          "path": "data/packs/lfm25-ud-q4_k_xl/tokenizer/tokenizer.json",
+          "bytes": 569,
+          "sha256": "327e7eabb6f40b32a729a6ee34ecd4593e12d8c9e73ede1b7b5be9d8f2873c33"
+        },
+        {
+          "path": "data/packs/lfm25-ud-q4_k_xl/tokenizer/vocab.json",
+          "bytes": 2574329,
+          "sha256": "32db6899e2fe640a025ac47ac09da122d85d56b60a47441fe98750d71ee0a031"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/lfm25-ud-q4_k_xl/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "qwen36-ud-q4_k_m-control-reserve1024",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/qwen36-ud-q4_k_m/tokenizer/chat_template.jinja",
+          "bytes": 8057,
+          "sha256": "55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q4_k_m/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q4_k_m/tokenizer/token_type.json",
+          "bytes": 744960,
+          "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q4_k_m/tokenizer/tokenizer.json",
+          "bytes": 589,
+          "sha256": "5e89589848ca155b6d1583b8b4ec52670558d1bf368b0ece589201290898c874"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q4_k_m/tokenizer/vocab.json",
+          "bytes": 5737005,
+          "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/qwen36-ud-q4_k_m/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    },
+    {
+      "profile": "qwen36-ud-q3_k_m",
+      "initial_readonly_pack_files": [
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/chat_template.jinja",
+          "bytes": 8057,
+          "sha256": "55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/merges.txt",
+          "bytes": 3353258,
+          "sha256": "4ba698529766c7a2f5052083ea10cdf2485577f5237a332ee291054eb11e3332"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/token_type.json",
+          "bytes": 744960,
+          "sha256": "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/tokenizer.json",
+          "bytes": 589,
+          "sha256": "5e89589848ca155b6d1583b8b4ec52670558d1bf368b0ece589201290898c874"
+        },
+        {
+          "path": "data/packs/qwen36-ud-q3_k_m/tokenizer/vocab.json",
+          "bytes": 5737005,
+          "sha256": "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"
+        }
+      ],
+      "missing_at_capture": [
+        "data/packs/qwen36-ud-q3_k_m/expert-profile.txt"
+      ],
+      "missing_note": "No hash is available for an absent static expert profile. Do not substitute the adapted output profile or infer an initial seed hash."
+    }
+  ],
+  "note": "Hashes identify the static readonly installer packs used to seed fresh profiles, not the adapted output profiles after later workloads. Captured after timed work."
+}

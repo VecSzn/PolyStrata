@@ -1,0 +1,26 @@
+{
+  "exe": "<workspace>\\source\\engine-poly\\strata-poly.exe",
+  "args": [
+    "--model",
+    "<workspace>\\campaign3h\\tiel\\models\\Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+    "--max-context",
+    "32768",
+    "--expert-profile",
+    "<workspace>\\campaign3h\\tiel\\data\\packs\\tiel-ud-q3_k_xl\\expert-profile.txt",
+    "--conversation-cache-mib",
+    "auto",
+    "--kv-whole"
+  ],
+  "cwd": "<workspace>\\source",
+  "tokenizer": "<workspace>\\campaign3h\\tiel\\data\\packs\\tiel-ud-q3_k_xl\\tokenizer",
+  "model_name": "tiel-coder-35b-a3b-ud-q3_k_xl",
+  "display_name": "Tiel Coder 35B-A3B UD-Q3_K_XL",
+  "log": "<workspace>\\campaign3h\\tiel\\engine-standard.log",
+  "lib_dirs": [
+    "<workspace>\\source\\.rocm-win\\Lib\\site-packages\\_rocm_sdk_devel\\bin"
+  ],
+  "port": 18085,
+  "backend": "hip",
+  "hip_ordinal": 0,
+  "open_browser": false
+}
