@@ -208,8 +208,8 @@ so setup does not fetch a draft from another model. Repeat-based guessing remain
 IQ1_S uses native GPU matrix-vector kernels and can enter the expert cache; CPU experts use ggml as before.
 No 35B tail-skipping or batch-size tuning is applied to this family.
 
-The following initial validation used the implementation recorded in commit `27ce71fe`, before merging
-upstream `f472d85a`. Performance measurements below refer to that source.
+The initial validation and first performance table below used commit `27ce71fe`, before merging
+upstream `f472d85a`. The later cross-platform results identify their source separately.
 
 On 2026-11-02, IQ1_S completed setup and text inference on Windows with an RX 9070 XT (15.9 GiB VRAM),
 63 GB system RAM and a Ryzen 7 7800X3D, using HIP SDK 7.2, VS 2022 and 16 CPU threads. All three downloaded
@@ -264,8 +264,9 @@ mapped hints; larger prompt batches keep their existing path.
 The option does not select a RAM budget, change the reader count or change the existing next-layer
 prediction policy. Disabling it does not disable the asynchronous reader requested by a RAM budget.
 
-On 2026-11-03, IQ1_S was compared with and without this option on the same RX 9070 XT / 7800X3D / 63 GB RAM
-Windows PC above. Each run started a new server from the same saved expert profile, then answered the same
+Before the cross-platform integration, on 2026-11-03, IQ1_S at `27ce71fe` was compared with and without this
+option on the same RX 9070 XT / 7800X3D / 63 GB RAM Windows PC above. Each run started a new server from the
+same saved expert profile, then answered the same
 explanation, Python binary-search and record-lookup requests. Context capacity stayed at 32K, with FP16 KV,
 16 CPU threads, graph replay and the default expert-cache budget. No experts were skipped. The table gives
 medians of two runs per setting through the chat API; these are short tests on one PC, not general benchmarks.
@@ -293,6 +294,54 @@ took 8.1 seconds. IQ kernel parity, the 512-expert/top-10 routing check, 4,000 w
 parity against the real IQ1_S shard passed. The frozen-cache prefetch comparison again returned the same
 32 token IDs and all printed top-three probabilities (2,926 cached experts in each run). These are correctness
 checks; the performance table above was not remeasured after this merge.
+
+### Cross-platform expert prefetch validation
+
+On 2026-11-03, the cross-platform integration at `fe1bc373` was built with HIP SDK 7.2 and VS 2022 on the
+same Windows PC. The real installer and generated launcher answered `4`, then `7`, and `4` after restart;
+the loads took 9.1 and 7.5 seconds. The tools suite reported `Ran 1088 tests` / `OK (skipped=14)` and the
+server suite `Ran 983 tests` / `OK (skipped=10)`.
+
+Eight frozen-cache runs compared the previous implementation (`d344f563`) with the new one, prefetch off
+and on, with no explicit RAM budget and with `--ram-experts-mib 4096`. Within each budget, all four runs
+returned identical 32 generated token IDs and every printed top-three probability. They used the same
+saved expert profile, 2,926 cached experts, HIP runtime DLLs, FP16 KV, 32K context capacity, `--window 1`
+and `--expert-swaps 0`. This checks output equivalence, not byte identity of the rebuilt executable.
+
+The new real-file host I/O and engine pipeline tests passed on Windows. The host I/O test also passed on
+Debian under WSL with GCC 14, including `-Wall -Wextra -Werror` and ASan/UBSan runs. These check actual
+file reads and mappings, staging completion and fallback, queue priority and shutdown. The full Linux
+host build with `STRATA_NATIVE_EXPERTS=OFF` completed; CTest passed 33 of 35 tests. `expert_parity` and
+`pool_test` failed because `pack/full/experts.bin` was unavailable. They still need that real fixture.
+CUDA and SYCL builds and native Linux GPU inference/performance remain unvalidated.
+
+The Windows HIP build also passed 4,000 worker checks and expert/matrix parity against the real IQ1_S
+shard with prefetch enabled. Four chat API timing runs used the same saved profile, 32K context capacity,
+FP16 KV, 16 CPU threads and default graph replay and cache resizing. Each server answered an explanation,
+a binary-search request and a 1,700-token record lookup in that order. The settings ran in this order:
+no RAM budget/off, no RAM budget/on, 4096 MiB/on, 4096 MiB/off. The OS file cache was not flushed.
+
+These are single runs per setting. Each table cell gives **off / on**:
+
+| RAM budget | Request | Prompt time (s) | Decode (tokens/s) | Total time (s) |
+| --- | --- | ---: | ---: | ---: |
+| None | Explanation | 7.0 / 5.3 | 4.0 / 5.9 | 21.9 / 15.5 |
+| None | Binary search | 4.2 / 4.7 | 3.6 / 4.2 | 30.9 / 27.5 |
+| None | Record lookup | 51.0 / 63.8 | 2.6 / 5.2 | 57.2 / 64.9 |
+| 4096 MiB | Explanation | 4.3 / 4.1 | 5.3 / 5.3 | 15.6 / 15.4 |
+| 4096 MiB | Binary search | 3.5 / 3.5 | 3.8 / 3.8 | 28.6 / 28.6 |
+| 4096 MiB | Record lookup | 47.4 / 49.9 | 5.8 / 5.4 | 48.3 / 50.9 |
+
+The explanation used 35 prompt and 60 output tokens; binary search used 40 and 94. Every record lookup
+returned `1246`, but the no-budget/off answer used 16 output tokens and the other three used five, so its
+decode and total times are not equal-length comparisons. Unlike the frozen-cache correctness check,
+these timing runs allowed cache resizing and guesses. They do not establish a general speedup.
+
+Peak process-tree RSS, sampled every 0.5 seconds across load and all three requests, was 48.84 / 50.12 GiB
+without a RAM budget and 11.54 / 11.56 GiB with 4096 MiB. This is process memory, not total system memory
+or a cap on the OS file cache. In these samples, mapped prefetch helped short-response generation but
+slowed the longer prompt; with staging it changed little. The option stays off by default, and setup
+does not select a staging budget automatically.
 
 ## How a backend works
 
