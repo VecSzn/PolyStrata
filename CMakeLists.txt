@@ -1364,8 +1364,15 @@ if(STRATA_BUILD_TESTS OR STRATA_BUILD_CONVERSATION_TESTS)
 endif()
 
 add_library(strata_kernels_cpu STATIC src/kernels/cpu/expert.cpp src/kernels/cpu/pool.cpp
-            src/kernels/cpu/expert_layout.cpp src/kernels/cpu/q2_avx2.cpp)
+            src/kernels/cpu/expert_layout.cpp src/kernels/cpu/q2_avx2.cpp src/kernels/cpu/q2_avx1.cpp)
 target_include_directories(strata_kernels_cpu PUBLIC include)
+# expert_layout calls the AVX1 Q2 fallback even without ggml/native IQ support (host-only tests too).
+if(MSVC)
+  set_source_files_properties(src/kernels/cpu/q2_avx1.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
+else()
+  set_source_files_properties(src/kernels/cpu/q2_avx1.cpp PROPERTIES COMPILE_OPTIONS
+                              "-msse4.2;-mavx;-mno-avx2;-mno-fma;-mno-f16c")
+endif()
 # Plan v0.3 P6: only the kernel files get the AVX-512 / AVX2 flags; the pool and the probe run on any x86-64,
 # and the engine picks the kernels at run time (cpu_avx512_ok).
 if(MSVC)
@@ -1471,7 +1478,7 @@ if(STRATA_NATIVE_EXPERTS)
   # one-pass static linking has no cycle to resolve)
   target_sources(strata_kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp src/kernels/cpu/iq_avx512.cpp
                                            src/kernels/cpu/iq_avx2.cpp src/kernels/cpu/kq_avx2.cpp
-                                           src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/q2_avx1.cpp src/kernels/cpu/iq_avx1.cpp
+                                           src/kernels/cpu/kq_avx1.cpp src/kernels/cpu/iq_avx1.cpp
                                            src/kernels/cpu/nvfp4_avx512.cpp src/kernels/cpu/nvfp4_avx2.cpp)
   target_include_directories(strata_kernels_cpu PRIVATE third_party/ggml)
   if(MSVC)
@@ -1482,9 +1489,6 @@ if(STRATA_NATIVE_EXPERTS)
     set_source_files_properties(src/kernels/cpu/nvfp4_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
     # the router lookahead's AVX1 dot (older CPUs; called behind cpu_avx1_ok): no FMA, no 256-bit integer ops
     set_source_files_properties(src/kernels/cpu/kq_avx1.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
-    # the older CPUs' Q2_0 rows and activation quantizer (q2_avx1.cpp, issue #1699): 128-bit integer lanes,
-    # no FMA/F16C, its own #error guard; called only behind cpu_avx1_ok() && !cpu_avx2_ok()
-    set_source_files_properties(src/kernels/cpu/q2_avx1.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
     # the older CPUs' i-quant expert rows (iq_avx1.hpp): 128-bit SSSE3/SSE2 integer, SSE2 float, no FMA/F16C
     set_source_files_properties(src/kernels/cpu/iq_avx1.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX")
   else()
@@ -1494,11 +1498,6 @@ if(STRATA_NATIVE_EXPERTS)
     set_source_files_properties(src/kernels/cpu/kq_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
     set_source_files_properties(src/kernels/cpu/nvfp4_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma;-mf16c")
     set_source_files_properties(src/kernels/cpu/kq_avx1.cpp PROPERTIES COMPILE_OPTIONS "-mavx")
-    # the older CPUs' Q2_0 rows and activation quantizer (q2_avx1.cpp, issue #1699): SSE4.2 + AVX with
-    # AVX2/FMA/F16C explicitly off, so a -march=native build host cannot leak AVX2 code into the file that
-    # runs on a Sandy Bridge Xeon
-    set_source_files_properties(src/kernels/cpu/q2_avx1.cpp PROPERTIES COMPILE_OPTIONS
-                                "-msse4.2;-mavx;-mno-avx2;-mno-fma;-mno-f16c")
     # the older CPUs' i-quant expert rows (iq_avx1.hpp): SSE4.2 + AVX with AVX2/FMA/F16C explicitly off, so a
     # -march=native build host cannot leak AVX2 code into the file that runs on a Sandy Bridge Xeon
     set_source_files_properties(src/kernels/cpu/iq_avx1.cpp PROPERTIES COMPILE_OPTIONS
@@ -1987,6 +1986,10 @@ endif()
 
 # The opt-in lifecycle is a host-only test, including on non-CUDA builds.
 if(STRATA_BUILD_TESTS)
+  add_executable(poly_expert_io_test src/poly/expert_io_test.cpp)
+  target_link_libraries(poly_expert_io_test PRIVATE Threads::Threads)
+  add_test(NAME poly_expert_io_test COMMAND poly_expert_io_test)
+  set_tests_properties(poly_expert_io_test PROPERTIES TIMEOUT 30)
   add_executable(poly_hip_value_split_policy_test src/poly/hip_value_split_policy_test.cpp)
   add_test(NAME poly_hip_value_split_policy_test COMMAND poly_hip_value_split_policy_test)
   add_executable(poly_gdn_mma_control_test src/poly/gdn_mma_control_test.cpp)
@@ -2116,6 +2119,20 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
                                            ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
                                            ${_strata_poly_driver}
                                            Threads::Threads)
+  if(STRATA_BUILD_TESTS)
+    # Same engine sources/dependencies as the executable; a file fixture drives only the host I/O path.
+    get_target_property(_poly_io_sources strata-poly SOURCES)
+    list(REMOVE_ITEM _poly_io_sources src/poly/main.cpp)
+    add_executable(poly_expert_pipeline_test src/poly/expert_io_test.cpp ${_poly_io_sources})
+    target_compile_definitions(poly_expert_pipeline_test PRIVATE STRATA_TEST_EXPERT_ENGINE=1)
+    target_include_directories(poly_expert_pipeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                               ${_strata_gpu_include_directories})
+    target_link_libraries(poly_expert_pipeline_test PRIVATE strata_poly_mmq strata_kernels strata_spec ggml-cpu
+                          ggml-base ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
+                          ${_strata_poly_driver} Threads::Threads)
+    add_test(NAME poly_expert_pipeline_test COMMAND poly_expert_pipeline_test)
+    set_tests_properties(poly_expert_pipeline_test PROPERTIES TIMEOUT 30)
+  endif()
   # needs the model file, so it is run by hand: poly_expert_parity MODEL.gguf
   add_executable(poly_expert_parity src/poly/expert_parity.cpp src/poly/cpu_experts.cpp src/poly/kernels.cu)
   target_include_directories(poly_expert_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include

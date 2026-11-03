@@ -11,13 +11,6 @@
 #include <mutex>
 #include <numeric>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <cstdlib>
-#endif
 
 namespace strata::poly {
 namespace {
@@ -199,35 +192,6 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
     if (late)
         std::stable_partition(order.begin(), order.end(), [&](int u) { return !late[by[(size_t) run[(size_t) u]]]; });
 
-#if defined(_WIN32)
-    // A model larger than RAM faults its mapped experts in small clusters. Ask Windows for all three
-    // matrices of the selected experts together, as the other engine's GGUF reader does. Opt-in: on a
-    // model that fits RAM this extra call may cost more than it saves. This is only an I/O hint; failed
-    // or unavailable prefetch leaves the ordinary mapped reads below to fetch exactly the same bytes.
-    using Pvm = BOOL(WINAPI*)(HANDLE, ULONG_PTR, PWIN32_MEMORY_RANGE_ENTRY, ULONG);
-    static const Pvm prefetch = [] {
-        const char* v = std::getenv("STRATA_POLY_PREFETCH_EXPERTS");
-        if (v == nullptr || std::atoi(v) != 1) return (Pvm) nullptr;
-        return (Pvm) (void*) GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "PrefetchVirtualMemory");
-    }();
-    if (prefetch && rows <= 8) {
-        // Queue the GPU's independent work before waiting for the SSD. Do not launch it twice below.
-        if (meanwhile) {
-            (*meanwhile)();
-            meanwhile = nullptr;
-        }
-        static thread_local std::vector<WIN32_MEMORY_RANGE_ENTRY> ranges;
-        ranges.clear();
-        ranges.reserve((size_t) n_run * 3);
-        for (int i = 0; i < n_run; ++i) {
-            const CpuExpert& e = experts[by[(size_t) run[(size_t) i]]];
-            ranges.push_back({(PVOID) e.gate, (SIZE_T) ((size_t) n_ff * gu_row)});
-            ranges.push_back({(PVOID) e.up, (SIZE_T) ((size_t) n_ff * u_row)});
-            ranges.push_back({(PVOID) e.down, (SIZE_T) ((size_t) n_embd * d_row)});
-        }
-        if (!ranges.empty()) (void) prefetch(GetCurrentProcess(), (ULONG_PTR) ranges.size(), ranges.data(), 0);
-    }
-#endif
 
     float* hp = h.data();
     const int* byp = by.data();

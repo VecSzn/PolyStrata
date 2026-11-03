@@ -236,15 +236,33 @@ in total). The host CTest run passed 38 tests and skipped one; `expert_parity` a
 read the separate PolyStrata model fixture `pack/full/experts.bin`. Those two checks need that real expert pack
 and were not validated by the Ornith GGUF inference runs.
 
-On Windows, `STRATA_POLY_PREFETCH_EXPERTS=1` is an opt-in for models whose CPU experts are read from an SSD.
-It asks Windows for the selected experts' gate, up and down matrices together before computing them, while
-the GPU works on its cached experts. It uses the same weights and routing, with ordinary mapped reads as
-the fallback if the memory hint is unavailable or fails. It is off by default; a model already in RAM may
-not benefit. To enable it for one installed model, add this entry to its run config's `env` object:
+On Windows and Linux, `STRATA_POLY_PREFETCH_EXPERTS=1` is an opt-in for models whose CPU experts are read
+from an SSD. The engine prepares the selected experts before computing them, while the GPU works on its
+cached experts. Windows uses a batched `PrefetchVirtualMemory` hint; Linux uses page-aligned `MADV_WILLNEED`
+hints in 128 KiB pieces. These are read-ahead hints, not a promise that the bytes are resident. Ordinary
+mapped reads still fetch the same weights if a hint fails. The option is off by default, independent of
+`STRATA_READ_AHEAD`; a model already in RAM may not benefit. To enable it for one installed model, add this entry to its run config's `env` object:
 
 ```json
 "env": {"STRATA_POLY_PREFETCH_EXPERTS": "1"}
 ```
+
+Without `--ram-experts-mib` (or with a negative value), this adds no staging pool or read threads. With an
+explicit nonnegative RAM budget, the existing asynchronous reader owns its slots and reads: repeated
+experts reuse pending work, CPU workers wait for completion, and failed reads retry before a mapped-copy
+fallback. Prefetch skips those slots and hints only experts still using mappings, including when no slot
+is free. Gate, up and down use their own byte lengths. Only calls of at most eight tokens get the extra
+mapped hints; larger prompt batches keep their existing path.
+
+| Prefetch | Explicit nonnegative RAM budget | Reads |
+| --- | --- | --- |
+| Off | No | Ordinary mapped reads |
+| On | No | Mapped reads with OS read-ahead hints |
+| Off | Yes | Existing asynchronous staging and mapped fallback |
+| On | Yes | Same staging, plus hints for mapped fallback experts |
+
+The option does not select a RAM budget, change the reader count or change the existing next-layer
+prediction policy. Disabling it does not disable the asynchronous reader requested by a RAM budget.
 
 On 2026-11-03, IQ1_S was compared with and without this option on the same RX 9070 XT / 7800X3D / 63 GB RAM
 Windows PC above. Each run started a new server from the same saved expert profile, then answered the same

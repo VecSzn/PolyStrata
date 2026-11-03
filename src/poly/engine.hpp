@@ -15,6 +15,7 @@
 #pragma once
 
 #include "cpu_experts.hpp"
+#include "expert_io.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -183,6 +184,7 @@ struct Image {
 };
 
 class Engine {
+    friend struct ExpertIoProbe;   // exercises the real slot/queue integration with a temporary file
 public:
     Engine();
     virtual ~Engine();
@@ -887,34 +889,23 @@ protected:
     void pool_reseed();
     // Read ahead: moe_router() also scores the next MoE layer's router on this layer's input (on the card, copied to
     // h_ahead_ before ev_, a part of a window apiece, as ev_row_; a head recorded as a graph copies it too), and
-    // moe() hands that layer's likeliest experts that the CPU would read from the files to pool_threads_ before
+    // moe() hands that layer's likeliest experts that the CPU would read from the files to the read queue before
     // this layer's are computed.
     // A slot being read is pool_state_ 1 (2: the read failed); its layer's call waits for it.
     int prefetch_k_ = 0;   ///< the next MoE layer's guessed top k
     float* ahead_dev_ = nullptr;
     float* h_ahead_ = nullptr;
     std::unique_ptr<std::atomic<uint8_t>[]> pool_state_;
-    struct PoolJob {   ///< a piece of an expert's read into its slot, or with s = kTouch / kDrop pages of the mapping
-        uint8_t* dst;
-        const uint8_t* src;
-        size_t n;
-        int32_t s;
-    };
+    using PoolJob = ExpertReadJob;
     static constexpr int32_t kTouch = -1, kDrop = -2;
-    std::deque<PoolJob> pool_jobs_;
-    /// kTouch / kDrop jobs, taken when pool_jobs_ is empty: in the first answer after the load the cache traded
-    /// 2,700 experts, and their page work ahead of the reads held the reads a call waited for up
-    std::deque<PoolJob> pool_pages_;
+    std::unique_ptr<ExpertReadQueue> pool_reader_;
+    bool prefetch_experts_ = false;
+    void prefetch_cpu_experts(const Layer& L, int il, const CpuExpert* host, int count, int rows,
+                             const std::function<void()>*& meanwhile);
     std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
     std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
     void pool_queue(const Layer& L, size_t e, int32_t s, bool first);
-    std::mutex pool_m_;
-    std::atomic<int> pool_n_{0};   ///< the jobs in pool_jobs_ and pool_pages_, which pool_loop() spins on
-    std::condition_variable pool_cv_;
-    bool pool_quit_ = false;
-    std::vector<std::thread> pool_threads_;
     void pool_ahead(int j, int n, size_t part, int k);
-    void pool_loop();
     void pool_run(const PoolJob& job);
     bool pool_help();
     std::mutex swap_m_;
