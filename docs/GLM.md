@@ -280,7 +280,8 @@ goes on from where it stopped, and an edit goes back to the nearest checkpoint.
 | `--eos-ids ID,ID,...` | from the GGUF | tokens that end a reply |
 | `--tail-skip N` | 0; setup gives Qwen3.6 6 | an expert outside VRAM that every token of a window ranks at place N+1 or later among its experts is left out: faster, and the answers move a little |
 | `STRATA_FREEZE_EXPERTS` | not set | hold the split of the routed experts between the card and the CPU still for the engine's whole run, so a greedy answer is a function of the request alone: same request, same answer, bit for bit. With guesses on (`--window` above 1 and a block or `--lookup`) the block's guesses and their windows still take their sizes from the machine's pace, which the freeze does not hold: on the cards measured so far it repeated with them on (RX 9060 XT, several thread counts and loads) and on one RTX 4070 laptop it did not — add `--window 1` for a repeat wherever the guesses are on. Measured cost: nothing measurable on the default path, 4-7% at a short prompt with the freeze set |
-| `STRATA_NO_SPILL=1` | not set or any nonzero value | keep parked conversations' blobs in heap instead of writing them to temporary files; parking still works but RAM use grows accordingly |
+| `STRATA_NO_SPILL=1` | not set | keep parked conversations' blobs in heap instead of writing them to temporary files; parking still works but RAM use grows accordingly |
+
 `strata-poly` with no arguments prints the list, with the options for running it without the server.
 
 `--kv q8_0` is new: it stores the attention K and V caches as ggml Q8_0 blocks and is opt-in for the
