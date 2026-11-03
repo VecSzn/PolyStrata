@@ -33,7 +33,8 @@ The server was ready 8.6 s after launch. A picture becomes 441 prompt tokens her
 question). The first request took 5.49 s of wall time because it starts the encoder; the next five took 4.2-4.7 s.
 `prompt_ms` is the engine's read of the prompt with the image embeddings and does not include the CPU encode, so
 client wall time minus `prompt_ms` is roughly the encode. Whole-machine VRAM was 6.9-7.1 GiB after each request — the
-same range as the text-only run, because the encoder ran on the CPU. The image files are beside this README.
+same range as the text-only run, because the encoder ran on the CPU. The six test images were generated for the
+run and are not kept; each row above and its entry in `vision.json` describe one of them.
 
 `vision.json` holds the same rows. Not checked: GPU image encoding, several pictures in one request, images with
 conversation history, and other cards.
