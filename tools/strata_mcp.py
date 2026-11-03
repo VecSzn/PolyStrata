@@ -146,6 +146,16 @@ FALLBACK_FAMILIES = {
                                     "download_gb": 28.6, "ram_gb": 33, "arena_gb": 26.9},
                            "Q3_K_M": {"about": "3-bit: the least RAM that still reads well",
                                       "download_gb": 37.5, "ram_gb": 42, "arena_gb": 35.8}}},
+    "groot": {"title": "Groot 19B-A3B 261023",
+              "about": "experimental qwen35moe on strata-poly; 3 sizes, 12.5 to 20.2 GB; "
+                       "Q4_K_M text measured on an 8 GB RTX 5060",
+              "tag": "groot-", "engine": "poly", "vision": True, "experimental": True, "unverified": True,
+              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP",
+                                    "download_gb": 12.5, "ram_gb": 17, "arena_gb": 9.937354752},
+                         "Q6_K": {"about": "6-bit K-quant, with embedded MTP",
+                                  "download_gb": 16.8, "ram_gb": 21, "arena_gb": 14.121172992},
+                         "Q8_0": {"about": "8-bit throughout, the largest and highest quality, including MTP",
+                                  "download_gb": 20.2, "ram_gb": 24, "arena_gb": 17.540579328}}},
     # a family with sizes of its own ("models"): two of these have a size of one name
     "qwen36": {"title": "Qwen3.6-35B-A3B", "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a "
                                                      "17 GB file, ~21 GB of RAM beside an 8 GB card; a smaller and a "
@@ -1104,7 +1114,8 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
          "description": "The models and sizes PolyStrata's setup offers (families: qwen = Qwen3.8-Flash-Next, swift = "
                         "Swift 1.5, coder = the Coder, unsloth = Unsloth's ~4-bit, glm = GLM 5.3 Flash, another "
                         "model with its own engine, deepseek = DeepSeek V4 Flash on that engine, lfm25 = LFM2.5-24B-A2B, "
-                        "flint = Flint 40B-A2.5B, kolibri = Kolibri 1, qwen36 = Qwen3.6-35B-A3B, ornith = Ornith 1.5, "
+                        "flint = Flint 40B-A2.5B, kolibri = Kolibri 1, qwen36 = Qwen3.6-35B-A3B, "
+                        "groot = Groot 19B-A3B (experimental; Q4_K_M text measured on an 8 GB RTX 5060), ornith = Ornith 1.5, "
                         "gemma4 = Gemma 4 26B-A4B and tiel = Tiel "
                         "Coder 35B-A3B, 11-25 GB models on that engine), with "
                         "download size, RAM needed, "
@@ -1133,7 +1144,9 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                                        "GB download, no images), lfm25 = LFM2.5-24B-A2B, flint = Flint 40B-A2.5B, "
                                        "kolibri = Kolibri 1 (Linux or Windows, one NVIDIA card, ~52 GB of RAM "
                                        "beside an 8 GB card, a 48 GB download, no images), qwen36 = "
-                                       "Qwen3.6-35B-A3B, ornith = Ornith 1.5, gemma4 = Gemma 4 26B-A4B, tiel = "
+                                       "Qwen3.6-35B-A3B, groot = Groot 19B-A3B (experimental; Q4_K_M text measured "
+                                       "on an 8 GB RTX 5060), "
+                                       "ornith = Ornith 1.5, gemma4 = Gemma 4 26B-A4B, tiel = "
                                        "Tiel Coder 35B-A3B (GLM's engine: one NVIDIA card, an 11-25 GB download, "
                                        "15-31 GB of RAM beside an 8 GB card by setup's estimate; images with "
                                        "vision except LFM2.5 and Flint)"},
@@ -1421,7 +1434,7 @@ class Tools:
                                                 s.setup_module().unsloth_budget(model, hw.get("ram_gb") or 0.0)):
                 context = 8192 if vram < 14 else 32768
             if families[family].get("engine") == "poly":
-                context = 32768                         # the one it was measured with, setup's own default
+                context = 32768                         # the shared strata-poly setup default
         if vision in ("yes", "gpu", "cpu") and d.get("vision", families[family].get("vision")) is False:
             raise ToolError(f"images are not available with {families[family]['title']} {model} yet: use vision=no")
         if vision is not None and backend == "hip" and vision != "no":

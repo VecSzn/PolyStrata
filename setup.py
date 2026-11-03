@@ -94,6 +94,7 @@ HF_REVISIONS = {
     "Diffuspace/Clover-35B-A3B-Preview": "4b0402b65e523d0183a14c431955438714cb16ff",                     # 2026-10-28
     "unsloth/Ornith-1.5-122B-GGUF": "3842d003341507c216295c6f28dfcd30349925c6",                          # 2026-10-20
     "ornith-ai/Ornith-1.5-122B": "dfa07bab90e90746ffbfc0b0cba3126eb9265de2",                              # 2026-10-20
+    "bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF": "0025df0d03fb385344394f4e5afd73ce47da0680",
 }
 
 
@@ -622,6 +623,38 @@ FAMILIES = {
                            (28634017760, "de2fac5230621125f0309046175a17f8cc554ee2fc2a199c0e6528f2e4aadd79"),
                            "Kolibri-1-Q3_K_M.gguf":
                            (37523996640, "b797de9cebb5f8b6e12e32a57c76776c83c2c077e6804fa4835aa6ab5e9e79da")}},
+    "groot": {"title": "Groot 19B-A3B 261023", "by": "GrootTeam; quantized by bartowski",
+              "about": "experimental qwen35moe on strata-poly; 3 sizes, 12.5 to 20.2 GB; "
+                       "Q4_K_M text measured on an 8 GB RTX 5060",
+              "hf": hf("bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF"),
+              "file": "GrootTeam_Groot-19B-A3B-261023-{q}.gguf",
+              "shards": 1, "tag": "groot-", "name": "groot-19b-a3b-261023", "engine": "poly",
+              "pack_tag": "groot-bartowski-",
+              "vision": True, "experimental": True, "unverified": True, "row_bytes": 22528,
+              "validation": "Q4_K_M text, streaming and tool calls ran on an 8 GB RTX 5060; images, Q6_K, "
+                            "Q8_0 and other hardware are untested.",
+              "mmproj_hf": hf("bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF"),
+              "mmproj": "mmproj-GrootTeam_Groot-19B-A3B-261023-bf16.gguf", "vision_gb": 0.9, "vision_vram_gb": 1.6,
+              # Expert bytes come from each pinned tensor directory. VRAM beside them is the other weights
+              # plus a 2.5 GiB budget for state, 32K KV rows and scratch, rounded up to 0.1 GiB; not measured.
+              # Q4_0/Q4_1 contain type-3 experts and BF16 type-30 experts, outside the native GPU cache path.
+              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP",
+                                    "download_gb": 12.5, "ram_gb": 17, "arena_gb": 9.937354752,
+                                    "vram_beside_gb": 4.9, "memory_estimate": True, "draft": "own"},
+                         "Q6_K": {"about": "6-bit K-quant, with embedded MTP",
+                                  "download_gb": 16.8, "ram_gb": 21, "arena_gb": 14.121172992,
+                                  "vram_beside_gb": 5.0, "memory_estimate": True, "draft": "own"},
+                         "Q8_0": {"about": "8-bit throughout, the largest and highest quality, including MTP",
+                                  "download_gb": 20.2, "ram_gb": 24, "arena_gb": 17.540579328,
+                                  "vram_beside_gb": 5.0, "memory_estimate": True, "draft": "own"}},
+              "sha256": {"GrootTeam_Groot-19B-A3B-261023-Q4_K_M.gguf":
+                         (12484339584, "c941e12a231b40b8fb9f6ad7f6601878d72db39c2c62aefb185fbe5c7d0c2e29"),
+                         "GrootTeam_Groot-19B-A3B-261023-Q6_K.gguf":
+                         (16791324544, "f784a74600c6a2986006909330aed5eeb1b931893c84505077f2595ad8e861fc"),
+                         "GrootTeam_Groot-19B-A3B-261023-Q8_0.gguf":
+                         (20230129536, "7e414a5e4dbb5aa3074a69b36104b2c8cdc188432527956a6ed9c916906a1882"),
+                         "mmproj-GrootTeam_Groot-19B-A3B-261023-bf16.gguf":
+                         (902822208, "0140cef0473d63595a030c68b75b2c8d110bb623bb12ae5993c0cfdfb2d2b0a7")}},
     "qwen36": {"title": "Qwen3.6-35B-A3B", "by": "Qwen; quantized by Unsloth",
                "about": "on the strata-poly engine: one NVIDIA card, Linux or Windows; a 17 GB file, ~21 GB of RAM "
                         "beside an 8 GB card; a smaller and a larger size too",
@@ -6714,7 +6747,11 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     if cuda_tk == 12:
         warn(f"{title}'s engine with CUDA 12 is compiled here (the ready-made one is CUDA 13)" +
              (": on Pascal / Volta it is untested" if int(gpu["arch"]) < CUDA13_MIN_ARCH else ""))
-    if WIN and not fam.get("windows"):
+    if fam.get("unverified"):
+        warn(f"{title}: tensor headers match an existing engine. "
+             f"{fam.get('validation', 'Text, tools, images and memory use have not been validated on hardware.')} "
+             "Estimates are not measurements; see docs/GROOT.md.")
+    elif WIN and not fam.get("windows"):
         confirm_risk(f"{title} has been run on Linux only: its engine compiles on Windows, the model was not tried "
                      "there", bool(a.family), a.yes, f"{title} has not been tried on Windows",
                      f"use Linux, or --family {family} --yes to try it here")
@@ -6777,8 +6814,9 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         "(the OS file cache).")
     if room < beside + 2:
         enc = vision == "gpu"                          # the encoder's share may be what does not fit
-        confirm_risk(f"{title} takes about {beside} GB of VRAM before any expert (measured on a 32 GB "
-                     f"card at a 32K context)" + (f" and its image encoder {fam['vision_vram_gb']} GB" if enc else "") +
+        basis = "estimated, not measured" if d.get("memory_estimate") else "measured on a 32 GB card at a 32K context"
+        confirm_risk(f"{title} takes about {beside} GB of VRAM before any expert ({basis})" +
+                     (f" and its image encoder {fam['vision_vram_gb']} GB" if enc else "") +
                      f"; {gpu_name(gpu)} has less than it takes to start", bool(a.model), a.yes,
                      f"{title} needs more VRAM than {vram:.0f} GB",
                      ("--vision cpu keeps the image encoder off the card; " if enc else "") +
@@ -6786,7 +6824,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         warn(f"going on with {vram:.0f} GB of VRAM, as you chose")
     elif vram < 30:
         ran = fam.get("ran_on_gb", 32)                 # a card of 8 GB reports 8,188 MiB
-        warn((f"{title} has run on no card under {ran} GB. " if round(vram) < ran else "") +
+        warn((f"{title} has run on no card under {ran} GB. " if round(vram) < ran and not fam.get("unverified") else "") +
              f"On {vram:.0f} GB about {100 * held / d['arena_gb']:.0f}% of {title}'s experts fit in VRAM "
              f"({100 * poly_held_gb(d, 31.84) / d['arena_gb']:.0f}% on a 32 GB card): more of every answer is "
              "computed on the CPU, so it is slower")
@@ -6801,7 +6839,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     ok(f"size: {model}")
     tag = fam["tag"] + custom_gguf_tag(_sg, model)
 
-    if a.context:
+    if a.context is not None:
         ctx = a.context
         if not 16 <= ctx <= 1048576:
             fail(f"--context {ctx}: {title} takes 16 to 1048576 tokens")
@@ -6943,7 +6981,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     ok("model file present")
 
     step(6, "preparing the model for PolyStrata")
-    pack = find_in([data, *elsewhere], f"packs/{tag.lower()}") or data / "packs" / tag.lower()
+    pack_tag = fam.get("pack_tag", fam["tag"]) + custom_gguf_tag(_sg, model)
+    pack = find_in([data, *elsewhere], f"packs/{pack_tag.lower()}") or data / "packs" / pack_tag.lower()
     if not (pack / "tokenizer" / "vocab.json").exists():
         run([sys.executable, str(ROOT / "tools" / "strata_tokenizer.py"), "--gguf", str(gguf), "--out", str(pack)],
             env=dict(os.environ, STRATA_GGUF_PY=str(llama / "gguf-py")))   # writes <pack>/tokenizer/
@@ -7598,7 +7637,8 @@ def main() -> int:
     ap.add_argument("--family", choices=list(FAMILIES) + list(PREVIEW_FAMILIES),
                     help="qwen = Qwen3.8-Flash-Next, swift = Swift 1.5, glm = GLM 5.3 Flash (docs/GLM.md), deepseek = "
                          "DeepSeek V4 Flash, lfm25 = LFM2.5-24B-A2B, flint = Flint 40B-A2.5B, qwen36 = "
-                         "Qwen3.6-35B-A3B on strata-poly, clover = Clover-35B-A3B-Preview, ornith = "
+                         "Qwen3.6-35B-A3B on strata-poly, groot = Groot 19B-A3B (experimental; docs/GROOT.md), "
+                         "clover = Clover-35B-A3B-Preview, ornith = "
                          "Ornith 1.5, gemma4 = Gemma 4 26B-A4B, tiel = Tiel Coder 35B-A3B, minicpmv = MiniCPM-V 4.7 "
                          "35B-A3B, ornith122 = Ornith 1.5 122B (docs/BACKENDS.md), qwen36-strata = Qwen3.6-35B-A3B on the Strata project's "
                          "own engine (UD-Q4_K_XL and up, 32 GB of RAM or more; pictures with --vision, several "

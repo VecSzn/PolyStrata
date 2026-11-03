@@ -98,6 +98,27 @@ class Registry(unittest.TestCase):
         g = registry.find(registry.discover(self.root), "gemma")
         self.assertEqual(g["display_name"], "Gemma 4 26B-A4B UD-Q3_K_M")
 
+    def test_groot_reuses_qwen35_and_respects_mtp_override(self):
+        cfg = install(self.root, "groot-19b-a3b-261023-q4_k_m", "qwen35moe",
+                      "Groot-19B-A3B-261023-Q4_K_M.gguf")
+        gguf(self.root / "Groot-19B-A3B-261023-Q4_K_M.gguf",
+             general__architecture="qwen35moe", general__size_label="19B-A3B",
+             qwen35moe__expert_count=128, qwen35moe__expert_used_count=8,
+             qwen35moe__nextn_predict_layers=1, qwen35moe__context_length=262144)
+        data = json.loads(cfg.read_text())
+        data["display_name"] = "Groot 19B-A3B 261023 Q4_K_M"
+        data["vision"] = {"gpu": False}
+        cfg.write_text(json.dumps(data))
+        entry = registry.describe(cfg)
+        self.assertEqual((entry["backend"], entry["status"], entry["mtp"]), ("qwen35moe", "available", True))
+        self.assertEqual((entry["params_total"], entry["params_active"], entry["quantization"]),
+                         ("19B", "3B", "Q4_K_M"))
+        self.assertTrue(entry["multimodal"])
+        self.assertEqual(entry["display_name"], data["display_name"])
+        data["args"].append("--no-draft")
+        cfg.write_text(json.dumps(data))
+        self.assertFalse(registry.describe(cfg)["mtp"])
+
     def test_what_cannot_run_says_why(self):
         install(self.root, "other", "llama", "other.gguf")
         cfg = install(self.root, "gone", "gemma4", "gone.gguf")
