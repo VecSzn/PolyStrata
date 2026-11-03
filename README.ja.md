@@ -44,6 +44,7 @@ GLM 5.3 Flash と DeepSeek V4 Flash 以外は Windows でも動きます。ま�
 
 サーバーは動かしたまま、インストール済みのモデルを切り替えられます（[方法](docs/BACKENDS.md#changing-the-model)、英語）。
 
+PolyStrata は [VecSzn](https://github.com/VecSzn) が作りました。
 PolyStrata は Niko1221 の [Strata](https://github.com/Niko1221/Strata) をもとにしています。
 別のリポジトリにしている理由、AMD や VRAM の少ないカード、ファインチューンなどの質問は [FAQ](docs/FAQ.md)（英語）にあります。
 
@@ -141,7 +142,7 @@ Qwen3.6、Clover、Ornith 1.5、Gemma 4、Tiel Coder、MiniCPM-V の 6 つのモ
 AI コーディングアシスタント（Claude Code、Cursor、Codex、GitHub Copilot など）を使っていますか？ これを貼り付けてください：
 
 ```text
-Set up PolyStrata on this PC for me: https://github.com/VecSzn/PolyStrata - follow docs/AI_SETUP.md in that repository.
+Set up PolyStrata on this PC for me: https://github.com/simplexai-labs/PolyStrata - follow docs/AI_SETUP.md in that repository.
 ```
 
 AI がグラフィックカード、RAM、ディスクを調べて、合うモデルを選びます。それからインストールして起動し、
@@ -150,7 +151,7 @@ PolyStrata のインストール、起動、停止もできます。
 
 ### 自分でやる
 
-[PolyStrata をダウンロード](https://github.com/VecSzn/PolyStrata/archive/refs/heads/main.zip)して展開します（または `git clone` します）。
+[PolyStrata をダウンロード](https://github.com/simplexai-labs/PolyStrata/archive/refs/heads/main.zip)して展開します（または `git clone` します）。
 **Windows：** **`START-HERE.bat`** をダブルクリック。**Linux：** PolyStrata フォルダーで **`./setup.sh`** を実行します。
 
 手順は NVIDIA でも AMD でも同じです。インストーラーがカードを見つけて、それに合うエンジンを用意します。
@@ -256,7 +257,7 @@ PolyStrata のインストール、起動、停止もできます。
 - **ポート 8080 がすでに使われていると表示される。** PolyStrata はもう動いています。そのウィンドウを探してください。
 
 ほかの問題と解決方法：[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。それでも解決しない場合は
-[issue](https://github.com/VecSzn/PolyStrata/issues) を作成し、PolyStrata フォルダーにある `strata-<model>.log` を添付してください。
+[issue](https://github.com/simplexai-labs/PolyStrata/issues) を作成し、PolyStrata フォルダーにある `strata-<model>.log` を添付してください。
 セキュリティの問題を見つけたら、非公開で報告してください：[SECURITY.md](SECURITY.md)。
 
 ## しくみ

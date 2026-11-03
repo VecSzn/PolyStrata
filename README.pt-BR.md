@@ -52,6 +52,7 @@ notebook com uma placa de 8 GB.
 O servidor pode trocar entre os modelos instalados enquanto está rodando
 ([como](docs/BACKENDS.md#changing-the-model), em inglês).
 
+O PolyStrata foi criado por [VecSzn](https://github.com/VecSzn).
 O PolyStrata é feito sobre o [Strata](https://github.com/Niko1221/Strata) de Niko1221.
 Por que é um repositório separado, placas AMD e menores, fine-tunes e outras perguntas: [FAQ](docs/FAQ.md) (em inglês).
 
@@ -151,7 +152,7 @@ Do que cada um dos seis (Qwen3.6, Clover, Ornith 1.5, Gemma 4, Tiel Coder e Mini
 Você usa um assistente de programação com IA (Claude Code, Cursor, Codex, GitHub Copilot, ...)? Cole isto nele:
 
 ```text
-Set up PolyStrata on this PC for me: https://github.com/VecSzn/PolyStrata - follow docs/AI_SETUP.md in that repository.
+Set up PolyStrata on this PC for me: https://github.com/simplexai-labs/PolyStrata - follow docs/AI_SETUP.md in that repository.
 ```
 
 Ele verifica sua placa de vídeo, RAM e disco e escolhe o modelo que cabe. Depois instala, inicia e explica como
@@ -160,7 +161,7 @@ conectar seus apps. Ferramentas de IA também podem instalar, iniciar e parar o 
 
 ### Ou faça você mesmo
 
-[Baixe o PolyStrata](https://github.com/VecSzn/PolyStrata/archive/refs/heads/main.zip) e descompacte (ou use `git clone`).
+[Baixe o PolyStrata](https://github.com/simplexai-labs/PolyStrata/archive/refs/heads/main.zip) e descompacte (ou use `git clone`).
 **Windows:** clique duas vezes em **`START-HERE.bat`**. **Linux:** rode **`./setup.sh`** na pasta do PolyStrata.
 
 **Mac (Apple Silicon, M1 a M5, macOS 15 ou mais recente):** instale uma vez as Command Line Tools da Apple (`xcode-select --install` no Terminal; o Xcode em si não é necessário). Depois abra o Terminal na pasta do PolyStrata e rode **`./setup.sh`**. Ele compila o motor do Mac no seu Mac (uns 7 minutos), faz as mesmas perguntas, baixa o modelo e o inicia. Da próxima vez, `./setup.sh` inicia na hora. Qual tamanho cabe no seu Mac e qual a velocidade: [docs/MAC.md](docs/MAC.md). O motor do Mac roda só o Qwen3.8-Flash-Next; os outros onze modelos precisam de uma placa NVIDIA ou AMD.
@@ -269,7 +270,7 @@ Reinicie o PolyStrata (`START-HERE.bat` ou `./setup.sh`) depois da mudança. Par
 - **Diz que a porta 8080 já está em uso.** O PolyStrata já está rodando. Procure a janela dele.
 
 Mais problemas e como resolver: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Ainda sem solução? Abra uma
-[issue](https://github.com/VecSzn/PolyStrata/issues) e anexe o `strata-<model>.log` da pasta do PolyStrata. Encontrou um
+[issue](https://github.com/simplexai-labs/PolyStrata/issues) e anexe o `strata-<model>.log` da pasta do PolyStrata. Encontrou um
 problema de segurança? Informe em particular: [SECURITY.md](SECURITY.md).
 
 ## Como funciona?

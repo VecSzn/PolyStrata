@@ -49,6 +49,7 @@ with an 8 GB card as well.
 
 The server can change between installed models while it runs ([how](docs/BACKENDS.md#changing-the-model)).
 
+PolyStrata was created by [VecSzn](https://github.com/VecSzn).
 PolyStrata is built on [Strata](https://github.com/Niko1221/Strata) by Niko1221.
 Why it is a separate repo, AMD and smaller cards, fine-tunes and other questions: [FAQ](docs/FAQ.md).
 
@@ -147,7 +148,7 @@ What Qwen3.6, Clover, Ornith 1.5, Gemma 4, Tiel Coder and MiniCPM-V each need an
 Do you use an AI coding assistant (Claude Code, Cursor, Codex, GitHub Copilot, ...)? Paste this into it:
 
 ```text
-Set up PolyStrata on this PC for me: https://github.com/VecSzn/PolyStrata - follow docs/AI_SETUP.md in that repository.
+Set up PolyStrata on this PC for me: https://github.com/simplexai-labs/PolyStrata - follow docs/AI_SETUP.md in that repository.
 ```
 
 It checks your graphics card, RAM and disk and picks the model that fits. Then it installs and starts it and tells
@@ -156,7 +157,7 @@ you how to connect your apps. AI tools can also install, start and stop PolyStra
 
 ### Or do it yourself
 
-[Download PolyStrata](https://github.com/VecSzn/PolyStrata/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
+[Download PolyStrata](https://github.com/simplexai-labs/PolyStrata/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
 **Windows:** double-click **`START-HERE.bat`**. **Linux:** run **`./setup.sh`** in the PolyStrata folder.
 
 **Mac (Apple Silicon, M1 to M5, macOS 15 or newer):** install Apple's Command Line Tools once
@@ -272,7 +273,7 @@ Restart PolyStrata (`START-HERE.bat` or `./setup.sh`) after the change. To undo,
 - **It says port 8080 is already in use.** PolyStrata is already running. Look for its window.
 
 More problems and their fixes: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Still stuck? Open an
-[issue](https://github.com/VecSzn/PolyStrata/issues) and attach `strata-<model>.log` from the PolyStrata folder. Found a
+[issue](https://github.com/simplexai-labs/PolyStrata/issues) and attach `strata-<model>.log` from the PolyStrata folder. Found a
 security problem? Report it privately: [SECURITY.md](SECURITY.md).
 
 ## How does it work?
