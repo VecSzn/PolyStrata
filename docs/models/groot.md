@@ -3,9 +3,9 @@
 [Bartowski's Groot GGUFs](https://huggingface.co/bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF) use `qwen35moe`,
 already implemented by `strata-poly`. Setup offers three quantizations (Q4_K_M, Q6_K and Q8_0) and their optional
 BF16 image projector.
-Q4_K_M ran on Windows 11, an RTX 5060 Laptop 8 GB and 32 GB of RAM: text on 2026-11-02 (it answered, streamed,
-kept its reasoning separate and called a tool) and images on 2026-11-03; [the measured speeds](#measured-on-an-rtx-5060-laptop-8-gb)
-are below. Q6_K, Q8_0 and other hardware have not been run. Matching tensor headers alone are not a correctness or
+Q4_K_M text ran on Windows 11, an RTX 5060 Laptop 8 GB and 32 GB of RAM on 2026-11-02: it answered, streamed,
+kept its reasoning separate and called a tool; [the measured speeds](#measured-on-an-rtx-5060-laptop-8-gb) are below.
+Q6_K, Q8_0, images and other hardware have not been run. Matching tensor headers alone are not a correctness or
 speed measurement.
 
 ## Choose it during setup
@@ -94,35 +94,7 @@ The benchmark's 256-token answers reached the limit while still thinking, so the
 tokens. A separate request with room to finish answered "hello from groot", a streamed request kept content and
 reasoning separate, and a tool request returned `get_weather({"city":"Paris"})` with `finish_reason: tool_calls`.
 The raw run is in
-[bench/results/2026-11-02-groot-q4_k_m-rtx5060-laptop](../../bench/results/2026-11-02-groot-q4_k_m-rtx5060-laptop/README.md).
-
-A rerun on 2026-11-03 on the `add-groot-family` branch (`ca522caa`, the same tree as `8ab2be06`) reproduced that
-table: decode was 93.8-101.5 tok/s cold and 83.9-101.3 after one warm-up request, and prefill 1,446-1,929 tok/s on
-the two long prompts. VRAM peaked at 7.09-7.18 GiB and RAM at 18.3-21.3 GiB, whole machine. The 21-token row is the
-unstable one: 6.4 tok/s before a warm-up against 122.7 after, because a 21-token read is mostly set-up work.
-The raw runs are in
-[bench/results/2026-11-03-groot-q4_k_m-rtx5060-laptop](../../bench/results/2026-11-03-groot-q4_k_m-rtx5060-laptop/README.md).
-
-### Draft and batch parity
-
-With `--no-gpu-experts --expert-swaps 0 --cpu-share 0 --tail-skip 0`, the same prompt ids with the MTP block and
-with `--no-draft` gave the same 64 tokens on all three test prompts (11, 13 and 638 tokens; 35/45, 30/39 and 33/58
-guesses kept with MTP on). `--batch 3 --check-batch 3` answered a 3,000-token prompt, the same prompt without its
-first token and without its first two, alone and then together: all 32 tokens matched for all three sequences, both
-with every expert on the CPU and with setup's profile (1,869 of 5,120 experts in VRAM).
-Raw rows: [bench/results/2026-11-03-groot-draft-parity](../../bench/results/2026-11-03-groot-draft-parity/README.md).
-
-### Compared with llama.cpp
-
-llama.cpp 0.4.1-dev, built from source at the pinned commit with CUDA on arch 120, read the same GGUF. On the same
-4,000-token prompt and sampler settings, Strata with MTP read it at 1,881 tok/s against 625 for llama.cpp's best
-arm (`--fit on --fit-target 512`) and decoded at 80.7 against 50.0 tok/s at temperature 0; at 0.7 it was 1,860
-against 618 and 86.0 against 51.0. Time to first token was 2.15 s against 6.49 s. llama.cpp's own MTP arm
-(`--spec-type draft-mtp`) decoded at 52.3 and 49.0 tok/s with 0.41-0.47 of its guesses kept, against Strata's
-0.70-0.76. One round, two reps, 4K only; llama.cpp was not tuned beyond `--fit`.
-Greedy 200-token answers: the code answer was identical character for character (813 characters); the story
-diverged after 165 characters, and both stayed coherent.
-Raw rows: [bench/results/2026-11-03-groot-q4_k_m-llamacpp-rtx5060-laptop](../../bench/results/2026-11-03-groot-q4_k_m-llamacpp-rtx5060-laptop/README.md).
+[bench/results/2026-11-02-groot-q4_k_m-rtx5060-laptop](../bench/results/2026-11-02-groot-q4_k_m-rtx5060-laptop/README.md).
 
 ## Hardware and shared engine features
 
@@ -150,11 +122,7 @@ The tokenizer declares `gpt2` with the `qwen35` pretokenizer. The image projecto
 `qwen3vl_merger` and projects to the text model's 2,048-wide embeddings.
 Images use the existing server/web upload and OpenAI-compatible image-content path.
 CPU image encoding is the automatic choice for an 8 GB card; `--vision gpu` explicitly requests GPU encoding.
-Six fresh 768×512 test images on 2026-11-03 (a code and a random number of shapes) got 5 of 6 answers exactly
-right: the codes 6/6 and the square counts 6/6, with one circle count wrong. A picture became 441 prompt tokens;
-the first request took 5.5 s because it starts the CPU encoder, the next five 4.2-4.7 s, and VRAM stayed at the
-text-only 6.9-7.1 GiB. Raw rows and the images:
-[bench/results/2026-11-03-groot-vision-rtx5060-laptop](../../bench/results/2026-11-03-groot-vision-rtx5060-laptop/README.md).
+Real image-answer correctness and memory use still need validation.
 
 Once running, use the local web app at `http://127.0.0.1:8080`, the OpenAI API under `/v1`, or Anthropic
 messages at `/v1/messages`. The API model ID is `groot-19b-a3b-261023-q4_k_m`.
@@ -173,13 +141,10 @@ Groot does not set an approximate tail-skipping override.
 
 ## What remains to be measured
 
-- Compare text logits and tokenizer IDs against a compatible reference runtime, and chunked prefill at more than
-  one prompt size; greedy answers (identical for the 200-token code answer) and batch parity were compared, not
-  logits.
+- Compare text logits/output, tokenizer IDs and chunked prefill against a compatible reference runtime.
 - Exercise the Anthropic API, multi-turn tools, model switching and explicit context-limit errors; streaming, one
   tool call and the OpenAI API were checked.
-- Test several pictures in one request, GPU image encoding, images with conversation history, and image answers on
-  a second card; one picture at a time on the CPU encoder was checked.
+- Test images; this run did not download the projector.
 - Measure Q6_K and Q8_0, other cards, longer contexts and repeated requests.
 
 The Q4_K_M table above is the first measured RTX 5060 throughput and RAM/VRAM peak. The model's trained context is 262,144 tokens;
