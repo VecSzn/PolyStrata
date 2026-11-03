@@ -39,11 +39,11 @@ The optional CUDA [GDN prefill adapter](DETAILS.md#strata-poly-chunked-gdn-prefi
 three quantizations (Q4_K_M by default, Q6_K or Q8_0, 12.5 to 20.2 GB) and the optional 0.9 GB image projector
 through the existing `qwen35moe` path. Their tensor headers match
 that backend. Q4_K_M text ran on Windows 11 with an 8 GB RTX 5060 Laptop: chat, streaming, separate reasoning
-and one tool call, at 1,296–1,905 prefill and 95–97 decode tokens/s ([the measured run](GROOT.md#measured-on-an-rtx-5060-laptop-8-gb)).
+and one tool call, at 1,296–1,905 prefill and 95–97 decode tokens/s ([the measured run](models/groot.md#measured-on-an-rtx-5060-laptop-8-gb)).
 Q6_K, Q8_0, images, Linux and other cards still need validation. The shared context menu
 offers 8K, 32K (default), 64K and 128K; `--context` overrides it. The engine detects the embedded MTP block normally.
 Hardware-aware expert caching, CPU experts, parallel requests and multi-GPU settings use the shared paths, not a
-specific card preset. Installation and estimates are in [GROOT.md](GROOT.md).
+specific card preset. Installation and estimates are in [groot.md](models/groot.md).
 
 ## Install
 

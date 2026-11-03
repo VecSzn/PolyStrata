@@ -43,12 +43,13 @@ class Pins(unittest.TestCase):
                 self.assertRegex(sha, r"^[0-9a-f]{64}$")
                 self.assertAlmostEqual(d["download_gb"], size / 1e9, delta=0.05)
                 self.assertEqual(d["draft"], "own")
-                self.assertTrue(d["memory_estimate"])
+                if quant != "Q4_K_M":
+                    self.assertEqual(d["memory_basis"], "estimated, not measured")
                 self.assertEqual(round(setup.poly_ram_need(d, 8.0)), d["ram_gb"])
         self.assertEqual(setup.POLY_GGUF_ARCHS.get("groot", ("qwen35moe",)), ("qwen35moe",))
-        self.assertTrue(fam["unverified"])
-        self.assertIn("Q4_K_M text", fam["validation"])
-        self.assertNotIn("ran_on_gb", fam)
+        self.assertTrue(fam["windows"])
+        self.assertEqual(fam["ran_on_gb"], 8)
+        self.assertIn("Q4_K_M text", fam["about"])
         self.assertNotIn("tail_skip", fam)
         self.assertNotIn("no_draft", fam)
         self.assertNotIn("contexts", fam)
@@ -56,10 +57,10 @@ class Pins(unittest.TestCase):
         for hip in (False, True):
             self.assertIn("groot", setup.menu_families(hip))
 
-    def test_estimates_fit_the_target_but_are_not_measurements(self):
+    def test_measured_q4_k_m_and_estimated_bigger_sizes(self):
         d = setup.family_models("groot")["Q4_K_M"]
+        self.assertIn("7.05 GiB peak measured", d["memory_basis"])
         self.assertEqual(d["arena_gb"], 9937354752 / 1e9)
-        self.assertTrue(d["memory_estimate"])
         self.assertEqual(round(setup.poly_ram_need(d, 8.0)), d["ram_gb"])
         self.assertTrue(setup.poly_fits(d, 32.0, 8.0, False))
         self.assertGreater(setup.poly_ram_need(d, 8.0 - 1.6), setup.poly_ram_need(d, 8.0))
@@ -84,7 +85,7 @@ class Pins(unittest.TestCase):
 class Main(unittest.TestCase):
     setUp, tearDown, main = glm_tests.Main.setUp, glm_tests.Main.tearDown, glm_tests.Main.main
 
-    def test_windows_text_setup_names_what_is_untested(self):
+    def test_windows_text_setup_defaults(self):
         code, out, cfg = self.main(family="groot", ram=32.0, vram=8.0, win=True)
         self.assertEqual(code, 0, out)
         fam = setup.FAMILIES["groot"]
@@ -100,10 +101,8 @@ class Main(unittest.TestCase):
         self.assertNotIn("--draft-model", args)
         self.assertNotIn("--tail-skip", args)
         self.assertEqual([Path(r[1]).name for r in self.runs], ["strata_tokenizer.py"])
-        self.assertIn("images, Q6_K, Q8_0 and other hardware are untested", out)
         self.assertNotIn("has been run on Linux only", out)
         self.assertNotIn("has run on no card", out)
-        self.assertNotIn("tokens/s after a full prompt", out)
 
     def test_startup_menu_selects_downloads_and_configures_groot(self):
         original_main = setup.main

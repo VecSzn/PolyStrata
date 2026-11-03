@@ -63,8 +63,10 @@ All downloads are pinned to revision `0025df0d03fb385344394f4e5afd73ce47da0680` 
 The engine keeps expert tensors in the model's RAM-backed file cache and caches as many as fit in VRAM.
 Q4_K_M's directory contains 9.94 GB of routed experts and 2.54 GB of other weight tensors.
 Each size's VRAM estimate is its non-expert tensor bytes in GiB plus a 2.5 GiB budget for state, KV rows and scratch,
-rounded up to 0.1 GiB. This gives Q4_K_M 4.9 GiB beside its experts.
-That budget and its roughly 17 GB RAM estimate beside an 8 GiB card are estimates, not measured peaks.
+rounded up to 0.1 GiB. This gives Q4_K_M 4.9 GiB beside its experts — a conservative budget over the measured run
+below, where the card held 3.5 GiB of experts and peaked at 7.05 GiB VRAM (whole machine).
+The measured Q4_K_M RAM peak was 21.8 GiB, whole machine; setup's 17 GB figure beside an 8 GiB card is a fit
+estimate. Q6_K's and Q8_0's figures are still estimates; nothing has measured them.
 The budget uses the 32K context, including the draft block's KV rows (22,528 bytes per token over 11 attention layers).
 Windows, the display, other applications, image encoding and longer requests need headroom.
 The expert cache adapts to available VRAM; total model size is not a full-GPU fit claim.

@@ -149,8 +149,9 @@ FALLBACK_FAMILIES = {
     "groot": {"title": "Groot 19B-A3B 261023",
               "about": "experimental qwen35moe on strata-poly; 3 sizes, 12.5 to 20.2 GB; "
                        "Q4_K_M text measured on an 8 GB RTX 5060",
-              "tag": "groot-", "engine": "poly", "vision": True, "experimental": True, "unverified": True,
-              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP",
+              "tag": "groot-", "engine": "poly", "vision": True, "experimental": True,
+              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP; text measured "
+                                             "on an 8 GB RTX 5060 (peak 7.05 GiB VRAM, 21.8 GiB RAM)",
                                     "download_gb": 12.5, "ram_gb": 17, "arena_gb": 9.937354752},
                          "Q6_K": {"about": "6-bit K-quant, with embedded MTP",
                                   "download_gb": 16.8, "ram_gb": 21, "arena_gb": 14.121172992},
