@@ -1,0 +1,57 @@
+{
+ "model": "groot-19b-a3b-261023-q4_k_m",
+ "backend": "qwen35moe",
+ "quantization": "Q4_K_M",
+ "context": 32768,
+ "max_tokens": 256,
+ "runs": [
+  {
+   "prompt": "short",
+   "prompt_tokens": 21,
+   "output_tokens": 256,
+   "ttft_s": 3.285,
+   "prefill_tok_s": 6.4,
+   "decode_tok_s": 93.8,
+   "cache_hit_rate": 0.754,
+   "mtp_offered": 164,
+   "mtp_accepted": 136,
+   "mtp_acceptance": 0.829,
+   "vram_peak_gib": 7.09,
+   "ram_peak_gib": 21.29,
+   "gpu_util_mean": 25.5,
+   "cpu_util_mean": 23.1
+  },
+  {
+   "prompt": "long-2000",
+   "prompt_tokens": 2952,
+   "output_tokens": 256,
+   "ttft_s": 2.165,
+   "prefill_tok_s": 1446.2,
+   "decode_tok_s": 99.0,
+   "cache_hit_rate": 0.675,
+   "mtp_offered": 203,
+   "mtp_accepted": 168,
+   "mtp_acceptance": 0.828,
+   "vram_peak_gib": 7.18,
+   "ram_peak_gib": 19.74,
+   "gpu_util_mean": 75.2,
+   "cpu_util_mean": 35.7
+  },
+  {
+   "prompt": "long-8000",
+   "prompt_tokens": 10649,
+   "output_tokens": 256,
+   "ttft_s": 4.639,
+   "prefill_tok_s": 1886.4,
+   "decode_tok_s": 101.5,
+   "cache_hit_rate": 0.726,
+   "mtp_offered": 218,
+   "mtp_accepted": 173,
+   "mtp_acceptance": 0.794,
+   "vram_peak_gib": 7.18,
+   "ram_peak_gib": 19.74,
+   "gpu_util_mean": 83.5,
+   "cpu_util_mean": 22.5
+  }
+ ]
+}
