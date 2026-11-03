@@ -1,0 +1,77 @@
+{
+ "load_s": 8.6,
+ "runs": [
+  {
+   "run": 1,
+   "expected": "CEF-30; 3; 2",
+   "answer": "CEF-30; 3; 2",
+   "correct": true,
+   "wall_s": 5.49,
+   "prompt_n": 441,
+   "prompt_ms": 592.1,
+   "pred_n": 11,
+   "pred_tps": 105.3,
+   "vram_after_mib": 6932
+  },
+  {
+   "run": 2,
+   "expected": "LLR-53; 5; 2",
+   "answer": "LLR-53; 6; 2",
+   "correct": false,
+   "wall_s": 4.2,
+   "prompt_n": 441,
+   "prompt_ms": 497.5,
+   "pred_n": 12,
+   "pred_tps": 84.7,
+   "vram_after_mib": 7052
+  },
+  {
+   "run": 3,
+   "expected": "NMB-20; 5; 2",
+   "answer": "NMB-20; 5; 2",
+   "correct": true,
+   "wall_s": 4.57,
+   "prompt_n": 441,
+   "prompt_ms": 507.4,
+   "pred_n": 12,
+   "pred_tps": 73.2,
+   "vram_after_mib": 7106
+  },
+  {
+   "run": 4,
+   "expected": "SAX-85; 5; 2",
+   "answer": "SAX-85; 5; 2",
+   "correct": true,
+   "wall_s": 4.71,
+   "prompt_n": 441,
+   "prompt_ms": 518.3,
+   "pred_n": 12,
+   "pred_tps": 86.1,
+   "vram_after_mib": 6946
+  },
+  {
+   "run": 5,
+   "expected": "XEF-93; 4; 1",
+   "answer": "XEF-93; 4; 1",
+   "correct": true,
+   "wall_s": 4.55,
+   "prompt_n": 441,
+   "prompt_ms": 506.5,
+   "pred_n": 12,
+   "pred_tps": 103.4,
+   "vram_after_mib": 6946
+  },
+  {
+   "run": 6,
+   "expected": "VRZ-73; 4; 4",
+   "answer": "VRZ-73; 4; 4",
+   "correct": true,
+   "wall_s": 4.58,
+   "prompt_n": 441,
+   "prompt_ms": 496.0,
+   "pred_n": 12,
+   "pred_tps": 95.4,
+   "vram_after_mib": 6946
+  }
+ ]
+}
