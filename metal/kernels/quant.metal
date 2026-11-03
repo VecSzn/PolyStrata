@@ -27,11 +27,13 @@
 #define T_IQ3_S 21
 #define T_IQ2_S 22
 #define T_IQ4_XS 23
+#define T_NVFP4 40
 #define T_Q2_0 42
 #define T_Q2_0R 142   // Q2_0 read with raw activations (codes - 1 in the decoder; no prepared x needed)
 
 template <int F> struct fmt;
 // QK block elements, BB block bytes, UNIT weights per unit, TAB words of threadgroup table
+template <> struct fmt<T_NVFP4> { enum { QK = 64, BB = 36, UNIT = 16, TAB = 1 }; };
 template <> struct fmt<T_Q2_0>    { enum { QK = 64,  BB = 18,  UNIT = 16, TAB = 1 }; };
 template <> struct fmt<T_Q2_0R>   { enum { QK = 64,  BB = 18,  UNIT = 16, TAB = 1 }; };
 template <> struct fmt<T_IQ3_XXS> { enum { QK = 256, BB = 98,  UNIT = 16, TAB = 256 + 32 }; };
@@ -75,6 +77,7 @@ static inline uint g_iq2xxs(threadgroup const uint* tab, uint i, int w) { return
 static inline uint g_iq2xs(threadgroup const uint* tab, uint i, int w) { return ctab ? uint(iq2xs_grid[i] >> (32 * w)) : tab[2 * i + w]; }
 static inline uint g_iq2s(threadgroup const uint* tab, uint i, int w) { return ctab ? uint(iq2s_grid[i] >> (32 * w)) : tab[2 * i + w]; }
 
+template <> inline void load_tab<T_NVFP4>(threadgroup uint*, ushort, ushort) {}
 template <> inline void load_tab<T_Q2_0>(threadgroup uint*, ushort, ushort) {}
 template <> inline void load_tab<T_Q2_0R>(threadgroup uint*, ushort, ushort) {}
 template <> inline void load_tab<T_Q8_0>(threadgroup uint*, ushort, ushort) {}
@@ -310,4 +313,15 @@ static inline float lane_sum(float v) {
     if (LPR == 32) return simd_sum(v);
     for (ushort o = LPR / 2; o > 0; o >>= 1) v += simd_shuffle_xor(v, o);
     return v;
+}
+
+// NVFP4 is decoded in software: E2M1 values and unsigned E4M3 block scales.
+// The second (per-expert) weight scale stays in the ready pack's 16-byte tail.
+template <> inline float deq<T_NVFP4>(device const uchar* b,int u,thread float* q,threadgroup const uint*) {
+        uint d=b[u];uint e=(d>>3)&15,m=d&7;
+        float scale=(d==0 || d==127)?0.0f:ldexp(e?1.0f+float(m)/8.0f:float(m),e?int(e)-7:-9);
+        const float values[8]={0,.5f,1,1.5f,2,3,4,6};
+        for(int j=0;j<8;++j){uint v=b[4+(u%4)*8+j];uint lo=v&15,hi=v>>4;
+            q[j]=values[lo&7]*(lo&8?-1.0f:1.0f);q[j+8]=values[hi&7]*(hi&8?-1.0f:1.0f);}
+        return scale;
 }

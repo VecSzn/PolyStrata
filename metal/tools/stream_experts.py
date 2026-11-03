@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import metal_repack as R  # noqa: E402
 
-NL, NE = 48, 512
+NL = 48
 ALIGN = 16384
 
 
@@ -32,16 +32,21 @@ def plan(gguf: Path):
     first data offset."""
     rd = R.Reader(gguf)
     tab = {t["name"]: t for t in rd.tensors}
+    ne = tab["blk.0.ffn_gate_exps.weight"]["dims"][2]
+    if ne not in (256, 512):
+        raise ValueError(f"unsupported expert count: {ne}")
     lay = []
     for l in range(NL):
         g, u, d = (tab[f"blk.{l}.ffn_{k}_exps.weight"] for k in ("gate", "up", "down"))
-        lay.append((g, u, d, g["bytes"] // NE, u["bytes"] // NE, d["bytes"] // NE))
+        if any(len(t["dims"]) != 3 or t["dims"][2] != ne for t in (g, u, d)):
+            raise ValueError(f"inconsistent expert geometry at layer {l}")
+        lay.append((g, u, d, g["bytes"] // ne, u["bytes"] // ne, d["bytes"] // ne))
     head_len = 64 + NL * 32
     data0 = (head_len + ALIGN - 1) // ALIGN * ALIGN
     offs, at = [], data0
     for g, u, d, gs, us, ds in lay:
         offs.append(at)
-        at += NE * (gs + us + ds)
+        at += ne * (gs + us + ds)
         at = (at + ALIGN - 1) // ALIGN * ALIGN
     return rd, lay, offs, at, data0
 
@@ -61,6 +66,7 @@ def main() -> int:
     a = ap.parse_args()
     out = a.out or a.gguf.with_name(a.gguf.name + ".experts")
     rd, lay, offs, at, data0 = plan(a.gguf)
+    NE = lay[0][0]["dims"][2]
     head = struct.pack("<4sIIIQ", b"STRX", 1, NL, NE, os.path.getsize(a.gguf)).ljust(64, b"\0")
     for (g, u, d, gs, us, ds), o in zip(lay, offs):
         head += struct.pack("<QQQQ", o, gs, us, ds)

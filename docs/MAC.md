@@ -10,6 +10,160 @@ with 32 GB and an M1 Max with 34 GB, where the experts stream from the SSD (the 
 9,940-token prompt, Q2_0, the expert cache at 64 slots, as reported with the kernel fix #2348). Other chips are untested, and reports help
 ([COMMUNITY_BENCHMARKS.md](COMMUNITY_BENCHMARKS.md)).
 
+## Model coverage
+
+The Mac installer and `setup.sh` read every family and quantization from the shared `setup.py` catalog.
+The added choices are experimental until tested with their actual weights. The existing Qwen defaults stay the same.
+
+These families use native Metal `strata-poly`:
+
+| `--family` | Model family |
+|---|---|
+| `glm` | GLM 5.3 Flash |
+| `deepseek` | DeepSeek V4 Flash |
+| `qwen36` | Qwen3.6-35B-A3B |
+| `ornith` | Ornith 1.5 35B-A3B |
+| `gemma4` | Gemma 4 26B-A4B |
+| `tiel` | Tiel Coder 35B-A3B |
+| `minicpmv` | MiniCPM-V 4.7 35B-A3B |
+| `lfm25` | LFM2.5-24B-A2B |
+
+List their quantizations and download sizes, or set up an existing LFM file without downloading model assets:
+
+```sh
+./setup.sh --list-models
+./setup.sh --family lfm25 --model QAD-Q4_0 --gguf-dir /path/to/ggufs \
+  --no-download-models --yes --no-start
+```
+
+`--no-download-models` requires complete local model, draft and (when requested) projector files. Python packages
+and build dependencies are separate. Files retain the shared installer's filenames and pinned checksums.
+`--family` selects the smaller engine; a setup without it keeps the existing Qwen3.8 choice and defaults.
+Within a smaller family, the default is its smallest download; `--model` keeps an explicit choice.
+
+This is **experimental**. LFM2.5 UD-Q3_K_XL has passed the real-weight smoke test below; the other families and
+quantizations have not been tested with full weights on Metal. There is no broad model-quality evaluation.
+The measured Qwen3.8 numbers elsewhere on this page do not describe these families. The default smaller-model
+context is 8,192 tokens.
+
+The engine uses the shared PolyStrata architecture code, expert cache, CPU experts, conversations, batching and
+speculative decoding. It speaks the existing server protocol; OpenAI and Anthropic APIs and the web app remain
+in `serve/server.py`. `--parallel`, `--conversation-cache-mib` and `--vram-reserve-mib` can be written by setup.
+`--vision yes` builds the existing image encoder with Metal and uses the family's projector. The encoder builds
+on the validation Mac; real-image inference with these families is not validated. GLM uses native KDA,
+hyper-connections and sparse latent attention. DeepSeek uses native compression, indexer and attention kernels.
+
+The native implementation is in `metal/src/poly/`. It covers floating-point projections, quantized GGUF
+projections, expert routing, normalization and activation, attention with FP16/Q8 caches, rotary positions,
+convolution, and the recurrent delta network with speculative snapshots. The GGUF block decoders come from the
+same pinned ggml checkout as the CPU expert code. The current projection and attention kernels prioritize
+reference agreement; they have not been tuned for throughput.
+
+For these checks, add `-DSTRATA_METAL_POLY=ON` to the engine build below and run `ctest -L poly`. Tests include
+CPU-reference kernel comparisons, small generated GGUF fixtures for all five architectures, graph replay,
+CPU experts, batch-versus-single generation, and the native server protocol with conversation park/restore.
+Synthetic weights check execution and state handling, not language-model quality. Metal fences order copies
+and fills against compute, and macOS host-memory telemetry supplies the conversation cache's admission checks.
+
+### Smaller-model Metal defaults
+
+For `strata-poly` families, optimized expert dispatch and balanced memory management are enabled by default.
+Compatible Qwen35MoE models automatically use Q8 KV caching. No optimization flags are needed:
+
+```sh
+./setup.sh --family tiel --model UD-Q4_K_XL --context 32768 \
+  --yes --no-start
+```
+
+- Optimized dispatch (`--metal-optimize`, on by default) submits cached GPU experts while CPU experts run, and avoids empty
+  expert matrix-multiplication threadgroups. It keeps the existing dot-product arithmetic.
+  `--no-metal-optimize` disables it.
+- `--metal-memory balanced` (the default) grows KV buffers in 4,096-token steps, with 1,024 tokens ahead,
+  up to the selected context, and budgets expert copies against available unified memory.
+  It keeps 4 GiB of host-memory headroom in addition to the GPU reserve. Expert-cache growth waits
+  for two request-boundary observations with at least 512 MiB extra headroom after the
+  256 MiB refill cushion. Warming prioritizes
+  uncached experts and stops under pressure. Audited kernels declare the buffers each submission
+  needs; unaudited paths retain conservative residency.
+  `--metal-memory legacy` selects the original allocation policy.
+- Automatic KV selection uses Q8 when the model is Qwen35MoE with compatible head geometry,
+  otherwise FP16. `--poly-kv q8_0` explicitly selects Q8; `--poly-kv fp16` selects FP16.
+  Direct engine launches use `--kv` for these overrides.
+  Q8 is supported for the Qwen35MoE families `qwen36`, `ornith`, `tiel` and `minicpmv`.
+  Other architectures reject Q8 rather than silently substituting a format.
+
+Setup uses explicit command-line choices first, then saved explicit settings, then these defaults.
+Saved opt-outs survive setup reruns. A normal start does not rewrite the config; omitted controls use the
+new engine defaults. The original `strata` and separate `strata-q36` engines
+reject these installer options. These options carry no throughput guarantee; compare timings on the same
+Mac, model and prompt. Q8 changes KV precision and must be evaluated for the intended workload.
+Cache resizing under memory pressure can still pause requests; these defaults do not resolve that delay.
+Experimental kernel variants remain manual and existing hardware checks remain in force.
+
+After reading the local GGUF headers, setup reports the initial and maximum KV allocation estimates for
+Qwen35MoE, including an enabled draft block and the base sequence plus any parallel slots. It reports recurrent
+sequence state separately when the metadata permits it. Unsupported or missing geometry is shown as unknown;
+additional scratch, speculative snapshots and caches are also unknown. This is not a total RAM estimate:
+weights, expert copies, other applications and macOS need space too. Under the legacy policy, the full
+maximum-context KV cache is allocated at load on Metal even for a short prompt. The balanced policy keeps
+that maximum as the limit while starting with fewer rows. KV growth needs temporary space for
+both old and replacement buffers. If that cannot fit, the request reports an allocation error; it
+does not silently shorten the selected context. Explicit `--kv-whole` still allocates the full KV
+capacity. A frozen expert split is never resized to make room for KV growth.
+
+### Additional Qwen and ready-pack choices
+
+`qwen`, `swift`, `coder`, `unsloth` and `nvfp4` use the original `strata` Metal engine. This includes
+Qwen IQ2_XS; Swift IQ2_XS/IQ3_XXS/IQ3_S; Coder IQ1_M; Unsloth UD-IQ4_XS/Q8_0; and both NVFP4 packs.
+Coder's 256-expert routers and caches retain their own geometry. Swift is repacked losslessly so its dense
+weights and experts are available together; its PLE table remains in the original shard.
+
+NVFP4 reads the shared installer's pinned ready-pack manifests. The expert bytes and separate gate/up/down
+scales stay intact, and a bounded SSD cache supplies native Metal software decoding. There is no full-model
+conversion to another quantization. Its prompt path uses small native windows; throughput is unmeasured.
+Generated ready packs verify bounded reads and scale preservation for 256/512 experts. NVFP4 expert projections
+match ggml's decoder for 1, 4 and 8 tokens. Neither published NVFP4 pack has been run end to end on this Mac.
+
+`qwen36-strata` selects the separate `strata-q36` Metal executable, including UD-Q4_K_XL, UD-Q6_K_XL and Q8_0.
+It keeps the original driver's MTP, parallel sessions, hybrid CPU experts and server protocol. A build-time
+adapter reads `src/qwen35/q36_engine.cu`, emits Metal kernels and substitutes native dispatch calls. CUDA-only
+fused optimizations use equivalent unfused operations. This path is distinct from `qwen36` on `strata-poly`.
+Its generated model tests compare graph/plain/MTP generation, hybrid MTP, conversation replay and two parallel
+MTP slots. Reference checks cover recurrent state updates and split-K attention. Actual Qwen3.6 weights
+have not been validated on Metal.
+
+On the M1 Pro validation machine, GLM's generated in-file draft executes through the existing speculative
+protocol. DeepSeek's generated prompt crosses its 128-token compression boundary and restores a parked
+conversation. These checks establish execution and state handling, not output quality on the published models.
+Run the full native regression with `ctest --test-dir build-metal --output-on-failure`; individual groups use
+`ctest -L poly`, `ctest -L q36`, and the `nvfp4_parity` / `ready_stream` tests.
+
+### LFM2.5 real-weight smoke test
+
+On 2026-11-02, an Apple M1 Pro with 32 GiB unified memory and macOS 27.0.1 ran
+`LFM2.5-24B-A2B-UD-Q3_K_XL.gguf` (10,947,100,928 bytes) through native `strata-poly` and the existing Python
+server. Setup downloaded the file and verified SHA-256
+`d54834c785c7e265f1cb7375e47aa6f55a0b7cfab75816254c4d2e0c82fd5efc`.
+
+```sh
+./setup.sh --family lfm25 --model UD-Q3_K_XL --context 2048 --vision no --yes --no-start --no-browser
+./run-lfm25-ud-q3_k_xl.sh
+```
+
+The engine loaded in 20.8 seconds, using eight CPU threads. All 2,432 routed experts fit in its 9.5 GiB expert
+cache. Requests used temperature zero and disabled thinking (`reasoning_effort: "none"` for OpenAI requests,
+`thinking: {"type": "disabled"}` for Anthropic requests).
+
+After warmup, the prompt "Write a 300-word story about a robot learning to garden." generated the requested
+limit of 256 tokens: 442.3 ms prompt processing, 6,821.8 ms generation, **37.5 tokens/s decode**, and 7.266 seconds
+total HTTP time. These are one request's server-reported timings and client wall time, not a repeated benchmark.
+The story stopped at the token limit. The first request after loading took 4.115 seconds for 11 output tokens.
+
+OpenAI and Anthropic requests both answered `17 + 25` with `42`. A code request returned
+`def square(x): return x * x`; streaming returned `hello` and its completion marker. A tool request returned
+`get_weather` with `{"city":"Istanbul"}` as a structured tool call; no external weather tool was executed.
+This checks basic generation and API integration, not general accuracy, long contexts, or image inference.
+
 ## What you need
 
 - **An Apple Silicon Mac (M1 or newer).** Intel Macs cannot run it.
@@ -53,12 +207,15 @@ What the first run does (each step is skipped when it is already done):
 6. **Prepares the model:** the pack (seconds), and the MTP draft layer (about 5 GB of the original checkpoint). On a Mac that streams: the experts' copy instead of the draft layer (about 3 minutes on the M4, checked byte for byte against the model file).
 7. **Writes `strata-<model>.json` and `run-<model>.sh`, then starts the server.**
 
-The config uses the Mac defaults: `--spec 2` and the Q8_0 hyper-connection read (below). After that, `./setup.sh` or `./run-q2_0.sh` starts the model directly. The server is the same as on a PC:
+The config uses the Mac defaults: `--spec 2` and the Q8_0 hyper-connection read (below). In a terminal,
+`./setup.sh` presents model → quantization → context, using installed choices as defaults. `./run-q2_0.sh`
+(or the run script for your selected model) starts it directly. `--yes` and noninteractive runs skip the launcher's
+menu and retain the installer's automatic behavior. The server is the same as on a PC:
 - the OpenAI-compatible API on `http://127.0.0.1:8080/v1`;
 - the Anthropic API on `/v1/messages`;
 - the chat page on `http://127.0.0.1:8080/`.
 
-Options: `--model Q2_0|IQ3_XXS|IQ3_S|UD-Q4_K_XL|UD-Q5_K_XL|UD-Q6_K_XL` (the UD files are Unsloth's), `--vision yes|no`, `--context N`, `--port`, `--host` / `--api-key`, `--draft-vocab`, `--no-browser`,
+Options: `--family NAME --model QUANT` (all choices: `./setup.sh --list-models`), `--vision yes|no`, `--context N`, `--port`, `--host` / `--api-key`, `--draft-vocab`, `--no-browser`,
 `--data-dir`, `--models-dir`, `--gguf-dir`, `--setup` (another model or new settings), `--no-start`, `--check` (only
 check the Mac), `--build` (build the engine again).
 
@@ -175,10 +332,10 @@ The arena was 11.5-14.7 GB. Tokens per second, one token per step (no MTP), medi
 
 - **Images (vision):** `--vision yes` in setup. Checked on one test picture with Q2_0 and UD-Q4_K_XL: the answers equal the HIP engine's, and text output is unchanged with vision on. No other tests yet.
 - **Context:** measured up to 32K (needles, KL). Setup recommends 32K below 96 GB and 64K from 96 GB. Up to the model's 262K can be set, but it is not measured.
-- **One request at a time.** `--parallel` (batch slots) is not ported. Several clients queue.
+- **Original `strata` engine:** one request at a time; several clients queue. The `strata-poly` and `strata-q36` Metal paths support parallel slots, with synthetic batch checks.
 - **Not ported:** the control vector (`--control-vector-scaled`) and the PC tuning (`--calibrate`).
 - **Streaming:** measured at 32 GB only. The model's file must be on the internal SSD; an external disk is untested and likely much slower.
-- **Families:** the original Qwen3.8-Flash-Next and Unsloth's UD-Q4/Q5/Q6_K_XL are measured (above). Setup repacks Unsloth's shards into one file for the GPU. The Swift and Coder releases are not set up on Mac yet, and Qwen3.6 does not run on the Mac engine.
+- **Families:** all installer choices are exposed. Original Qwen3.8 and Unsloth measurements are above; newly ported Swift, Coder, NVFP4, GLM, DeepSeek and Qwen3.6 paths still need actual-weight validation. See [model coverage](#model-coverage).
 - **Engine only from source.** There is no ready-made Mac engine in the release zips.
 
 ## Switches (for testing; all off unless set, the defaults are above)
@@ -201,14 +358,44 @@ The arena was 11.5-14.7 GB. Tokens per second, one token per step (no MTP), medi
 | `STRATA_METAL_KEEP_HOST_WEIGHTS=1` | Streaming: keep the host code's own copies of the weights (2-3 GB) instead of giving them back to macOS |
 | `STRATA_METAL_TRACE=1`, `STRATA_METAL_PROFILE=1`, `STRATA_METAL_KPROF=T` | Per-window traces, a time breakdown, per-kernel GPU times |
 
-**Two opt-ins an M1 Max cannot run (measured on an M1 Max, macOS 26.6.2, Q2_0):** `STRATA_METAL_PROMPT_EXPERTS=v3` - the
-prompt's expert GEMMs with the M5's layout, `mm_gu3` - loses the threadgroup once a prompt spreads over more than 40
-threadgroups of it (35 pass, 40 fail; 190 tiles and the engine's tile both fail, one tile passes), so it is off there (the
-default is v2). `STRATA_METAL_ROUTE=1` - the router GEMV and `moe_route` fused into one dispatch - routes with stale
-logits and gives a different top-10 per run (two identical runs differ in ids, weights and plan; the logits themselves
-stay bitwise): the fusion hands the routing to the last threadgroup of the GEMV through a device counter, and this
-Metal's device atomics are relaxed-only, with no acquire to pair with the writers' fence. Both are off by default. The
-`no faster` measurement in the table is from the Macs above; on an M1 Max `ROUTE` is also wrong.
+**An opt-in an M1 Max cannot run (measured on an M1 Max, macOS 26.6.2, Q2_0):** `STRATA_METAL_PROMPT_EXPERTS=v3` — the
+prompt's expert GEMMs with the M5's layout, `mm_gu3` — loses the threadgroup once a prompt spreads over more than 40
+threadgroups of it (35 pass, 40 fail; 190 tiles and the engine's tile both fail, one tile passes). The default remains v2.
+
+`STRATA_METAL_ROUTE=1` previously handed routing to the last GEMV threadgroup through a device counter. On M1 it
+could route stale logits. It now computes all logits and routes within one threadgroup, with a device-memory barrier
+between them. BF16 and F32 routing pass bitwise comparisons against separate GEMV and routing dispatches on a
+32 GB M1 Pro, macOS 27.0.1, for windows of 1–4 tokens, including poisoned output buffers. This is a correctness
+check, not an inference-speed measurement. The option remains off by default.
+
+## Build and regression checks
+
+The standalone checks generate their own inputs and do not need model files or metal-cpp:
+
+```sh
+cmake -S metal -B build-metal-check -DCMAKE_BUILD_TYPE=Release
+cmake --build build-metal-check -j 4
+ctest --test-dir build-metal-check --output-on-failure
+```
+
+CTest registers the memory-budget check and kernel parity checks, and serializes GPU tests even with `ctest -j`.
+The benchmarks and model-dependent chain programs are separate. To include the engine and runtime checks, configure
+with `-DMETAL_CPP_DIR=/path/to/metal-cpp -DSTRATA_GGML_DIR=/path/to/llama.cpp`, using setup's pinned dependencies.
+`-DBUILD_TESTING=OFF` disables CTest registration. A passing kernel suite does not establish model generation,
+server behavior, or performance on other Apple chips.
+
+Pipeline handles share ownership across copies and release the native Metal pipeline when the last copy goes
+away. This avoids retaining every compiled pipeline after a model context is destroyed. `pipeline_lifetime`
+checks dispatch through a surviving copy and release of the last owner; it is not a throughput benchmark.
+
+Local validation uses AppleClang 21 on a 32 GB M1 Pro running macOS 27.0.1. The original engine, the opt-in
+strata-poly and strata-q36 engines and the Metal image encoder build. The full 58-check native suite passed;
+four added Q4/Q6 Qwen fixture/protocol checks also passed, along with the expanded indexer references.
+The installer, launcher, shell bootstrap and focused server configuration suite passed 126 Python tests.
+The existing LFM2.5 UD-Q3_K_XL weights were re-run through the rebuilt engine: both OpenAI and Anthropic APIs
+answered `17 + 25` with `42`; the temporary server was stopped. Other newly added actual-weight combinations
+remain unvalidated. Shared host changes select the Metal architecture list and add macOS memory telemetry
+behind platform guards. CUDA, HIP and SYCL were not built on this Mac.
 
 ## How it works
 
@@ -219,4 +406,4 @@ The code is in `metal/` (the engine's side in `metal/src/engine`, the kernels in
   - the experts are read in place from the mapped model file;
   - the hyper-connections, the GDN state and the QSA attention stay on the GPU;
   - a whole MTP draft round runs in one command buffer.
-- **The PC builds are byte-identical** with this code present. Every shared file's change is behind `STRATA_GPU_METAL` or `__APPLE__`, and the CUDA and HIP objects are compared after each change.
+- **PC paths stay separate:** these changes to shared host code are behind `STRATA_GPU_METAL` or `__APPLE__`; the Metal build has its own CMake project. CUDA and HIP object identity was not measured in this validation.

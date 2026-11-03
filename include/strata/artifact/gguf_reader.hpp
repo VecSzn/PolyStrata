@@ -420,7 +420,11 @@ private:
         struct stat st{};
         if (fstat(fd, &st) != 0) throw std::runtime_error("fstat failed");
         size_ = (uint64_t)st.st_size;
+#if defined(__APPLE__)
+        void* p = mmap(nullptr, size_, PROT_READ, MAP_SHARED, fd, 0);
+#else
         void* p = mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, fd, 0);
+#endif
         if (p == MAP_FAILED) throw std::runtime_error("mmap failed");
         base_ = (const uint8_t*)p;
 #endif

@@ -1022,6 +1022,10 @@ int check_batch(Engine& engine, const std::vector<int32_t>& ids, int k, long lon
 }
 
 void usage() {
+#if defined(STRATA_GPU_METAL)
+    std::fprintf(stderr, "Metal defaults: optimized expert overlap and compact MMQ (disable: --no-metal-optimize), "
+                         "--metal-memory legacy|balanced (default balanced)\n");
+#endif
     std::fprintf(stderr,
                  "usage: strata-poly --model FILE.gguf (--serve | --tokens ID,ID,... [--max-new N])\n"
                  "  --max-context N        tokens the attention caches hold (default 8192)\n"
@@ -1053,8 +1057,13 @@ void usage() {
                  "                         as a CUDA graph and replayed)\n"
                  "  --kv-whole             give the attention caches VRAM for the whole context at load (default: as\n"
                  "                         the conversation grows, the expert cache having the rest until then)\n"
-                 "  --kv fmt               the K and V attention caches' format: fp16 (default, unchanged) or q8_0\n"
-                 "                         (ggml Q8_0 blocks: half the KV VRAM, slightly different answers); opt-in\n"
+                 "  --kv fmt               the K and V attention caches' format: fp16 or q8_0\n"
+#if defined(STRATA_GPU_METAL)
+                 "                         default: Q8 for compatible Qwen35MoE geometry, otherwise FP16\n"
+#else
+                 "                         default: fp16; Q8 is opt-in\n"
+#endif
+                 "                         Q8 uses about half the KV memory and can change answers\n"
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
                  "                         into VRAM, in place of cached ones it uses less (default 64, 0 = the cache\n"
                  "                         stays as it was loaded)\n"
@@ -1138,6 +1147,18 @@ int main(int argc, char** argv) {
         };
         if (a == "--model") o.model = val();
         else if (a == "--serve") want_serve = true;
+#if defined(STRATA_GPU_METAL)
+        else if (a == "--metal-optimize") o.metal_optimize = true;
+        else if (a == "--no-metal-optimize") o.metal_optimize = false;
+        else if (a == "--metal-memory") {
+            const std::string policy = val();
+            if (policy != "legacy" && policy != "balanced") {
+                std::fprintf(stderr, "strata-poly: --metal-memory requires legacy or balanced\n");
+                return 2;
+            }
+            o.metal_balanced = policy == "balanced";
+        }
+#endif
         else if (a == "--max-context") o.max_context = std::atoi(val());
         else if (a == "--threads") o.threads = std::atoi(val());
         else if (a == "--vram-reserve-mib") o.vram_reserve_mib = std::atoi(val());

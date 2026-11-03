@@ -144,7 +144,8 @@ Pipeline Context::pipeline(int lib, const std::string& fn, const Constants& c) {
         std::exit(3);
     }
     Pipeline p;
-    p.handle = (__bridge_retained void*)ps;
+    p.owner = std::shared_ptr<void>((__bridge_retained void*)ps, [](void* ptr) { CFRelease(ptr); });
+    p.handle = p.owner.get();
     p.max_threads = (int)ps.maxTotalThreadsPerThreadgroup;
     if (const char* cap = std::getenv("STRATA_METAL_MAX_THREADS_CAP")) {   // test hook, see require_fit
         const int lim = std::atoi(cap);

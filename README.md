@@ -478,7 +478,9 @@ you how to connect your apps. AI tools can also install, start and stop PolyStra
 **Mac (Apple Silicon, M1 to M5, macOS 15 or newer):** install Apple's Command Line Tools once
 (`xcode-select --install` in Terminal; Xcode itself is not needed). Then open Terminal in the PolyStrata folder and run
 **`./setup.sh`**. It builds the Mac engine on your Mac (about 7 minutes), asks the same questions, downloads the model
-and starts it. Next time, `./setup.sh` starts it right away. Which size fits your Mac and how fast it is:
+and starts it. The shell launcher lists models, then their quantizations, then context sizes; installed choices
+are the defaults on later runs. Its catalog includes every `setup.py` family and quantization; newly ported
+Metal paths are experimental, with actual-weight coverage listed in the Mac guide. `./run-<model>.sh` starts a saved model directly. Which size fits your Mac and how fast it is:
 [docs/MAC.md](docs/MAC.md).
 
 The installer finds your card and sets up the right engine for it. It asks you a few questions:
@@ -498,7 +500,8 @@ All nine are in the installer's list of models. `./setup.sh --family glm`, `deep
 > PolyStrata loads 35-55 GB into your RAM and locks part of it for the graphics card. This is normal. Wait, and don't
 > close the window. The window shows what PolyStrata is doing.
 
-**Next time**, run `START-HERE.bat` (or `./setup.sh`) again. It starts right away and downloads nothing twice. Close
+**Next time**, run `START-HERE.bat` again, or use `./run-<model>.sh` on Mac/Linux to start directly. `./setup.sh`
+shows the model → quantization → context menu with your installed choices as defaults. Existing downloads are reused. Close
 its window to stop the model. `UPDATE.bat` (`./update.sh`) updates PolyStrata without starting it. Updating, Docker,
 several cards, where the files go and every option: [docs/INSTALL.md](docs/INSTALL.md).
 

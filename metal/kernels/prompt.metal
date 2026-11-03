@@ -9,15 +9,16 @@
 //   swiglu_h       h = half(silu(g) * u)
 //   moe_out        bo = y_routed + sigmoid(sg) * y_shared
 
-kernel void route_topk(device const float* logits [[buffer(0)]], device int* ids [[buffer(1)]],
+template <uint NE>
+kernel void route_topk_impl(device const float* logits [[buffer(0)]], device int* ids [[buffer(1)]],
                        device float* w [[buffer(2)]], constant uint& n_tok [[buffer(3)]],
                        uint3 tg [[threadgroup_position_in_grid]], ushort sg [[simdgroup_index_in_threadgroup]],
                        ushort lane [[thread_index_in_simdgroup]]) {
     const uint t = tg.x * 8 + sg;
     if (t >= n_tok) return;
-    device const float* l = logits + ulong(t) * 512;
+    device const float* l = logits + ulong(t) * NE;
     float v[16];
-    for (int i = 0; i < 16; ++i) v[i] = l[lane + 32 * i];
+    for (int i = 0; i < 16; ++i) v[i] = lane + 32 * i < NE ? l[lane + 32 * i] : -INFINITY;
     float mx = -INFINITY;
     for (int i = 0; i < 16; ++i) mx = max(mx, v[i]);
     for (ushort m = 16; m > 0; m >>= 1) mx = max(mx, simd_shuffle_xor(mx, m));
@@ -175,3 +176,6 @@ kernel void gemm_hc_up(device half* A [[buffer(0)]], device half* B [[buffer(1)]
 template [[host_name("gemm_hc_up_64_64_4")]] kernel decltype(gemm_hc_up<64, 64, 4>) gemm_hc_up<64, 64, 4>;
 template [[host_name("gemm_hc_up_64_32_4")]] kernel decltype(gemm_hc_up<64, 32, 4>) gemm_hc_up<64, 32, 4>;
 template [[host_name("gemm_hc_up_32_64_4")]] kernel decltype(gemm_hc_up<32, 64, 4>) gemm_hc_up<32, 64, 4>;
+
+template [[host_name("route_topk")]] kernel decltype(route_topk_impl<512>) route_topk_impl<512>;
+template [[host_name("route_topk_256")]] kernel decltype(route_topk_impl<256>) route_topk_impl<256>;

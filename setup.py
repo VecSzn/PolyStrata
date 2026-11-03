@@ -65,6 +65,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from tools import hf_auth
+
 ROOT = Path(__file__).resolve().parent
 WIN = os.name == "nt"
 # #214: every Hugging Face file comes from a fixed commit of its repository (the `sha` of
@@ -128,7 +130,7 @@ def ms_endpoint() -> str:
 def reachable(url: str, timeout: float = 5.0) -> bool:
     """Whether `url` answers a HEAD request with success (2xx, after redirects) within `timeout` seconds."""
     try:
-        urllib.request.urlopen(urllib.request.Request(url, method="HEAD", headers={"User-Agent": "strata-setup"}),
+        hf_auth.urlopen(urllib.request.Request(url, method="HEAD", headers={"User-Agent": "strata-setup"}),
                                timeout=timeout).close()
         return True
     except OSError:                                    # HTTPError too: an error page is not the file
@@ -1973,8 +1975,10 @@ def download(url, dst: Path, what=None):
     for attempt in range(5):
         try:
             req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "strata-setup"})
-            total = int(urllib.request.urlopen(req, timeout=60).headers.get("Content-Length", 0))
+            total = int(hf_auth.urlopen(req, timeout=60).headers.get("Content-Length", 0))
             break
+        except hf_auth.HFAuthError as e:
+            fail(str(e))
         except urllib.error.HTTPError as e:
             if e.code == 404 and hf_unpinned(url) != url:  # #214: the pinned revision is gone from the repository
                 warn(f"{what or dst.name}: not at the pinned revision any more; downloading the repository's "
@@ -2000,7 +2004,7 @@ def download(url, dst: Path, what=None):
             break                                      # ask for (a range past the end is a 416, retried 30 times)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "strata-setup", "Range": f"bytes={have}-"})
-            with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab" if have else "wb") as f:
+            with hf_auth.urlopen(req, timeout=60) as r, open(part, "ab" if have else "wb") as f:
                 if have and r.status != 206:                     # the server ignored the range: start over
                     f.seek(0)
                     f.truncate()
@@ -2020,6 +2024,8 @@ def download(url, dst: Path, what=None):
             print()
             if not total or have >= total:
                 break
+        except hf_auth.HFAuthError as e:
+            fail(str(e))
         except OSError as e:
             print()
             warn(f"download interrupted ({e}); retrying in 10 s ...")
@@ -5035,6 +5041,9 @@ def choices_from_config(cfg_path: Path) -> dict:
     family = next((f for f, d in FAMILIES.items() if d["tag"] and tag.startswith(d["tag"])), "qwen")
     model = (tag[len(FAMILIES[family]["tag"]):] if tag.startswith(FAMILIES[family]["tag"]) else tag).upper()
     sizes = FAMILIES[family].get("models", MODELS)     # a family's own sizes, where it has them
+    # Some published quant names are lowercase (MiniCPM-V's mix_q3gud_im).
+    # Match the filename case-insensitively, then return the catalog's canonical key.
+    model = next((m for m in sizes if m.casefold() == model.casefold()), model)
     if model not in sizes:                             # (sizes have no dash except UD-Q4_K_XL: the old rule)
         model = tag.split("-")[-1].upper()
     a = cfg.get("args", [])
@@ -7141,7 +7150,9 @@ def main() -> int:
                          "Linux or Windows (chosen by itself when the PC has no NVIDIA card PolyStrata can use), "
                          "sycl = Intel Arc, EXPERIMENTAL: Linux, built from source (docs/INTEL_ARC.md)")
     ap.add_argument("--skip-build", action="store_true", help=argparse.SUPPRESS)
+    hf_auth.add_argument(ap)
     a = ap.parse_args()
+    hf_auth.configure(ap, a)
     # a strata-poly family's own size (FAMILIES[f]["models"]) is checked by poly_setup, which names the family
     if a.model and a.model not in MODELS and a.family not in PREVIEW_FAMILIES and             not any(a.model in d.get("models", {}) for d in FAMILIES.values()):
         ap.error(f"--model {a.model} is a size of " + ", ".join(f"--family {f}" for f, d in PREVIEW_FAMILIES.items()

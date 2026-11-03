@@ -26,6 +26,11 @@ import time
 import urllib.error
 import urllib.request
 
+if __package__:
+    from . import hf_auth
+else:
+    import hf_auth
+
 # #214: a fixed commit of the checkpoint (its `sha` from https://huggingface.co/api/models/Qwen/Qwen3.8-Flash-Next
 # on 2026-09-30), so every install reads the same tensors; STRATA_MTP_REVISION overrides it (e.g. main).  When the
 # repository no longer has it, the current files are read instead, with a message (resolve_repo).
@@ -119,13 +124,15 @@ def get(url, start=None, end=None, retries=4):
             req = urllib.request.Request(url, headers={"User-Agent": "strata-mtp-fetch"})
             if start is not None:
                 req.add_header("Range", "bytes=%d-%d" % (start, end))
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with hf_auth.urlopen(req, timeout=120) as r:
                 if start is not None:
                     check_range(r.status, r.headers.get("Content-Range"), start, end)
                 data = r.read()
             if start is not None and len(data) != end - start + 1:
                 raise IOError("short range read: %d of %d" % (len(data), end - start + 1))
             return data
+        except hf_auth.HFAuthError:
+            raise
         except Exception as e:  # network errors are retried, then surfaced
             if attempt == retries - 1:
                 raise
@@ -162,7 +169,7 @@ def resolve_repo():
     try:
         req = urllib.request.Request(REPO + "model.safetensors.index.json", method="HEAD",
                                      headers={"User-Agent": "strata-mtp-fetch"})
-        urllib.request.urlopen(req, timeout=120).close()
+        hf_auth.urlopen(req, timeout=120).close()
     except urllib.error.HTTPError as e:
         if e.code == 404 and "/resolve/main/" not in REPO:
             print("the checkpoint's pinned revision %s is gone: reading its current files (main)" % REVISION,
@@ -311,4 +318,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except hf_auth.HFAuthError as error:
+        sys.exit(str(error))

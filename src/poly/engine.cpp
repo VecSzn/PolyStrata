@@ -10,6 +10,10 @@
 #include "qwen35.hpp"
 #include "runtime.hpp"
 #include "strata/poly/kernels.hpp"
+#if defined(STRATA_GPU_METAL)
+#include "strata/core/conversation_memory.hpp"
+#include "strata/gpu/metal.hpp"
+#endif
 #include "strata/kernels/native_mmvq.hpp"
 
 #include "ggml.h"
@@ -37,9 +41,24 @@
 #include <sched.h>
 #include <unistd.h>
 #endif
+#if defined(__APPLE__)
+#include <sys/mman.h>
+#endif
 
 namespace strata::poly {
 namespace {
+
+void drop_file_pages(const void* p, size_t n) {
+#if defined(__APPLE__)
+    constexpr uintptr_t kPage = 16384;
+    const uintptr_t a = ((uintptr_t) p + kPage - 1) & ~(kPage - 1);
+    const uintptr_t b = ((uintptr_t) p + n) & ~(kPage - 1);
+    if (b > a) (void) msync((void*) a, b - a, MS_INVALIDATE);
+#else
+    (void) p;
+    (void) n;
+#endif
+}
 
 // A launch's tiles are as wide as the most rows one of its matrices has, up to 128, and every matrix in it
 // computes whole tiles.  So a prompt batch's cached experts go by how many rows they have (moe_rows()): a launch
@@ -326,7 +345,9 @@ int default_reserve_mib(size_t total_b, bool ram_tight) {
 
 // The RAM the machine has free for the model's file, or 0 when it cannot tell.
 size_t ram_available() {
-#ifdef _WIN32
+#if defined(STRATA_GPU_METAL)
+    return strata::core::available_host_bytes().value_or(0);
+#elif defined(_WIN32)
     MEMORYSTATUSEX st{};
     st.dwLength = sizeof(st);
     return GlobalMemoryStatusEx(&st) ? (size_t) st.ullAvailPhys : 0;
@@ -376,6 +397,11 @@ Engine::~Engine() {
     if (st_) cudaStreamSynchronize(cs(st_));
     workers_.reset();
     mmq_.reset();
+#if defined(STRATA_GPU_METAL)
+    // Metal recordings retain their resources. Retire them before releasing the allocation owners.
+    for (void* g : graphs_) cudaGraphExecDestroy((cudaGraphExec_t) g);
+    graphs_.clear();
+#endif
     for (void* p : dev_allocs_) cudaFree(p);
     for (Kv& k : kv_) vmm_free(k);
     for (Seq& q : seqs_)
@@ -588,9 +614,192 @@ void Engine::vmm_free(Mapped& m) {
     m.base = 0;
 }
 
+#if defined(STRATA_GPU_METAL)
+namespace {
+constexpr size_t kMetalHostReserve = size_t(4) << 30;
+constexpr size_t kMetalGrowthMargin = size_t(512) << 20;
+constexpr size_t kMetalRefillCushion = size_t(256) << 20;
+}
+
+std::optional<uint64_t> Engine::metal_host_available() const {
+    return strata::core::available_host_bytes();
+}
+
+size_t Engine::metal_host_headroom() {
+    const auto memory = metal_host_available();
+    if (memory) return *memory > kMetalHostReserve ? size_t(*memory - kMetalHostReserve) : 0;
+    if (!metal_host_warning_) {
+        std::fprintf(stderr, "strata-poly: host memory is unavailable; balanced Metal uses the Metal budget only\n");
+        metal_host_warning_ = true;
+    }
+    return SIZE_MAX;
+}
+
+void Engine::metal_sync_memory() {
+    settle_swaps();
+    for (void* s : {st_, up_, rs_, swap_st_})
+        if (s) ck(cudaStreamSynchronize(cs(s)), "moving Metal allocations");
+}
+
+void Engine::metal_invalidate_graphs() {
+    // Graphs own resources as well as raw argument pointers. Clear every sequence's recordings before
+    // retiring an allocation; otherwise a parked sequence can replay old pointers or keep that memory alive.
+    for (void* g : graphs_) ck(cudaGraphExecDestroy((cudaGraphExec_t) g), "invalidating Metal graphs");
+    graphs_.clear();
+    for (Layer& l : layers_) {
+        l.heads.clear(); l.shared.clear(); l.tail.clear(); l.card_moe.clear(); l.rows_heads.clear();
+        l.card = -1;
+    }
+    passes_.clear();
+    tail_ = nullptr;
+    for (Seq& q : seqs_) {
+        q.heads.clear(); q.passes.clear(); q.tail = nullptr;
+    }
+    recorded_ = false;
+    // Force the next GPU-routed call to upload fresh expert addresses, including indirect dependencies.
+    h_slots_.clear();
+    if (d_slots_) {
+        const void* empty = nullptr;
+        ck(gpu::metal::register_indirect(d_slots_, &empty, 0), "clearing expert dependencies");
+    }
+}
+
+void Engine::metal_resize_cache(size_t limit) {
+    if (freeze_experts_) throw std::runtime_error("balanced Metal cannot resize a frozen expert cache");
+    const size_t previous_limit = metal_cache_limit_;
+    const int previous_reserve = opt_.vram_reserve_mib;
+    metal_cache_limit_ = limit;
+    try {
+        resize_card_cache(previous_reserve);
+    } catch (...) {
+        metal_cache_limit_ = previous_limit;
+        opt_.vram_reserve_mib = previous_reserve;
+        throw;
+    }
+    metal_cache_limit_ = previous_limit;
+    opt_.vram_reserve_mib = previous_reserve;
+}
+
+bool Engine::metal_mind_memory() {
+    if (!opt_.gpu_experts || n_moe_ == 0 || freeze_experts_) return false;
+    size_t free_b = 0, total_b = 0;
+    ck(cudaMemGetInfo(&free_b, &total_b), "balanced Metal budget");
+    const size_t reserve = size_t(std::max(reserve_mib_, 256)) << 20;
+    const size_t held = metal_cache_bytes_;
+    const size_t available = free_b > SIZE_MAX - held ? SIZE_MAX : free_b + held;
+    size_t target = available > reserve ? available - reserve : 0;
+    const auto host = metal_host_available();
+    if (host) {
+        const size_t host_total = *host > SIZE_MAX - held ? SIZE_MAX : size_t(*host) + held;
+        target = std::min(target, host_total > kMetalHostReserve ? host_total - kMetalHostReserve : 0);
+    } else {
+        (void) metal_host_headroom(); // issue the one-time fallback diagnostic
+    }
+    if (target < held) {
+        metal_growth_samples_ = 0;
+        metal_resize_cache(target);
+        return metal_cache_bytes_ != held;
+    }
+    // A refill leaves its own cushion. Require a useful net increase before rereading the whole cache.
+    if (all_cached() || target - held < kMetalGrowthMargin + kMetalRefillCushion ||
+        (host && *host < kMetalHostReserve + kMetalGrowthMargin)) {
+        metal_growth_samples_ = 0;
+        return false;
+    }
+    if (++metal_growth_samples_ < 2) return false;
+    metal_growth_samples_ = 0;
+    metal_resize_cache(target);
+    return metal_cache_bytes_ != held;
+}
+
+void Engine::metal_cover(int64_t end) {
+    if (end < 0 || end > opt_.max_context) throw std::runtime_error("the context is full");
+    if (end <= kv_rows_) { kv_reach_ = std::max(kv_reach_, end); return; }
+    const int64_t rows = kv_rows_for(end);
+    struct Replacement { size_t index, capacity; void* p; };
+    std::vector<Replacement> next;
+    size_t peak = 0;
+    for (size_t i = 0; i < bufs_.size(); ++i) {
+        const Buf& b = bufs_[i];
+        if (!b.per) continue;
+        const size_t capacity = size_t((rows + b.per - 1) / b.per) * b.bytes;
+        if (capacity <= b.capacity) continue;
+        if (capacity > SIZE_MAX - peak) throw std::runtime_error("Metal attention cache size overflow");
+        peak += capacity; // old buffers stay alive until every replacement has been copied and rebound
+        next.push_back({i, capacity, nullptr});
+    }
+    if (next.empty()) { kv_rows_ = rows; kv_reach_ = std::max(kv_reach_, end); return; }
+    metal_sync_memory();
+    const auto headroom = [&] {
+        size_t free_b = 0, total_b = 0;
+        ck(cudaMemGetInfo(&free_b, &total_b), "growing Metal attention cache");
+        const size_t reserve = size_t(std::max(reserve_mib_, 256)) << 20;
+        return std::min(free_b > reserve ? free_b - reserve : 0, metal_host_headroom());
+    };
+    size_t room = headroom();
+    bool reduced = false;
+    if (room < peak && exp_) {
+        if (freeze_experts_)
+            throw std::runtime_error("balanced Metal KV growth needs memory held by frozen experts; reduce context or unfreeze the cache");
+        const size_t cut = peak - room;
+        metal_resize_cache(metal_cache_bytes_ > cut ? metal_cache_bytes_ - cut : 0);
+        reduced = true;
+        room = headroom();
+    }
+    if (room < peak)
+        throw std::runtime_error("not enough unified memory to grow the Metal attention cache; existing rows are preserved");
+    const auto release = [&](void* p) {
+        if (!p) return;
+        const auto it = std::find(dev_allocs_.begin(), dev_allocs_.end(), p);
+        if (it != dev_allocs_.end()) dev_allocs_.erase(it);
+        ck(cudaFree(p), "retiring a Metal attention cache");
+    };
+    const std::vector<Buf> old = bufs_;
+    try {
+        for (Replacement& r : next) {
+            r.p = dmalloc(r.capacity, "growing the attention cache");
+            // Preserve the entire old capacity: speculative draft rows can extend beyond pos_.
+            ck(cudaMemcpyAsync(r.p, old[r.index].p, old[r.index].capacity, cudaMemcpyDeviceToDevice, cs(st_)),
+               "copying the attention cache");
+        }
+        ck(cudaStreamSynchronize(cs(st_)), "copying the attention cache");
+        metal_invalidate_graphs();
+        for (const Replacement& r : next) { bufs_[r.index].p = r.p; bufs_[r.index].capacity = r.capacity; }
+        again_ = 0;
+        alloc_caches();
+        again_ = SIZE_MAX;
+    } catch (...) {
+        // Rebind the old addresses before freeing replacements, including on an architecture rebind failure.
+        bufs_ = old;
+        again_ = 0;
+        try { alloc_caches(); } catch (...) { again_ = SIZE_MAX; std::terminate(); }
+        again_ = SIZE_MAX;
+        (void) cudaStreamSynchronize(cs(st_));
+        for (const Replacement& r : next) release(r.p);
+        throw;
+    }
+    for (const Replacement& r : next) release(old[r.index].p);
+    kv_rows_ = rows;
+    kv_reach_ = std::max(kv_reach_, end);
+    if (reduced && !freeze_experts_) {
+        // Refill only after the old KV buffers have gone; failure must not invalidate committed rows.
+        try { metal_resize_cache(SIZE_MAX); }
+        catch (const std::exception& e) { std::fprintf(stderr, "strata-poly: Metal expert cache remains reduced: %s\n", e.what()); }
+    }
+}
+#endif
+
 void* Engine::kv_alloc(size_t bytes, int per) {
     if (again_ != SIZE_MAX) return bufs_.at(again_++).p;
     const size_t all = (size_t) ((opt_.max_context + per - 1) / per) * bytes;
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced && opt_.kv_grow) {
+        const size_t capacity = (size_t) ((kv_rows_for(1) + per - 1) / per) * bytes;
+        void* p = dmalloc(capacity, "the initial attention cache");
+        bufs_.push_back({p, bytes, per, capacity});
+        return p;
+    }
+#endif
     void* p = nullptr;
     if (!vmm_ || !opt_.kv_grow) {
         p = dmalloc(all, "the attention cache");
@@ -603,6 +812,9 @@ void* Engine::kv_alloc(size_t bytes, int per) {
         p = (void*) kv_.back().base;
     }
     bufs_.push_back({p, bytes, per});
+#if defined(STRATA_GPU_METAL)
+    bufs_.back().capacity = all;
+#endif
     return p;
 }
 
@@ -610,6 +822,9 @@ void* Engine::seq_alloc(size_t bytes, const char* what) {
     if (again_ != SIZE_MAX) return bufs_.at(again_++).p;
     void* p = dmalloc(bytes, what);
     bufs_.push_back({p, bytes, 0});
+#if defined(STRATA_GPU_METAL)
+    bufs_.back().capacity = bytes;
+#endif
     return p;
 }
 
@@ -704,6 +919,12 @@ void Engine::copy_seq(int from, int to) {
 // reserve stays for what is recorded later.  A quarter of the reserve stays free whatever else took VRAM since
 // (mind_vram()).
 void Engine::cover(int64_t end) {
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced && opt_.kv_grow) {
+        metal_cover(end);
+        return;
+    }
+#endif
     kv_reach_ = std::max(kv_reach_, end);
     if (kv_.empty() || end <= kv_rows_) return;
     const int64_t rows = kv_rows_for(end);
@@ -1097,6 +1318,9 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
             });
         }
         h2d(d.p, q.data(), out);
+#if defined(STRATA_GPU_METAL)
+        if (opt_.metal_balanced) drop_file_pages(src, bytes);
+#endif
         return d;
     }
     const bool as_is = !fix && (t->type == kTypeF32 || (want != kF32 && t->type == kTypeBF16) ||
@@ -1110,6 +1334,9 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
     if (dense_at_ > dense_bytes_) throw std::logic_error("the dense arena is too small for " + t->name);
     if (as_is) {
         h2d(d.p, home(*t).data(*t), bytes);
+#if defined(STRATA_GPU_METAL)
+        if (opt_.metal_balanced) drop_file_pages(home(*t).data(*t), bytes);
+#endif
         return d;
     }
 
@@ -1118,6 +1345,9 @@ Dev Engine::upload(const TensorInfo* t, const std::string& name, int64_t n_in, i
     if (t->type == kTypeF32) std::memcpy(f.data(), home(*t).data(*t), bytes);
     else if (traits && traits->to_float) traits->to_float(home(*t).data(*t), f.data(), (int64_t) count);
     else throw std::runtime_error(t->name + " is " + shape_of(*t) + ", a type this engine cannot read");
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced) drop_file_pages(home(*t).data(*t), bytes);
+#endif
     if (fix)
         for (float& v : f) v = fix(v);
     if (type == kTypeF32) {
@@ -1154,8 +1384,11 @@ void Engine::fill_expert_cache() {
     const size_t ram = ram_available(), files = gg_->bytes() + (dg_ ? dg_->bytes() : 0);
     ram_tight_ = ram > 0 && files + (4ULL << 30) > ram;
     // 256 MiB at least, whatever was asked: the launches recorded later take theirs out of the reserve (mind_vram())
-    reserve_mib_ = opt_.vram_reserve_mib >= 0 ? std::max(opt_.vram_reserve_mib, 256)
-                                             : default_reserve_mib(total_b, ram_tight_);
+    reserve_mib_ = opt_.vram_reserve_mib >= 0 ? std::max(opt_.vram_reserve_mib, 256) :
+#if defined(STRATA_GPU_METAL)
+                   opt_.metal_balanced ? 256 :
+#endif
+                   default_reserve_mib(total_b, ram_tight_);
     const size_t reserve = size_t(reserve_mib_) << 20;
     if (free_b <= reserve) return;
 
@@ -1195,8 +1428,34 @@ void Engine::fill_expert_cache() {
 
     n_trade_ = (int) sizes.size();
     // sized again (resize_cache()), it is no larger than load() made it, or than its addresses with VMM
-    const size_t most = vmm_ ? std::min(all, total_b) : full_bytes_ > 0 ? full_bytes_ : all;
+    const size_t most = vmm_ ? std::min(all, total_b) :
+#if defined(STRATA_GPU_METAL)
+                       opt_.metal_balanced ? all :
+#endif
+                       full_bytes_ > 0 ? full_bytes_ : all;
     size_t arena = std::min({all, free_b - reserve, arena_.base ? arena_.reserved - 256 : most});
+#if defined(STRATA_GPU_METAL)
+    size_t metal_cap = 0, metal_stage_need = 0;
+    if (opt_.metal_balanced) {
+        for (const Layer& L : layers_) {
+            if (!L.moe) continue;
+            drop_file_pages(L.exp_gate, (size_t) n_expert_ * L.gu_stride);
+            if (L.gu_stride == L.gu_bytes) drop_file_pages(L.exp_up, (size_t) n_expert_ * L.gu_bytes);
+            drop_file_pages(L.exp_down, (size_t) n_expert_ * L.d_bytes);
+        }
+        metal_cap = metal_cache_limit_ != SIZE_MAX ? metal_cache_limit_ : metal_host_headroom();
+        arena = std::min(arena, metal_cap > 256 ? metal_cap - 256 : 0);
+        if (arena < all) {
+            if (mmq_ && !stage_) metal_stage_need += stage_bytes_ + 256 + kTail + 2 * chunk_bytes_;
+            if (!swap_ && opt_.expert_swaps > 0) metal_stage_need += (size_t) opt_.expert_swaps * slot_max_;
+            if (metal_cache_limit_ == SIZE_MAX && !recorded_)
+                metal_stage_need += size_t(scratch_at_) * sizeof(float) + state_n_ * sizeof(float) + (size_t(512) << 20);
+            else if (arena > (size_t(512) << 20))
+                metal_stage_need += kMetalRefillCushion;
+            arena = arena > metal_stage_need ? arena - metal_stage_need : 0;
+        }
+    }
+#endif
     if (arena == 0) return;
     if (vmm_) {   // in pieces, so that it can give some up to the attention caches (shrink_cache()) and grow
         if (!arena_.base) vmm_reserve(arena_, most + 256);   // addresses only: grow_cache() maps more of them
@@ -1212,6 +1471,10 @@ void Engine::fill_expert_cache() {
     } else {
         exp_ = (uint8_t*) dmalloc(arena + 256, "the expert cache");
     }
+#if defined(STRATA_GPU_METAL)
+    metal_cache_bytes_ = arena + 256;
+    if (!opt_.metal_balanced)
+#endif
     zero_vram(exp_, arena + 256);   // the slots' tails stay zero (kTail)
     // Which experts is by value; where they go is by layer, a layer's side by side in the experts' order.
     std::vector<Cand> taken;
@@ -1228,21 +1491,70 @@ void Engine::fill_expert_cache() {
         uint8_t* s = exp_ + exp_at_;
         exp_at_ += c.bytes;
         const size_t e = (size_t) c.e;
-        h2d(s, L.exp_gate + e * L.gu_stride, L.gu_bytes);
-        h2d(s + L.gu_bytes, L.exp_up + e * L.gu_stride, L.gu_bytes);
-        h2d(s + 2 * L.gu_bytes, L.exp_down + e * L.d_bytes, L.d_bytes);
+        const uint8_t* g_src = L.exp_gate + e * L.gu_stride;
+        const uint8_t* u_src = L.exp_up + e * L.gu_stride;
+        const uint8_t* d_src = L.exp_down + e * L.d_bytes;
+        h2d(s, g_src, L.gu_bytes);
+        h2d(s + L.gu_bytes, u_src, L.gu_bytes);
+        h2d(s + 2 * L.gu_bytes, d_src, L.d_bytes);
+#if defined(STRATA_GPU_METAL)
+        if (opt_.metal_balanced) {
+            const size_t used = 2 * L.gu_bytes + L.d_bytes;
+            if (c.bytes > used) {
+                if (void* hv = gpu::host_view(s + used)) std::memset(hv, 0, c.bytes - used);
+                else zero_vram(s + used, c.bytes - used);
+            }
+            drop_file_pages(g_src, L.gu_bytes);
+            drop_file_pages(u_src, L.gu_bytes);
+            drop_file_pages(d_src, L.d_bytes);
+        }
+#endif
         L.slot[e] = s;
         ++cached_;
     }
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced) {
+        if (arena + 256 > exp_at_) {
+            if (void* hv = gpu::host_view(exp_ + exp_at_)) std::memset(hv, 0, arena + 256 - exp_at_);
+            else zero_vram(exp_ + exp_at_, arena + 256 - exp_at_);
+        }
+        const size_t used_host = exp_at_ + 256 + metal_stage_need;
+        metal_warm_bytes_ = arena == all && metal_cap > used_host ? metal_cap - used_host : 0;
+        for (const Layer& L : layers_) {
+            if (!L.moe) continue;
+            drop_file_pages(L.exp_gate, (size_t) n_expert_ * L.gu_stride);
+            if (L.gu_stride == L.gu_bytes) drop_file_pages(L.exp_up, (size_t) n_expert_ * L.gu_bytes);
+            drop_file_pages(L.exp_down, (size_t) n_expert_ * L.d_bytes);
+        }
+    }
+#endif
     if (full_bytes_ == 0) {
         full_bytes_ = arena;
         full_cached_ = cached_;
     }
 }
 
+void Engine::ensure_stage() {
+    if (!mmq_ || stage_) return;
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced && all_cached()) return;
+#endif
+    if (stage_wide_ > stage_narrow_) {
+        vmm_reserve(stage_map_, stage_wide_ + 256 + kTail);
+        vmm_map(stage_map_, stage_narrow_ + 256 + kTail, SIZE_MAX, "the expert staging buffer");
+        stage_ = (uint8_t*) stage_map_.base;
+    } else {
+        stage_ = (uint8_t*) dmalloc(stage_bytes_ + 256 + kTail, "the expert staging buffer");
+    }
+    for (int b = 0; b < 2; ++b) h_stage_[b] = (uint8_t*) hmalloc(chunk_bytes_, "pinned memory");
+}
+
 // The thread and the stream that bring experts into the cache while an answer is written (follow()).
 void Engine::start_swaps() {
     if (swap_ || cached_ == 0 || opt_.expert_swaps == 0) return;
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced && all_cached()) return;
+#endif
     swap_ = std::make_unique<Swap[]>((size_t) opt_.expert_swaps);
     cudaStream_t up = nullptr;
     ck(cudaStreamCreateWithFlags(&up, cudaStreamNonBlocking), "cudaStreamCreate");
@@ -1269,6 +1581,11 @@ void Engine::resize_card_cache(int mib) {
     // requests; unfreeze_experts() ends the freeze before one begins).
     if (freeze_experts_) return;
     OnCard here(device_, split_);
+#if defined(STRATA_GPU_METAL)
+    // Every Metal graph retains its indirect resources, including in the legacy memory mode.
+    metal_sync_memory();
+    metal_invalidate_graphs();
+#endif
     ck(cudaStreamSynchronize(cs(st_)), "resize");
     const auto failed = [&] {
         std::lock_guard<std::mutex> l(swap_m_);
@@ -1292,8 +1609,12 @@ void Engine::resize_card_cache(int mib) {
         ck(cudaFree(exp_), "resize");
         exp_ = nullptr;
     }
+#if defined(STRATA_GPU_METAL)
+    metal_cache_bytes_ = 0;
+#endif
     opt_.vram_reserve_mib = mib < 0 ? asked_reserve_mib_ : mib;
     fill_expert_cache();
+    ensure_stage();
     start_swaps();
 }
 
@@ -1311,6 +1632,9 @@ bool Engine::mind_vram() {
 }
 
 bool Engine::mind_card_vram() {
+#if defined(STRATA_GPU_METAL)
+    if (opt_.metal_balanced) return metal_mind_memory();
+#endif
     if (!exp_ || reserve_mib_ <= 0) return false;
     // As shrink_cache(): a frozen answer's cache is the one its first token saw.
     if (freeze_experts_) return false;
@@ -1395,9 +1719,18 @@ void* Engine::seq_buf(int s, const void* p) const {
     const auto* q = (const uint8_t*) p;
     for (size_t i = 0; i < bufs_.size(); ++i) {
         const Buf& b = bufs_[i];
+#if defined(STRATA_GPU_METAL)
+        const size_t all = b.capacity;
+#else
         const size_t all = b.per ? (size_t) ((opt_.max_context + b.per - 1) / b.per) * b.bytes : b.bytes;
+#endif
         const auto* at = (const uint8_t*) b.p;
-        if (q >= at && q < at + all) return (uint8_t*) to[i].p + (q - at);
+        if (q >= at && q < at + all) {
+#if defined(STRATA_GPU_METAL)
+            if ((size_t) (q - at) >= to[i].capacity) throw std::logic_error("seq_buf: destination capacity");
+#endif
+            return (uint8_t*) to[i].p + (q - at);
+        }
     }
     throw std::logic_error("seq_buf: not in a buffer of the sequence");
 }
@@ -1626,6 +1959,10 @@ void Engine::follow(int written) {
 }
 
 void Engine::load(const Options& o) {
+#if defined(STRATA_GPU_METAL)
+    gpu::metal::set_optimize(o.metal_optimize);
+    gpu::metal::set_scoped_residency(o.metal_balanced);
+#endif
     opt_ = o;
     asked_reserve_mib_ = o.vram_reserve_mib;
     if (opt_.max_context < 16) throw std::runtime_error("the context must be at least 16 tokens");
@@ -1643,7 +1980,24 @@ void Engine::load(const Options& o) {
     if (opt_.dump || std::min(opt_.prompt_batch, opt_.max_context) == 1) opt_.window = 1;
     gg_ = std::make_unique<Shards>(opt_.model);
     if (!opt_.draft_model.empty() && opt_.draft && opt_.window != 1) dg_ = std::make_unique<Shards>(opt_.draft_model);
+#if defined(STRATA_GPU_METAL)
+    if (opt_.kv_format == KvFmt::kAuto) {
+        const MetaValue* arch = gg_->get("general.architecture");
+        const MetaValue* heads = gg_->get("qwen35moe.attention.head_count_kv");
+        const MetaValue* key = gg_->get("qwen35moe.attention.key_length");
+        const MetaValue* value = gg_->get("qwen35moe.attention.value_length");
+        // The Q8 attention kernels store a scale for each 32 values within each head.
+        opt_.kv_format = arch && arch->s == "qwen35moe" && heads && heads->u > 0 &&
+                         key && key->u > 0 && key->u % 32 == 0 && value && value->u == key->u
+                             ? KvFmt::kQ8_0 : KvFmt::kFp16;
+    }
+#endif
     load_geometry();
+#if defined(STRATA_GPU_METAL)
+    std::fprintf(stderr, "strata-poly: Metal optimize=%s memory=%s kv=%s\n",
+                 opt_.metal_optimize ? "on" : "off", opt_.metal_balanced ? "balanced" : "legacy",
+                 opt_.kv_format == KvFmt::kQ8_0 ? "q8_0" : "fp16");
+#endif
     if (block_ != dg_.get()) dg_.reset();
     hi_ = end_ < 0 ? n_layer_ : end_;
 
@@ -1737,6 +2091,7 @@ void Engine::load(const Options& o) {
     alloc();
     if (!opt_.profile.empty()) read_profile(opt_.profile, (int) layers_.size(), n_expert_, prior_);
     fill_expert_cache();
+    ensure_stage();
     // The weights and the expert cache are written on st_ now (h2d(), zero_vram()): the load is not over until
     // those are done, so that everything after it - a read of what the cache holds, the first request's cover()
     // mapping the attention caches - finds what it expects.
@@ -1794,8 +2149,58 @@ void Engine::load(const Options& o) {
     start_swaps();
     reset();
     // nothing is read from the files when every expert is in VRAM
-    if (!all_cached())
+    if (!all_cached()) {
+#if defined(STRATA_GPU_METAL)
+        if (opt_.metal_balanced) {
+            if (metal_warm_bytes_ > 0) {
+                struct Warm {
+                    int64_t used;
+                    std::pair<const uint8_t*, size_t> gate, up, down;
+                };
+                std::vector<Warm> cold;
+                for (size_t il = 0; il < layers_.size(); ++il) {
+                    const Layer& l = layers_[il];
+                    if (!l.moe) continue;
+                    for (int e = 0; e < n_expert_; ++e) {
+                        if (l.slot[(size_t) e]) continue;
+                        const size_t i = il * n_expert_ + size_t(e);
+                        const int64_t used = (prior_.empty() ? 0 : prior_[i]) + use_[i];
+                        cold.push_back({used, {l.exp_gate + size_t(e) * l.gu_stride, l.gu_bytes},
+                                             {l.exp_up + size_t(e) * l.gu_stride, l.gu_bytes},
+                                             {l.exp_down + size_t(e) * l.d_bytes, l.d_bytes}});
+                    }
+                }
+                std::stable_sort(cold.begin(), cold.end(), [](const Warm& a, const Warm& b) { return a.used > b.used; });
+                const size_t warm_cap = metal_warm_bytes_;
+                mapper_ = std::thread([this, cold = std::move(cold), warm_cap] {
+                    constexpr size_t page = 16384, check_every = size_t(16) << 20;
+                    size_t touched = check_every, total_warmed = 0;
+                    bool warned = false;
+                    volatile uint8_t seen = 0;
+                    for (const Warm& expert : cold) for (const auto& span : {expert.gate, expert.up, expert.down}) {
+                        for (size_t at = 0; at < span.second; at += page) {
+                            if (map_quit_.load(std::memory_order_relaxed) || total_warmed >= warm_cap) return;
+                            if (touched >= check_every) {
+                                const auto available = strata::core::available_host_bytes();
+                                if (available && *available <= kMetalHostReserve) return;
+                                if (!available && !warned) {
+                                    std::fprintf(stderr, "strata-poly: host memory is unavailable while warming uncached experts\n");
+                                    warned = true;
+                                }
+                                touched = 0;
+                            }
+                            seen = uint8_t(seen + span.first[at]);
+                            touched += page;
+                            total_warmed += page;
+                        }
+                        if (span.second) seen = uint8_t(seen + span.first[span.second - 1]);
+                    }
+                });
+            }
+        } else
+#endif
         mapper_ = std::thread([this, spans = std::move(spans)] { map_pages(spans, map_quit_); });
+    }
 }
 
 void Engine::load_drafter() {
@@ -1940,14 +2345,10 @@ void Engine::alloc() {
         if (vmm_ && !split_ && opt_.stage_read_mib > 0)
             stage_wide_ = std::max(stage_bytes_, std::min((size_t) opt_.stage_read_mib << 20,
                                                           (size_t) n_expert_ * one_expert));
-        if (stage_wide_ > stage_narrow_) {
-            vmm_reserve(stage_map_, stage_wide_ + 256 + kTail);
-            vmm_map(stage_map_, stage_narrow_ + 256 + kTail, SIZE_MAX, "the expert staging buffer");
-            stage_ = (uint8_t*) stage_map_.base;
-        } else {
-            stage_ = (uint8_t*) dmalloc(stage_bytes_ + 256 + kTail, "the expert staging buffer");
-        }
-        for (int b = 0; b < 2; ++b) h_stage_[b] = (uint8_t*) hmalloc(chunk_bytes_, "pinned memory");
+#if defined(STRATA_GPU_METAL)
+        if (!opt_.metal_balanced)
+#endif
+            ensure_stage();
         for (void** e : {&ev_stage_[0], &ev_stage_[1], &ev_ahead_, &ev_free_}) {
             cudaEvent_t ev = nullptr;
             ck(cudaEventCreateWithFlags(&ev, cudaEventDisableTiming), "cudaEventCreate");
@@ -2289,6 +2690,10 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                     if (k == kSumRows - 1 || i0 + j == n_cached - 1) add_scaled(sum, k + 1, n_embd_, st_);
                 }
             }
+#if defined(STRATA_GPU_METAL)
+            if (opt_.metal_optimize && n_host > 0)
+                ck(gpu::metal::submit(static_cast<gpu::Stream>(st_)), "submitting cached experts");
+#endif
         };
 
         // The next layer's router wait is what makes h_cpu_ free to write again.
@@ -2329,6 +2734,9 @@ bool Engine::card_moe(int n) {
                           h_slots_.begin() + (ptrdiff_t) il * n_expert_);
         ck(cudaMemcpy(d_slots_, h_slots_.data(), h_slots_.size() * sizeof(void*), cudaMemcpyHostToDevice),
            "expert slots");
+#if defined(STRATA_GPU_METAL)
+        ck(gpu::metal::register_indirect(d_slots_, h_slots_.data(), h_slots_.size()), "expert dependencies");
+#endif
     }
     return true;
 }
@@ -2590,14 +2998,28 @@ void Engine::moe_rows(Layer& L, int il, int n) {
         auto slot_of = [&](int j) { return L.slot[(size_t) chan_[(size_t) j]]; };
         runs_.clear();
         for (int j = 0; j < n_chan;) {
-            int m = 1, most[kClasses] = {};
+            int m = 1, most[kClasses] = {}, first_c[kClasses], last_c[kClasses];
+            for (int c = 0; c < kClasses; ++c) { first_c[c] = j + n_chan; last_c[c] = -1; }
             while (j + m < n_chan && slot_of(j + m) == slot_of(j + m - 1) + L.slot_bytes) ++m;
             for (int i = j; i < j + m; ++i) {
                 const int rows = count_[(size_t) chan_[(size_t) i]];
-                if (rows > 0) most[tile_class(rows)] = std::max(most[tile_class(rows)], rows);
+                if (rows > 0) {
+                    const int c = tile_class(rows);
+                    most[c] = std::max(most[c], rows);
+                    first_c[c] = std::min(first_c[c], i);
+                    last_c[c] = std::max(last_c[c], i);
+                }
             }
-            for (int c = 0; c < kClasses; ++c)
-                if (most[c] > 0) runs_.push_back({c, j, m, most[c]});
+            for (int c = 0; c < kClasses; ++c) {
+                if (most[c] <= 0) continue;
+#if defined(STRATA_GPU_METAL)
+                if (opt_.metal_optimize) {
+                    runs_.push_back({c, first_c[c], last_c[c] - first_c[c] + 1, most[c]});
+                    continue;
+                }
+#endif
+                runs_.push_back({c, j, m, most[c]});
+            }
             j += m;
         }
         for (const Run& r : runs_)

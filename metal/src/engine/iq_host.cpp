@@ -13,13 +13,13 @@ namespace strata::kernels {
 namespace {
 bool is_iq(int t) {
     return t == 16 || t == 17 || t == 18 || t == 20 || t == 21 || t == 22 || t == 23 || t == 29 || t == 42 || t == 11 ||
-           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8;   // 14: Q6_K (Unsloth's Q5/Q6 gate/up)
+           t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40;   // 14: Q6_K (Unsloth's Q5/Q6 gate/up)
 }
 // values per block of the types the grouped expert kernels take (0 = none): STRATA_GU_FMTS / STRATA_D_FMTS
 int gu_qk(int t) {
     switch (t) {
         case 16: case 17: case 18: case 21: case 22: case 23: case 29: case 12: case 13: case 14: return 256;
-        case 42: return 64;
+        case 40: case 42: return 64;
         case 6: case 2: case 3: case 8: return 32;
         default: return 0;
     }
@@ -27,7 +27,7 @@ int gu_qk(int t) {
 int d_qk(int t) {
     switch (t) {
         case 23: return 256;
-        case 42: return 64;
+        case 40: case 42: return 64;
         case 20: case 7: case 6: case 2: case 3: case 8: return 32;
         default: return 0;
     }
@@ -48,6 +48,7 @@ size_t iq_row_bytes(int t, int64_t n) noexcept {
         case 29: return (size_t) (n / 256) * sizeof(block_iq1_m);
         case 23: return (size_t) (n / 256) * sizeof(block_iq4_xs);
         case 11: return (size_t) (n / 256) * sizeof(block_q3_K);
+        case 40: return (size_t) (n / 64) * 36;
         case 42: return (size_t) (n / 64) * sizeof(block_q2_0);
         case 12: return (size_t) (n / 256) * sizeof(block_q4_K);
         case 13: return (size_t) (n / 256) * sizeof(block_q5_K);
@@ -79,6 +80,7 @@ NativeExpertLayout native_expert_layout(int gu_type, int d_type, int64_t n_embd,
     L.up_off = (size_t) n_ff * L.gu_row;
     L.down_off = 2 * L.up_off;
     L.bytes = L.down_off + (size_t) n_embd * L.d_row;
+    if (gu_type == 40 || d_type == 40) { L.tail_off = L.bytes; L.bytes += 16; }
     return L;
 }
 

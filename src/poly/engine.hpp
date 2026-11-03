@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,10 +37,14 @@ namespace strata::poly {
 class Shards;
 struct Likeliest;
 
-/// The attention caches' storing format: fp16 (default) or ggml Q8_0; opt-in via --kv.
-enum class KvFmt { kFp16 = 0, kQ8_0 = 1 };
+/// Auto is resolved from model geometry before allocation on Metal; other backends default to fp16.
+enum class KvFmt { kAuto = -1, kFp16 = 0, kQ8_0 = 1 };
 
 struct Options {
+#if defined(STRATA_GPU_METAL)
+    bool metal_optimize = true;
+    bool metal_balanced = true;
+#endif
     std::string model;
     int max_context = 8192;
     int threads = 0;              ///< 0: the CPUs this process may use
@@ -71,7 +76,11 @@ struct Options {
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
                                   ///< so; false: for the whole context at load, as the expert cache gets the rest
-    KvFmt kv_format = KvFmt::kFp16;   ///< the K and V caches' format; fp16 by default (byte-identical path)
+#if defined(STRATA_GPU_METAL)
+    KvFmt kv_format = KvFmt::kAuto;   ///< Q8 for compatible Qwen35MoE geometry, otherwise fp16
+#else
+    KvFmt kv_format = KvFmt::kFp16;
+#endif
     int window = 0;               ///< the most tokens window() takes: the known one and guesses after it; 1: none;
                                   ///< 0: 8, or 4 where every guess keeps a copy of the recurrent state
     bool draft = true;            ///< run the block that guesses ahead, when there is one and window is above 1
@@ -451,6 +460,7 @@ protected:
     bool input(int32_t token, int64_t row, float* dst) const;
     void lin(const Dev& w, const float* x, float* y, int n, const void* xq = nullptr, int rows_per_x = 0);
     void fill_expert_cache();
+    void ensure_stage();
     void start_swaps();
     void plan_ahead(Layer& L, int il);
     void run(const int32_t* tokens, int n);
@@ -517,6 +527,20 @@ protected:
     int64_t kv_rows_for(int64_t end) const;   ///< the rows cover() maps for `end`
     void held_is_budget();
     void settle_swaps();
+#if defined(STRATA_GPU_METAL)
+    virtual std::optional<uint64_t> metal_host_available() const;
+    size_t metal_host_headroom();
+    void metal_invalidate_graphs();
+    void metal_sync_memory();
+    void metal_cover(int64_t end);
+    virtual void metal_resize_cache(size_t limit);
+    bool metal_mind_memory();
+    size_t metal_cache_limit_ = SIZE_MAX;
+    size_t metal_cache_bytes_ = 0;
+    size_t metal_warm_bytes_ = 0;
+    unsigned metal_growth_samples_ = 0;
+    bool metal_host_warning_ = false;
+#endif
 
     Options opt_;
     std::unique_ptr<Shards> gg_;
@@ -607,6 +631,9 @@ protected:
         void* p = nullptr;
         size_t bytes = 0;   ///< a kv_alloc() buffer's for every `per` rows; a seq_alloc() one's, all of it
         int per = 0;        ///< 0: seq_alloc()'s
+#if defined(STRATA_GPU_METAL)
+        size_t capacity = 0; ///< allocated bytes, distinct from the logical context's address range
+#endif
     };
     struct Seq {
         int64_t pos = 0, kv_rows = 0, kv_reach = 0, ahead_pos = -1;

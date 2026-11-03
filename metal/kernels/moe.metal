@@ -119,9 +119,9 @@ kernel void moe_route(device const float* logits [[buffer(0)]], device int* ids 
                       ushort sg [[simdgroup_index_in_threadgroup]], ushort lane [[thread_index_in_simdgroup]]) {
     threadgroup int s_grp[32], s_ent[32];
     if (sg < a.n_tok) {
-        device const float* l = logits + sg * 512;
+        device const float* l = logits + sg * a.n_expert;
         float v[16];
-        for (int i = 0; i < 16; ++i) v[i] = l[lane + 32 * i];
+        for (int i = 0; i < 16; ++i) v[i] = lane + 32 * i < a.n_expert ? l[lane + 32 * i] : -INFINITY;
         float mx = -INFINITY;
         for (int i = 0; i < 16; ++i) mx = max(mx, v[i]);
         for (ushort m = 16; m > 0; m >>= 1) mx = max(mx, simd_shuffle_xor(mx, m));
@@ -169,7 +169,7 @@ kernel void moe_route(device const float* logits [[buffer(0)]], device int* ids 
 template <int F, int LPR, int NR, int NE>
 static inline void gu_body(device const uchar* g0, device const uchar* u0, device const float* x,
                            device const float* xs16, device float* h, device const int* etok, int c, int row0, int li,
-                           constant MoeArgs& a, threadgroup const uint* tab) {
+                           constant MoeArgs& a, threadgroup const uint* tab, float gate_scale=1.0f, float up_scale=1.0f) {
     constexpr int UNIT = fmt<F>::UNIT;
     float ag[NR][NE], au[NR][NE];
     for (int r = 0; r < NR; ++r)
@@ -194,7 +194,7 @@ static inline void gu_body(device const uchar* g0, device const uchar* u0, devic
     }
     for (int r = 0; r < NR; ++r)
         for (int t = 0; t < NE; ++t) {
-            const float gv = lane_sum<LPR>(ag[r][t]), uv = lane_sum<LPR>(au[r][t]);
+            const float gv = lane_sum<LPR>(ag[r][t]) * gate_scale, uv = lane_sum<LPR>(au[r][t]) * up_scale;
             if (li == 0) h[(c + t) * int(a.n_ff) + row0 + r] = gv / (1.0f + exp(-gv)) * uv;
         }
 }
@@ -227,18 +227,20 @@ kernel void moe_gu(device const uchar* W [[buffer(0)]], device const float* x [[
     device const uchar* E = kArena ? arena_slot(smap[ex], W, W1, W2, W3) : W + ex * a.gu_stride;
     device const uchar* g0 = E + a.gate_off + (ulong)row0 * a.gu_row;
     device const uchar* u0 = E + a.up_off + (ulong)row0 * a.gu_row;
+    float2 scale=1.0f;
+    if(a.pad) scale=*(device const float2*)(E+a.down_off+a.d_stride);
     switch (ne) {
-        case 1: gu_body<F, LPR, NR, 1>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab); break;
-        case 2: gu_body<F, LPR, NR, 2>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab); break;
-        case 3: gu_body<F, LPR, NR, 3>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab); break;
-        case 4: gu_body<F, LPR, NR, 4>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab); break;
+        case 1: gu_body<F, LPR, NR, 1>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab, scale.x, scale.y); break;
+        case 2: gu_body<F, LPR, NR, 2>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab, scale.x, scale.y); break;
+        case 3: gu_body<F, LPR, NR, 3>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab, scale.x, scale.y); break;
+        case 4: gu_body<F, LPR, NR, 4>(g0, u0, x, xs16, h, etok, c, row0, li, a, tab, scale.x, scale.y); break;
         default:
             for (int k = 0; k < ne; k += 4) {
                 const int m = min(4, ne - k);
-                if (m == 4) gu_body<F, LPR, NR, 4>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab);
-                else if (m == 3) gu_body<F, LPR, NR, 3>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab);
-                else if (m == 2) gu_body<F, LPR, NR, 2>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab);
-                else gu_body<F, LPR, NR, 1>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab);
+                if (m == 4) gu_body<F, LPR, NR, 4>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab, scale.x, scale.y);
+                else if (m == 3) gu_body<F, LPR, NR, 3>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab, scale.x, scale.y);
+                else if (m == 2) gu_body<F, LPR, NR, 2>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab, scale.x, scale.y);
+                else gu_body<F, LPR, NR, 1>(g0, u0, x, xs16, h, etok + k, c + k, row0, li, a, tab, scale.x, scale.y);
             }
     }
 }
@@ -247,7 +249,7 @@ kernel void moe_gu(device const uchar* W [[buffer(0)]], device const float* x [[
 template <int F, int LPR, int NR, int NE>
 static inline void dn_body(device const uchar* d0, device const float* h, device const float* hs16, device float* ye,
                            device const int* plan, int c, int row0, int li, constant MoeArgs& a,
-                           threadgroup const uint* tab) {
+                           threadgroup const uint* tab, float down_scale=1.0f) {
     constexpr int UNIT = fmt<F>::UNIT;
     float ac[NR][NE];
     for (int r = 0; r < NR; ++r)
@@ -266,7 +268,7 @@ static inline void dn_body(device const uchar* d0, device const float* h, device
     for (int r = 0; r < NR; ++r)
         for (int t = 0; t < NE; ++t) {
             const float v = lane_sum<LPR>(ac[r][t]);
-            if (li == 0) ye[(c + t) * int(a.n_embd) + row0 + r] = as_type<float>(plan[P_EW + c + t]) * v;
+            if (li == 0) ye[(c + t) * int(a.n_embd) + row0 + r] = as_type<float>(plan[P_EW + c + t]) * v * down_scale;
         }
 }
 
@@ -289,18 +291,21 @@ kernel void moe_down(device const uchar* W [[buffer(0)]], device const float* h 
     const ulong ex = (ulong)plan[P_GEXP + g];
     const int c = plan[P_GSTART + g], ne = plan[P_GSTART + g + 1] - c;
     device const uchar* d0 = (kArena ? arena_slot(smap[ex], W, W1, W2, W3) : W + ex * a.d_stride) + a.down_off + (ulong)row0 * a.d_row;
+    float scale=1.0f;
+    if(a.pad) {device const uchar* E=arena_slot(smap[ex],W,W1,W2,W3);
+        scale=((device const float*)(E+a.down_off+a.d_stride))[2];}
     switch (ne) {
-        case 1: dn_body<F, LPR, NR, 1>(d0, h, hs16, ye, plan, c, row0, li, a, tab); break;
-        case 2: dn_body<F, LPR, NR, 2>(d0, h, hs16, ye, plan, c, row0, li, a, tab); break;
-        case 3: dn_body<F, LPR, NR, 3>(d0, h, hs16, ye, plan, c, row0, li, a, tab); break;
-        case 4: dn_body<F, LPR, NR, 4>(d0, h, hs16, ye, plan, c, row0, li, a, tab); break;
+        case 1: dn_body<F, LPR, NR, 1>(d0, h, hs16, ye, plan, c, row0, li, a, tab, scale); break;
+        case 2: dn_body<F, LPR, NR, 2>(d0, h, hs16, ye, plan, c, row0, li, a, tab, scale); break;
+        case 3: dn_body<F, LPR, NR, 3>(d0, h, hs16, ye, plan, c, row0, li, a, tab, scale); break;
+        case 4: dn_body<F, LPR, NR, 4>(d0, h, hs16, ye, plan, c, row0, li, a, tab, scale); break;
         default:
             for (int k = 0; k < ne; k += 4) {
                 const int m = min(4, ne - k);
-                if (m == 4) dn_body<F, LPR, NR, 4>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab);
-                else if (m == 3) dn_body<F, LPR, NR, 3>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab);
-                else if (m == 2) dn_body<F, LPR, NR, 2>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab);
-                else dn_body<F, LPR, NR, 1>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab);
+                if (m == 4) dn_body<F, LPR, NR, 4>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab, scale);
+                else if (m == 3) dn_body<F, LPR, NR, 3>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab, scale);
+                else if (m == 2) dn_body<F, LPR, NR, 2>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab, scale);
+                else dn_body<F, LPR, NR, 1>(d0, h, hs16, ye, plan, c + k, row0, li, a, tab, scale);
             }
     }
 }
@@ -334,3 +339,6 @@ DN_SET(T_Q5_1) DN_SET(T_Q8_0)
 DN_SET(T_Q2_0)
 DN_SET(T_Q2_0R)
 DN_SET(T_IQ4_NL)
+
+GU_SET(T_NVFP4)
+DN_SET(T_NVFP4)

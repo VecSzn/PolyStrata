@@ -7,6 +7,11 @@ version of everything below is [INSTALL.md](INSTALL.md).
 
 Work through the steps in order. Tell the user what you are doing in plain words; they may not be technical.
 
+For Apple Silicon, `./setup.sh --list-models` exposes the complete shared catalog and dispatches installation to
+`metal/setup_mac.py`. See [Mac model coverage](MAC.md#model-coverage) before selecting a newly ported path;
+synthetic kernel/engine checks do not establish actual-weight quality or performance. `qwen36-strata` keeps
+its separate `strata-q36` executable and server configuration.
+
 ## 0. Ground rules
 
 - **Never expose the server without an API key.** Keep the default `--host 127.0.0.1`. Only if the user asks for
@@ -164,8 +169,10 @@ Windows (PowerShell):  Start-Process -FilePath ".\run-iq2_xs.bat"            (op
 Linux:                 nohup ./run-iq2_xs.sh > strata-server.out 2>&1 &
 ```
 
-Or `START-HERE.bat` / `./setup.sh` without flags, which starts the installed model (it asks which one when several are
-installed; add `--yes` to take the first). The server opens the user's browser on `http://127.0.0.1:8080` when it is
+Or `START-HERE.bat` / `./setup.sh --yes`, which starts the installed model (the first when several are installed).
+In a terminal, `./setup.sh` without `--yes` shows model, quantization and context menus with installed choices as
+defaults. Use the generated run script to start a specific saved configuration directly.
+The server opens the user's browser on `http://127.0.0.1:8080` when it is
 ready. Closing its window (or stopping the process) stops the model.
 
 ## 7. Verify

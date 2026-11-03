@@ -59,6 +59,7 @@ build-vision-cuda12.bat
 /dist/
 *.done
 /third_party/*.zip
+/third_party/metal-cpp/
 
 # IDEs
 .vscode/

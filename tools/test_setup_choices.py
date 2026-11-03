@@ -347,6 +347,8 @@ class HipVision(unittest.TestCase):
                 (bdir / "bin" / setup.VEXE).write_bytes(b"vision")
 
             with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "cmake_build", cmake_build), \
+                    mock.patch.object(setup, "rocm_root", lambda archs: (root / "rocm", [])), \
+                    mock.patch.object(setup, "cpu_info", lambda: ("Test CPU", True, False)), \
                     mock.patch.object(setup, "source_hash", lambda paths: vsrc if paths == setup.VISION_SOURCES else src):
                 quiet(setup.build_engine_hip, {"arch": "gfx1201"}, "llama", vision)
             return built, json.loads((eng / "BUILD.json").read_text()), (eng / setup.VEXE).exists()
@@ -540,8 +542,10 @@ class CudaVision(unittest.TestCase):
                     (bdir / "bin" / setup.VEXE).write_bytes(b"vision")
 
                 with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "cmake_build", cmake_build), \
+                        mock.patch.object(setup, "get_llama_cpp", return_value=Path("llama")), \
                         mock.patch.object(setup, "source_hash", lambda p: "V" if p == setup.VISION_SOURCES else "S"), \
                         mock.patch.object(setup, "install_build_tools", lambda gpu, yes: (str(root / "nvcc"), None)), \
+                        mock.patch.object(setup, "cpu_info", lambda: ("Test CPU", True, False)), \
                         mock.patch.object(setup, "source_version", lambda: "test"):
                     quiet(setup.build_engine, {"arch": "86"}, vision, True, "llama")
                 self.assertEqual([t for t, _ in built], ["strata-vision"])
@@ -612,10 +616,6 @@ class HostCompilers(unittest.TestCase):
             self.assertIn("-DCMAKE_CUDA_HOST_COMPILER=g++-14", defs, target)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CalibrateWithModel(unittest.TestCase):
     """#2036: --calibrate --model X tunes model X (it used to fall through to a plain re-setup); a model that is not
     installed is an error that says so; --calibrate with --setup or --check says it does nothing."""
@@ -630,6 +630,7 @@ class CalibrateWithModel(unittest.TestCase):
             cfgs.append(p)
         tuned = []
         with mock.patch.object(sys, "argv", ["setup.py", *argv]), \
+                mock.patch.object(setup.sys, "platform", "win32" if setup.WIN else "linux"), \
                 mock.patch.object(setup, "installed_configs", lambda: cfgs), \
                 mock.patch.object(setup, "update_installed_engine", lambda *a, **k: None), \
                 mock.patch.object(setup, "calibrate_config", lambda c: tuned.append(c.name) or True), \
@@ -661,3 +662,7 @@ class CalibrateWithModel(unittest.TestCase):
             self.assertEqual(setup.calibration_targets(ps, "Q2_0", None), [ps[1]])
             self.assertEqual(setup.calibration_targets(ps, "Q2_0", "qwen"), [ps[1]])
             self.assertEqual(setup.calibration_targets(ps, "Q4_K_M", None), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
