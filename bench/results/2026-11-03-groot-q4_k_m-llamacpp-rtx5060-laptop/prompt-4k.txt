@@ -1,0 +1,132 @@
+<h1 align="center">PolyStrata</h1>
+
+**English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt-BR.md)
+
+<p align="center"><b>Run large AI models on your own PC</b><br>
+Qwen3.8-Flash-Next, GLM 5.3 Flash, DeepSeek V4 Flash, LFM2.5, Flint, Qwen3.6, Clover, Ornith 1.5, Gemma 4, Tiel Coder, MiniCPM-V and Kolibri 1 · free and open source</p>
+
+<p align="center"><img src="docs/media/speed.svg" width="820" alt="Tokens per second while writing an answer: 94 to 100 for Qwen3.6-35B-A3B on a laptop with an 8 GB card, 394 to 395 on an RTX 5090"></p>
+
+<p align="center"><img src="docs/media/claude-code-demo.gif" width="820" alt="Claude Code in a terminal beside PolyStrata's API Monitor"><br>
+<sub>Claude Code on Qwen3.6-35B-A3B UD-Q3_K_M, on the laptop with the 8 GB card, in real time: it adds a <code>--json</code> option to a small program, writes a test for it and runs the tests. The server had read Claude Code's system prompt when it started (<code>"warm_start": true</code>).</sub></p>
+
+<p align="center"><a href="https://github.com/Niko1221/Strata/releases/download/v0.1.10/Pagoda.mp4"><img src="docs/media/pagoda-preview.webp" width="720" alt="A voxel pagoda garden the model wrote, running in the browser"></a><br>
+<sub>A voxel pagoda garden, 1 shot prompt running on an RTX 5070 with <a href="https://github.com/Niko1221/Strata">Strata</a> (Qwen3.8-Flash-Next IQ3_S, 128K context) ·
+<a href="https://github.com/Niko1221/Strata/releases/download/v0.1.10/Pagoda.mp4">full video (49 s)</a></sub></p>
+
+PolyStrata runs large AI models on a normal PC, models that usually need a server. They chat, write code and work
+with your apps and coding agents. Nothing leaves your PC.
+
+It runs twelve models, on two engines:
+
+- **[Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)** on an NVIDIA or AMD graphics card with
+  12 GB or more, on Windows or Linux. It also reads pictures. Its engine is the Strata project's, unchanged.
+
+The other eleven run on an engine written for PolyStrata, with one NVIDIA card or [two](docs/MULTI_GPU.md#the-strata-poly-models): on Linux, and all but GLM 5.3 Flash and
+DeepSeek V4 Flash on Windows too. They are experimental: they have run on one PC with a 32 GB card, and the eight smaller ones on a laptop
+with an 8 GB card as well.
+
+- **[GLM 5.3 Flash](docs/models/glm.md)**, the largest: a file of 79 to 114 GB, most of which stays in RAM.
+- **[DeepSeek V4 Flash](docs/models/deepseek.md)**, a file of 91 GB, most of which stays in RAM too. Its memory of a
+  conversation is small: a 128K context takes 0.7 GB more VRAM than 32K.
+- **[LFM2.5-24B-A2B](docs/models/lfm25.md)** by Liquid AI, a file of 11 to 25 GB. Most of its layers have no attention, so a
+  long conversation takes little VRAM: a 128K context takes 2 GB more than 32K. Its license allows commercial use
+  only to companies with less than 10 million dollars of yearly revenue.
+- **[Flint 40B-A2.5B](docs/models/flint.md)** by Recursive, made for coding agents: a file of 18 to 42 GB. Most of its layers
+  look back only 513 tokens, so a long conversation takes little VRAM: a 128K context takes 2.6 GB more than 32K.
+- **[Qwen3.6-35B-A3B](docs/models/qwen36.md)**, a file of 13 to 23 GB. It also reads pictures.
+- **[Groot 19B-A3B 261023](docs/models/groot.md)**, experimental setup integration for three of Bartowski's quantizations,
+  Q4_K_M, Q6_K and Q8_0 (12.5 to 20.2 GB), with MTP and an optional image projector. Q4_K_M text has run on an
+  8 GB RTX 5060; images, Q6_K and Q8_0 are still pending.
+- **[Clover-35B-A3B-Preview](docs/models/clover.md)** by DiffuSpace, Qwen3.6-35B-A3B trained further to also write a
+  block of tokens at once: a file of 13 to 21 GB. It reads text only.
+- **[Ornith 1.5](docs/models/ornith.md)**, which has Qwen3.6-35B-A3B's architecture and other weights: a file of 14 to 24 GB. It
+  also reads pictures.
+- **[Gemma 4 26B-A4B](docs/models/gemma4.md)**, a file of 11 to 17 GB. It also reads pictures.
+- **[Tiel Coder 35B-A3B](docs/models/tiel.md)**, Ornith 1.5 quantized for coding agents by peculiar-ragdoll: a file of
+  14 to 23 GB. It also reads pictures.
+- **[MiniCPM-V 4.7 35B-A3B](docs/models/minicpmv.md)** by OpenBMB, which has Qwen3.6-35B-A3B's architecture and weights of its
+  own, made to read pictures: a file of 16 to 29 GB.
+- **[Kolibri 1](docs/models/kolibri.md)** by Aleph Alpha, which writes German as well as English: a file of 29 to 48 GB,
+  most of which stays in RAM beside a small card.
+
+The server can change between installed models while it runs ([how](docs/BACKENDS.md#changing-the-model)).
+
+PolyStrata is built on [Strata](https://github.com/Niko1221/Strata) by Niko1221.
+Why it is a separate repo, AMD and smaller cards, fine-tunes and other questions: [FAQ](docs/FAQ.md).
+
+## How fast is it?
+
+A token is about ¾ of a word.
+
+- **Writes answers:** how fast the reply appears in a short chat. 60 tokens per second is faster than you can read.
+- **Reads your prompt:** how fast it takes in what you send (a document, code or a chat history).
+
+The table gives the size the installer takes for each model, in tokens per second. Every size's numbers, the comparison with llama.cpp and how they were measured are on each model's page.
+
+| Model | Laptop with an 8 GB card<br>writes / reads | RTX 5090<br>writes / reads | Every size |
+| --- | ---: | ---: | --- |
+| LFM2.5-24B-A2B | 70-73 / 3,590-3,620 | 480-485 / 23,390-23,460 | [LFM2.5](docs/models/lfm25.md) |
+| Flint 40B-A2.5B | 61-63 / 2,000-2,010 | 251-252 / 12,900 | [Flint](docs/models/flint.md) |
+| Qwen3.6-35B-A3B | 94-100 / 1,690 | 394-395 / 7,800-7,810 | [Qwen3.6](docs/models/qwen36.md) |
+| Clover-35B-A3B-Preview | 68-73 / 1,560-1,700 | not measured | [Clover](docs/models/clover.md) |
+| Ornith 1.5 | 76-82 / 1,620 | 316-319 / 8,040-8,110 | [Ornith](docs/models/ornith.md) |
+| Gemma 4 26B-A4B | 92-93 / 2,240 | 353-356 / 8,420-8,480 | [Gemma 4](docs/models/gemma4.md) |
+| Tiel Coder 35B-A3B | 83 / 1,700 | 337-345 / 8,080-8,110 | [Tiel Coder](docs/models/tiel.md) |
+| MiniCPM-V 4.7 35B-A3B | 64 / 1,150 | 308-311 / 7,910-7,950 | [MiniCPM-V](docs/models/minicpmv.md) |
+| Kolibri 1 | not measured | 189-192 / 4,980-5,070 | [Kolibri 1](docs/models/kolibri.md) |
+| GLM 5.3 Flash | does not run: needs a 32 GB card | 59-66 / 820 | [GLM](docs/models/glm.md) |
+| DeepSeek V4 Flash | does not run: needs a 32 GB card | 56 / 1,040 | [DeepSeek](docs/models/deepseek.md) |
+
+Laptop: RTX 4070 Laptop (8 GB), Core i7-14700HX, 32 GB RAM. Workstation: RTX 5090 (32 GB), Xeon Platinum 8470Q (25 vCPU), 90 to 120 GB RAM. Flint is UD-Q3_K_XL on the laptop, the size the installer takes with 32 GB of RAM, and UD-Q4_K_XL on the workstation. Kolibri 1 is Q2_K on the workstation; the installer takes Q4_K_M there, which was not measured.
+
+Qwen3.8-Flash-Next runs on the Strata project's engine and was measured by that project on a PC with an RTX 5070 (12 GB) and 64 GB of RAM: IQ2_XS writes at 79 and reads a 32K prompt at 2,090 ([every size](docs/models/qwen38.md)).
+
+The eleven models of PolyStrata's own engine were measured with its benchmark, which you can run on your PC:
+`python polystrata.py benchmark --model <name> --prompt-tokens 24000`
+([what it sends and prints](docs/BACKENDS.md#benchmark)).
+What others measured on their own cards, and how to compare with llama.cpp on yours:
+[community results](docs/COMMUNITY_BENCHMARKS.md#the-models-polystrata-adds).
+On the laptop PolyStrata read prompts 2.7 to 3.5 times as fast as llama.cpp b11540 and wrote 1.5 to 1.8 times
+as fast, with Qwen3.6 and with Tiel Coder ([the two runs](docs/COMMUNITY_BENCHMARKS.md#comparing-with-llamacpp)).
+
+## How much RAM it keeps
+
+Since 0.1.45-poly.7 the engine of the eleven models keeps less of your RAM: it no longer holds the parts of the
+model file that are already on the graphics card. On the laptop, Qwen3.6-35B-A3B after a 32,000-token prompt held
+17.9 GiB with 0.1.45-poly.6 and holds 13.1 GiB now, and writes as fast. Under Linux it went from 17.8 to 12.6 GiB.
+
+To hold less, add `"--ram-experts-mib", "6144"` to the `"args"` list of `strata-<model>.json`
+([where](docs/INSTALL.md#where-things-are-stored)) and restart. The engine then holds that many MiB of RAM for the
+experts that stay outside VRAM, while it answers too, and says so when it starts. The others stay in the system's
+file cache, where your other programs can take that memory, and are read from it when a token needs them. It is off
+by default because it writes slower, and we are still working on that. On the laptop (RTX 4070 Laptop 8 GB, 32 GB
+of RAM, Windows 11), Qwen3.6-35B-A3B UD-Q3_K_M:
+
+| | default | `--ram-experts-mib 6144` |
+| --- | ---: | ---: |
+| RAM the engine holds after it loads | 11.7 GiB | **6.5 GiB** |
+| at most while it writes: short chat / after a 32K prompt | 14.3 / 14.0 GiB | **6.7 / 7.3 GiB** |
+| between requests | 12.8 GiB | **7.1 GiB** |
+| Writes, tokens/s: the first short chat | 71.6 | 69.4 (3% slower) |
+| after the 32K prompt | 65.4 | 63.7 (3% slower) |
+| a short chat after that | 84.2 | 72.9 (13% slower) |
+| a long answer (1,024 tokens of a short chat) | 90.6 | 78.3 (14% slower) |
+
+Other programs held part of the card's VRAM in this run, so both columns write slower than with the card free. In
+two other runs it wrote 6 to 8% slower after the 32K prompt and 8 to 10% slower in the chat after it. Under Linux
+(an RTX PRO 6000 held to about 8 GB) it held 7.0 to 7.7 GiB instead of 12.3 to 14.3 and wrote 7 to 14% slower. With
+the expert cache held still, as a release is checked, the answers are the same token for token.
+
+The engine also needs 350 to 400 MiB less VRAM for reading prompts: the expert cache takes it (Qwen3.6 keeps 2,712
+experts in VRAM instead of 2,444), or `--vram-reserve-mib` leaves it to other programs.
+How it works and how it was measured: [docs/BACKENDS.md](docs/BACKENDS.md#less-of-the-pcs-ram-and-vram).
+
+## What you need
+
+| Model | Graphics card | RAM (the installer's size) | Disk | System |
+| --- | --- | --- | --- | --- |
+| [Qwen3.8-Flash-Next](docs/models/qwen38.md) | NVIDIA RTX 20 to 50 series, or AMD RX 6800 / 6900, RX 7700 XT / 7800 XT / 7900 XT / XTX, RX 9060 XT / 9070 / 9070 XT, Radeon AI PRO R9700; 12 GB or more | 32 GB or more; 64 GB runs every size | about 80 GB | Windows, Linux |
+| [GLM 5.3 Flash](docs/models/glm.md) | NVIDIA RTX 20 series or newer; only run on a 32 GB card | 96 GB beside a 32 GB card | 79 to 114 GB, on an SSD | Linux |
+| [DeepSeek V4 Flash](docs/models/deepseek.md) | same as above | 72 GB beside a 32 GB card | 91 GB, on an SSD | Linux |
+| [LFM2.5-24B-A2B](docs/models/lfm25.md) | NVIDIA RTX 20 series or newer, 8 GB or more | about 20 GB beside an 

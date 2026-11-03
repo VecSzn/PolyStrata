@@ -1,0 +1,27 @@
+{
+ "exe": "C:/Users/zshua/PolyStrata/engine-poly/strata-poly.exe",
+ "args": [
+  "--model",
+  "C:\\Users\\zshua\\Downloads\\PolyStrata-main\\PolyStrata-data\\models\\groot-Q4_K_M\\GrootTeam_Groot-19B-A3B-261023-Q4_K_M.gguf",
+  "--max-context",
+  "32768",
+  "--expert-profile",
+  "C:\\Users\\zshua\\Downloads\\PolyStrata-main\\PolyStrata-data\\packs\\groot-bartowski-q4_k_m\\expert-profile.txt",
+  "--conversation-cache-mib",
+  "auto",
+  "--threads",
+  "15",
+  "--no-draft"
+ ],
+ "cwd": "C:\\Users\\zshua\\PolyStrata",
+ "tokenizer": "C:\\Users\\zshua\\Downloads\\PolyStrata-main\\PolyStrata-data\\packs\\groot-bartowski-q4_k_m\\tokenizer",
+ "model_name": "groot-19b-a3b-261023-q4_k_m",
+ "display_name": "Groot 19B-A3B 261023 Q4_K_M",
+ "log": "C:\\Users\\zshua\\PolyStrata\\strata-groot-q4_k_m.log",
+ "lib_dirs": [
+  "C:\\Users\\zshua\\anaconda3\\Lib\\site-packages\\nvidia\\cu13\\bin\\x86_64"
+ ],
+ "port": 8190,
+ "gpu": 0,
+ "gpus_asked": true
+}

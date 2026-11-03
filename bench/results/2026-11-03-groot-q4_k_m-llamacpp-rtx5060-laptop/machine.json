@@ -1,0 +1,15 @@
+{
+ "gguf": "C:/Users/zshua/Downloads/PolyStrata-main/PolyStrata-data/models/groot-Q4_K_M/GrootTeam_Groot-19B-A3B-261023-Q4_K_M.gguf",
+ "strata_cfg": "C:/Users/zshua/PolyStrata/strata-groot-q4_k_m.json",
+ "strata_exe": "C:/Users/zshua/PolyStrata/engine-poly/strata-poly.exe",
+ "serve": "C:/Users/zshua/PolyStrata/serve",
+ "cwd": "C:/Users/zshua/PolyStrata",
+ "llama_server": "C:/Users/zshua/AppData/Local/Temp/opencode/llama-build2/bin/llama-server.exe",
+ "configs": [
+  {"name": "strata-mtp", "kind": "strata", "args": []},
+  {"name": "strata-nodraft", "kind": "strata", "args": ["--no-draft"]},
+  {"name": "llama-fit", "kind": "llama", "args": ["--fit", "on", "-c", "32768", "-fa", "on"]},
+  {"name": "llama-fit512", "kind": "llama", "args": ["--fit", "on", "--fit-target", "512", "-c", "32768", "-fa", "on"]},
+  {"name": "llama-mtp3", "kind": "llama", "args": ["--fit", "on", "-c", "32768", "-fa", "on", "--spec-type", "draft-mtp", "--spec-draft-n-max", "3"]}
+ ]
+}
