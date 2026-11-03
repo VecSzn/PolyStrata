@@ -1,0 +1,41 @@
+{
+ "model": "qwen3.8-flash-next-unsloth-ud-q5_k_xl",
+ "backend": "qwen4exp",
+ "quantization": null,
+ "context": 1048576,
+ "max_tokens": 256,
+ "runs": [
+  {
+   "prompt": "short",
+   "prompt_tokens": 63,
+   "output_tokens": 113,
+   "ttft_s": 0.129,
+   "prefill_tok_s": 47.3,
+   "decode_tok_s": 85.4,
+   "cache_hit_rate": 0.78,
+   "mtp_offered": 95,
+   "mtp_accepted": 75,
+   "mtp_acceptance": 0.789,
+   "vram_peak_gib": 31.68,
+   "ram_peak_gib": 114.98,
+   "gpu_util_mean": 100.0,
+   "cpu_util_mean": 49.0
+  },
+  {
+   "prompt": "long-200000",
+   "prompt_tokens": 267035,
+   "output_tokens": 256,
+   "ttft_s": 63.444,
+   "prefill_tok_s": 4217.3,
+   "decode_tok_s": 77.8,
+   "cache_hit_rate": 0.823,
+   "mtp_offered": 206,
+   "mtp_accepted": 137,
+   "mtp_acceptance": 0.665,
+   "vram_peak_gib": 31.69,
+   "ram_peak_gib": 116.49,
+   "gpu_util_mean": 99.1,
+   "cpu_util_mean": 10.1
+  }
+ ]
+}
