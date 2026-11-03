@@ -3075,7 +3075,7 @@ bool native_mmvq_supported(int ggml_type) noexcept {
     return ggml_type == 2 || ggml_type == 6 || ggml_type == 7 || ggml_type == 8 || ggml_type == 10 || ggml_type == 11 ||
            ggml_type == 12 || ggml_type == 13 || ggml_type == 14 || ggml_type == 20 ||
            ggml_type == 23 || ggml_type == 42 || ggml_type == 16 || ggml_type == 17 || ggml_type == 18 ||
-           ggml_type == 21 || ggml_type == 22 || ggml_type == 29 || ggml_type == 39;
+           ggml_type == 19 || ggml_type == 21 || ggml_type == 22 || ggml_type == 29 || ggml_type == 39;
 }
 
 std::size_t native_mmvq_weight_bytes(int ggml_type, int n_in, int n_out) {
@@ -3094,7 +3094,7 @@ std::size_t native_mmvq_weight_bytes(int ggml_type, int n_in, int n_out) {
     case 14: block_elems = 256; block_bytes = 210; break;
     case 23: block_elems = 256; block_bytes = 136; break;
     case 42: block_elems = 64; block_bytes = 18; break;
-    case 16: case 17: case 18: case 21: case 22: case 29:
+    case 16: case 17: case 18: case 19: case 21: case 22: case 29:
         block_elems = 256; block_bytes = (int) iq_row_bytes(ggml_type, 256); break;
     default: throw std::invalid_argument("unsupported native MMVQ GGML type");
     }
@@ -3123,7 +3123,7 @@ void native_mmvq(int ggml_type, const void* weights, const void* x_q8_1, float* 
     case 14: native_q6_k_mmvq(weights, x_q8_1, y, n_in, n_out, ncols, stream); break;
     case 23: native_iq4_xs_mmvq(weights, x_q8_1, y, n_in, n_out, ncols, stream); break;
     case 42: native_q2_0_mmvq(weights, x_q8_1, y, n_in, n_out, ncols, stream); break;
-    case 16: case 17: case 18: case 21: case 22: case 29:
+    case 16: case 17: case 18: case 19: case 21: case 22: case 29:
         iq_mmvq(ggml_type, weights, x_q8_1, y, n_in, n_out, ncols, stream); break;
     default: throw std::invalid_argument("unsupported native MMVQ GGML type");
     }
@@ -3139,7 +3139,7 @@ int slots_kind(int ggml_type) {
 #else
     switch (ggml_type) {
     case 2: case 6: case 8: case 20: case 39: case 10: case 11: case 12: case 13: case 14: case 23: case 42: return 1;
-    case 7: case 16: case 17: case 18: case 21: case 22: case 29: return 2;   // the ones native_mmvq() hands to iq_mmvq()
+    case 7: case 16: case 17: case 18: case 19: case 21: case 22: case 29: return 2;   // the ones native_mmvq() hands to iq_mmvq()
     default: return 0;
     }
 #endif

@@ -400,6 +400,36 @@ class Install(FakeRoot):
         self.assertTrue(err)
         self.assertIn("images are not available", res["error"])
 
+    def test_ornith397_install_plans(self):
+        for q in ("IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M"):
+            with self.subTest(q=q):
+                res, err = self.call("strata_install", {"family": "ornith397", "model": q, "vision": "cpu"})
+                self.assertFalse(err, res)
+                p = res["plan"]
+                self.assertEqual((p["family"], p["model"]), ("ornith397", q))
+                self.assertIn(f"--family ornith397 --model {q}", p["setup_command"])
+                self.assertIn("--vision cpu", p["setup_command"])
+
+    def test_windows_amd_ornith_plan(self):
+        with mock.patch.object(M, "WIN", True):
+            res, err = self.call("strata_install", {"family": "ornith397", "model": "IQ1_S",
+                                                   "backend": "hip", "vision": "no"})
+        self.assertFalse(err, res)
+        self.assertIn("--backend hip", res["plan"]["setup_command"])
+
+    def test_windows_hardware_includes_supported_amd_cards(self):
+        sdk = mock.Mock()
+        sdk.ram_gb.return_value = 63.0
+        sdk.page_file_gb.return_value = 32.0
+        sdk.cpu_info.return_value = ("7800X3D", True, True)
+        sdk.gpus.return_value = []
+        sdk.amd_gpus_win.return_value = [{"index": 1, "name": "RX 9070 XT", "arch": "gfx1201", "vram_gb": 15.9}]
+        sdk.amd_problem.return_value = None
+        with mock.patch.object(M, "WIN", True), mock.patch.object(self.strata, "setup_module", return_value=sdk), \
+                mock.patch.object(M, "windows_video_controllers", return_value=[]):
+            hw = M.Strata._hardware(self.strata)
+        self.assertEqual([(g["vendor"], g["usable"], g["arch"]) for g in hw["gpus"]], [("amd", True, "gfx1201")])
+
     def test_a_family_with_sizes_of_its_own(self):
         """Qwen3.6, Ornith 1.5 and Gemma 4: three sizes each, two families' of the same names; a 32 GB PC with an
         8 GB card."""

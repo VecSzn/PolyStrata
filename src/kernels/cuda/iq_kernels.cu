@@ -241,6 +241,27 @@ __device__ __forceinline__ float vec_dot_iq3_s_q8_1(const void* __restrict__ vbq
     return d * sumi;
 }
 
+// IQ1_S has one scale and delta per 32 values; its 50-byte blocks are only 2-byte aligned.
+__device__ __forceinline__ float vec_dot_iq1_s_q8_1(const void* __restrict__ vbq, const block_q8_1* __restrict__ bq8_1,
+                                                    const int& kbx, const int& iqs) {
+    const block_iq1_s* b = (const block_iq1_s*) vbq + kbx;
+    const uint16_t h = b->qh[iqs];
+    int sumi = 0, sumy = 0;
+#pragma unroll
+    for (int j = 0; j < 4; ++j) {
+        const uint32_t grid = iq1s_grid_gpu[b->qs[4 * iqs + j] | (((h >> (3 * j)) & 7) << 8)];
+        const int u = get_int_b4(bq8_1[iqs].qs, 2 * j);
+        const int v = get_int_b4(bq8_1[iqs].qs, 2 * j + 1);
+        sumi = ggml_cuda_dp4a(grid & 0x0f0f0f0f, u, sumi);
+        sumi = ggml_cuda_dp4a((grid >> 4) & 0x0f0f0f0f, v, sumi);
+        sumy = ggml_cuda_dp4a(u, 0x01010101, sumy);
+        sumy = ggml_cuda_dp4a(v, 0x01010101, sumy);
+    }
+    const float delta = (h & 0x8000) ? -1.f - IQ1S_DELTA : -1.f + IQ1S_DELTA;
+    const float d = __half2float(b->d) * (2 * ((h >> 12) & 7) + 1) * __low2float(bq8_1[iqs].ds);
+    return d * (sumi + delta * sumy);
+}
+
 __device__ __forceinline__ float vec_dot_iq1_m_q8_1(const void* __restrict__ vbq, const block_q8_1* __restrict__ bq8_1,
                                                     const int& kbx, const int& iqs) {
     const block_iq1_m* bq1 = (const block_iq1_m*) vbq + kbx;
@@ -620,6 +641,8 @@ template<> struct Fmt<23> { static constexpr int qk = 256, ipb = 8, step = 4;
     __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_iq4_xs_q8_1(v, y, kbx, iqs); } };
 template<> struct Fmt<22> { static constexpr int qk = 256, ipb = 8, step = 2;
     __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_iq2_s_q8_1(v, y, kbx, iqs); } };
+template<> struct Fmt<19> { static constexpr int qk = 256, ipb = 8, step = 1;
+    __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_iq1_s_q8_1(v, y, kbx, iqs); } };
 template<> struct Fmt<29> { static constexpr int qk = 256, ipb = 8, step = 1;
     __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_iq1_m_q8_1(v, y, kbx, iqs); } };
 template<> struct Fmt<42> { static constexpr int qk = 64, ipb = 2, step = 1;
@@ -644,17 +667,17 @@ template<> struct Fmt<8> { static constexpr int qk = 32, ipb = QI8_0 / VDR_Q8_0,
 // The formats of each role, one list each so a type cannot be in one switch and missing from another.  Every
 // entry is a kernel template for each CUDA architecture of the build, hence two lists rather than one.
 #ifdef STRATA_Q6K_EXPERTS   // opt-in build (-DSTRATA_Q6K_EXPERTS=ON): one more instance per kernel, loaded at start
-#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8) X(40)
+#define STRATA_GU_FMTS(X) X(19) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(14) X(6) X(2) X(3) X(8) X(40)
 #else
-#define STRATA_GU_FMTS(X) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8) X(40)
+#define STRATA_GU_FMTS(X) X(19) X(16) X(17) X(18) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(6) X(2) X(3) X(8) X(40)
 #endif
 // Q5_K / Q6_K downs: Qwen3.6-35B-A3B (FF 512, whole 256-blocks per row); Flash-Next's FF 640 never selects them
 #ifdef STRATA_Q6K_EXPERTS
-#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(14) X(40)
+#define STRATA_D_FMTS(X) X(19) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(14) X(40)
 #else
-#define STRATA_D_FMTS(X) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(40)
+#define STRATA_D_FMTS(X) X(19) X(20) X(23) X(42) X(7) X(6) X(2) X(3) X(8) X(13) X(40)
 #endif
-#define STRATA_MMVQ_FMTS(X) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8) X(40)
+#define STRATA_MMVQ_FMTS(X) X(19) X(16) X(17) X(18) X(20) X(21) X(22) X(23) X(29) X(42) X(12) X(13) X(7) X(6) X(2) X(3) X(8) X(40)
 template<> struct Fmt<40> { static constexpr int qk = 64, ipb = 2, step = 4;     // NVFP4: 2 calls of 32 values
     __device__ static float dot(const void* v, const block_q8_1* y, int kbx, int iqs) { return vec_dot_nvfp4_q8_1(v, y, kbx, iqs); } };
 
@@ -1855,7 +1878,7 @@ __global__ void __launch_bounds__(256, MINB) expdec_gu_kernel(const unsigned lon
                                                                             float* __restrict__ gate, float* __restrict__ up, int rb) {
     const int ng = *n_groups;
     if (blockIdx.y >= ng) return;
-    __shared__ alignas(16) int4 s_u[ED_NC * 2 * ED_XB];
+    __shared__ __align__(16) int4 s_u[ED_NC * 2 * ED_XB];
     __shared__ float s_ds[ED_NC * ED_XB];
     STRATA_SHARED_ALIGN16_U32(s_grid_buf, EdGrid<TG>::words);
     const int tid = threadIdx.x;
@@ -2042,7 +2065,7 @@ __global__ void __launch_bounds__(256, STRATA_EXPDEC_MINB) expdec_down_kernel(co
     if (blockIdx.y >= ng) return;
     constexpr int LANES = TD == 20 ? 8 : 16;
     constexpr int RPP = (256 / LANES) * R;   // rows per pass
-    __shared__ alignas(16) int4 s_u[ED_NC * 2 * ED_HB];
+    __shared__ __align__(16) int4 s_u[ED_NC * 2 * ED_HB];
     __shared__ float s_ds[ED_NC * ED_HB];
     const int tid = threadIdx.x;
     const int sw = tid / LANES, t = tid % LANES;
@@ -2206,6 +2229,20 @@ __device__ void dq_iq3_s(const void* vx, int64_t ibs, dst_t* yy, int tid) {
         y[j + 0] = cvt<dst_t>(d * grid1[j] * (signs & kmask_iq2xs[j + 0] ? -1.f : 1.f));
         y[j + 4] = cvt<dst_t>(d * grid2[j] * (signs & kmask_iq2xs[j + 4] ? -1.f : 1.f));
     }
+}
+template<typename dst_t>
+__device__ void dq_iq1_s(const void* vx, int64_t ibs, dst_t* yy, int tid) {
+    const block_iq1_s& b = ((const block_iq1_s*) vx)[ibs];
+    const int ib = tid % 8, il = tid / 8;
+    const uint16_t h = b.qh[ib];
+    const float d = __half2float(b.d) * (2 * ((h >> 12) & 7) + 1);
+    const float delta = (h & 0x8000) ? -1.f - IQ1S_DELTA : -1.f + IQ1S_DELTA;
+    uint32_t grid[2];
+    grid[0] = iq1s_grid_gpu[b.qs[4 * ib + il] | (((h >> (3 * il)) & 7) << 8)];
+    grid[1] = (grid[0] >> 4) & 0x0f0f0f0f;
+    grid[0] &= 0x0f0f0f0f;
+    const int8_t* q = (const int8_t*) grid;
+    for (int j = 0; j < 8; ++j) yy[32 * ib + 8 * il + j] = cvt<dst_t>(d * (q[j] + delta));
 }
 template<typename dst_t>
 __device__ void dq_iq1_m(const void* vx, int64_t ibs, dst_t* yy, int tid) {
@@ -2465,6 +2502,7 @@ __device__ __forceinline__ void dq_dispatch(int ty, const void* vx, int64_t ibs,
         case 20: dq_iq4_nl(vx, ibs, y, tid); break;
         case 21: dq_iq3_s(vx, ibs, y, tid); break;
         case 22: dq_iq2_s(vx, ibs, y, tid); break;
+        case 19: dq_iq1_s(vx, ibs, y, tid); break;
         case 29: dq_iq1_m(vx, ibs, y, tid); break;
         case 23: dq_iq4_xs(vx, ibs, y, tid); break;
         case 11: dq_q3_k(vx, ibs, y, tid); break;
@@ -2520,7 +2558,7 @@ __global__ void dequant_gu_kernel(int ty, const void* __restrict__ gate, const v
 
 // the types dq_dispatch dequantizes
 bool is_iq(int t) {
-    return t == 16 || t == 17 || t == 18 || t == 20 || t == 21 || t == 22 || t == 23 || t == 29 || t == 42 || t == 11 ||
+    return t == 16 || t == 17 || t == 18 || t == 20 || t == 21 || t == 22 || t == 23 || t == 29 || t == 42 || t == 11 || t == 19 ||
 #ifdef STRATA_Q6K_EXPERTS
            t == 12 || t == 13 || t == 14 || t == 7 || t == 6 || t == 2 || t == 3 || t == 8 || t == 40;
 #else
@@ -3452,6 +3490,7 @@ size_t iq_row_bytes(int t, int64_t n) noexcept {
         case 20: return (size_t) (n / 32) * sizeof(block_iq4_nl);
         case 21: return (size_t) (n / 256) * sizeof(block_iq3_s);
         case 22: return (size_t) (n / 256) * sizeof(block_iq2_s);
+        case 19: return (size_t) (n / 256) * sizeof(block_iq1_s);
         case 29: return (size_t) (n / 256) * sizeof(block_iq1_m);
         case 23: return (size_t) (n / 256) * sizeof(block_iq4_xs);
         case 11: return (size_t) (n / 256) * sizeof(block_q3_K);

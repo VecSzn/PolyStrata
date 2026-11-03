@@ -21,7 +21,7 @@ class FamilyOrder(unittest.TestCase):
     def test_the_menu_order_on_nvidia(self):
         fams = setup.menu_families(False) + list(setup.OWN_PATH_FAMILIES)
         self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "nvfp4", "glm", "deepseek", "lfm25", "qwen36",
-                                "ornith", "gemma4", "tiel", "minicpmv", "qwen36-strata"])
+                                "ornith", "ornith397", "gemma4", "tiel", "minicpmv", "qwen36-strata"])
 
     def test_the_default_stays_the_first_family(self):
         self.assertEqual(setup.menu_families(False)[0], "qwen")
@@ -30,7 +30,7 @@ class FamilyOrder(unittest.TestCase):
     def test_nvfp4_is_not_listed_on_amd_and_intel(self):
         fams = setup.menu_families(True)
         self.assertNotIn("nvfp4", fams)
-        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "glm", "deepseek", "lfm25", "qwen36", "ornith",
+        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "glm", "deepseek", "lfm25", "qwen36", "ornith", "ornith397",
                                 "gemma4", "tiel", "minicpmv"])
         self.assertIn("nvfp4", setup.FAMILIES)             # --family nvfp4 still exists, and says why not
 

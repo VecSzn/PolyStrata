@@ -1,6 +1,6 @@
 """tools/iq_fixture.py - deterministic i-quant fixtures for src/kernels/iq_parity.cpp (TODO 24).
 
-For each of the ten types iq_parity tests, writes `<out>/<name>.bin` (int32 header: the KERNEL type id,
+For each type iq_parity tests, writes `<out>/<name>.bin` (int32 header: the KERNEL type id,
 rows, cols - then the raw GGUF block bytes) and `<out>/<name>.f32` (rows*cols float32 reference values,
 dequantized by the same library the comparison treats as ground truth):
 
@@ -10,7 +10,7 @@ dequantized by the same library the comparison treats as ground truth):
 Generation is deterministic: an explicit seed and fixed dimensions, and every random choice comes from
 numpy's RandomState under that seed.  The blocks are synthetic on purpose: the i-quant formats have no
 published quantizer in gguf-py (it dequantizes only), so each block combines sane half-precision scales
-(written at the layout's scale offsets, see SCALE_OFFSETS below) with seeded index/sub-scale bytes - the
+(written at the layout's scale offsets, see repair_scales below) with seeded index/sub-scale bytes - the
 dequantized reference covers real codebook values either way, which is what the parity compares.
 
 Dependencies: python3 and numpy, plus the repository's VENDORED gguf-py (third_party/llama.cpp/gguf-py -
@@ -57,6 +57,7 @@ LAYOUT = {   # (block values, block bytes) == the vendored gguf-py's GGML_QUANT_
     "IQ2_S":   (256,  82),
     "IQ3_XXS": (256,  98),
     "IQ3_S":   (256, 110),
+    "IQ1_S":   (256,  50),
     "IQ1_M":   (256,  56),
     "IQ4_NL":   (32,  18),
     "IQ4_XS":  (256, 136),
@@ -83,7 +84,7 @@ def repair_scales(name: str, raw: np.ndarray) -> None:
     raw[:, 0:2] = np.frombuffer(HALF_ONE, dtype=np.uint8)
 # name -> (the KERNEL type id written into the .bin header, identical to the gguf-py enum id)
 KERNEL_IDS = {"IQ2_XXS": 16, "IQ2_XS": 17, "IQ2_S": 22, "IQ3_XXS": 18, "IQ3_S": 21,
-              "IQ1_M": 29, "IQ4_NL": 20, "IQ4_XS": 23, "Q2_0": 42, "Q3_K": 11}
+              "IQ1_S": 19, "IQ1_M": 29, "IQ4_NL": 20, "IQ4_XS": 23, "Q2_0": 42, "Q3_K": 11}
 
 
 def build(name: str, rows: int, cols: int, seed: int):
@@ -129,7 +130,12 @@ def main() -> int:
         (out / f"{name}.f32").write_bytes(np.ascontiguousarray(ref, dtype="<f4").tobytes())
         print(f"  {name:<8} type {KERNEL_IDS[name]:>2}  {args.rows} x {args.cols}  "
               f"{len(blob) - 12} block bytes, {ref.size} reference floats")
-    print(f"iq_fixture: {len(KERNEL_IDS)} fixtures in {out} (seed {args.seed})")
+    # Ornith 397B's actual expert projections exercise many blocks and both row shapes.
+    for label, rows, cols in (("IQ1_S_GATE", 1024, 4096), ("IQ1_S_DOWN", 4096, 1024)):
+        blob, ref = build("IQ1_S", rows, cols, args.seed)
+        (out / f"{label}.bin").write_bytes(blob)
+        (out / f"{label}.f32").write_bytes(np.ascontiguousarray(ref, dtype="<f4").tobytes())
+    print(f"iq_fixture: {len(KERNEL_IDS) + 2} fixtures in {out} (seed {args.seed})")
     return 0
 
 

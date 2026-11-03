@@ -112,6 +112,7 @@ int check(int gate, int n_expert, int n_used, float in_scale, bool with_bias, bo
 int main() {
     std::mt19937 rng(1234);
     int bad = 0;
+    bad += check(0, 512, 10, 1.f, false, false, true, 0.f, rng);                    // Ornith 397B
     bad += check(0, 256, 8, 1.f, false, false, true, 0.f, rng);                     // Qwen3.6
     bad += check(0, 128, 8, 1.f / std::sqrt(2816.f), false, true, true, 0.f, rng);  // Gemma 4
     bad += check(1, 256, 8, 1.f, true, false, true, 2.5f, rng);                    // GLM 5.3 Flash

@@ -120,6 +120,112 @@ and 31.4 with Ornith's and 22.6, 24.6 and 28.6 with Gemma 4's, of its 31.8. Tiel
 with the engine of 1212621baadf, took it to 21.8, 24.9 and 29.9 GiB. Setup does not stop a PC below the 32 GB that
 Qwen3.8 needs when one of these families is named.
 
+## Ornith 1.5 397B (experimental)
+
+`ornith397` is a separate family from `ornith` (35B). It uses `strata-poly`'s `qwen35moe` backend with
+[bartowski's files](https://huggingface.co/bartowski/Ornith-1.5-397B-GGUF/tree/217875e8f6cf3989807cfe0313b43309874c4e90).
+The pinned GGUF headers describe 60 layers, 512 experts, 10 selected experts and a 4096-wide embedding.
+These are file inspections, not inference benchmarks. Image input for this family has not yet been validated
+on hardware. Windows AMD setup builds the text engine locally with the AMD HIP SDK and Visual Studio C++ Build
+Tools. The full engine builds with HIP SDK 7.2 and VS 2022, and its GPU memory self-test passes on an RX 9070 XT
+(gfx1201, 16 GB). IQ1_S text inference was also checked on this card as described below; the other five sizes
+have not had a full-model inference check.
+
+```bash
+python setup.py --family ornith397 --model IQ2_XXS --yes
+python setup.py --family ornith397 --model IQ1_S --vision cpu --yes
+python setup.py --family ornith397 --model IQ1_S --backend hip --vision no --yes
+```
+
+The same options work with `START-HERE.bat` on Windows and `./setup.sh` on Linux. The MCP installer accepts
+`family: "ornith397"` and the same size names. Each installed size appears separately in the server and web
+model lists. `--gguf-dir` accepts an existing local directory containing all numbered shards of the selected size.
+
+| Size | Download (GB) | Shards | Routed experts (GB) |
+| --- | ---: | ---: | ---: |
+| IQ1_S | 81.78 | 3 | 76.202 |
+| IQ1_M | 91.36 | 3 | 85.732 |
+| IQ2_XXS | 106.31 | 3 | 100.596 |
+| IQ2_XS | 118.47 | 3 | 112.676 |
+| IQ2_S | 120.51 | 4 | 114.555 |
+| IQ2_M | 133.13 | 4 | 127.104 |
+
+Sizes are decimal GB, summed from all shards at the pinned revision. Quantization names describe mixtures:
+IQ2_M, for example, contains IQ2_S and IQ3_S experts. Each shard is checked against its published size and SHA-256.
+Setup selects IQ2_XXS when its RAM estimate fits, then IQ1_M, then IQ1_S; the other sizes are selected by name.
+This does not change the default family or the existing 35B installation.
+
+The memory figures are conservative estimates, not measurements. Setup budgets all non-expert file bytes plus
+6 GiB for 32K context caches, recurrent state snapshots, prompt scratch and reserve before allocating experts.
+The full-attention cache is 30,720 bytes per token in FP16. This gives an estimated 11.2-11.7 GiB before experts,
+plus the existing 2 GiB minimum expert margin. The RAM estimate uses uncached expert bytes plus the existing
+10 GB host allowance. Larger contexts, concurrent conversations and images need more memory. The image encoder's
+2 GiB VRAM allowance is also an estimate; `--vision cpu` keeps it off the GPU.
+
+Images are optional and download the model's own F16 projector (0.918 GB). Text-only installs do not download it.
+The tokenizer and chat template come from the first shard. None of these six files contains MTP draft tensors,
+so setup does not fetch a draft from another model. Repeat-based guessing remains the engine's existing behavior.
+IQ1_S uses native GPU matrix-vector kernels and can enter the expert cache; CPU experts use ggml as before.
+No 35B tail-skipping or batch-size tuning is applied to this family.
+
+On 2026-11-02, IQ1_S completed setup and text inference on Windows with an RX 9070 XT (15.9 GiB VRAM),
+63 GB system RAM and a Ryzen 7 7800X3D, using HIP SDK 7.2, VS 2022 and 16 CPU threads. All three downloaded
+shards passed SHA-256 verification. Setup used `--backend hip --vision no --context 32768`, mapped the card
+from Windows inventory GPU 1 to HIP GPU 0, and generated a working launcher. Starting that launcher took
+14.1 seconds to report the model loaded; restarting it took 8.1 seconds. It answered `2 + 2` with `4`,
+then a follow-up to add three with `7`, and answered `4` again after restarting.
+
+A separate two-sentence response completed normally with 35 prompt tokens and 59 output tokens in
+24.4 seconds (the server reported 3.6 output tokens/s). This is one short smoke test, not a throughput or
+quality benchmark: the answer included an incorrect suggestion that SSDs can be mechanical. The model
+exceeds this PC's RAM, so experts can be paged from disk. These runs do not measure minimum RAM or validate
+32K-length prompts, concurrent conversations, image input, or the other five sizes.
+
+Kernel validation on Windows, Radeon RX 9070 XT, HIP SDK 7.2: `iq_parity` and `iq_multi_parity` passed,
+including IQ1_S's 4096-to-1024 and 1024-to-4096 projections. Dequantization matched gguf-py exactly;
+multi-column results matched single-column results bit for bit. The 512-expert/top-10 routing test selected
+the same experts as its CPU reference (maximum relative weight difference 3.3e-7). These synthetic tests do
+not establish full-model inference, vision, performance or memory requirements. CUDA and SYCL were not built
+on this machine because their toolchains were unavailable.
+
+Installer, MCP and server regression suites completed with 678, 29 and 971 tests respectively (12 skips
+in total). The host CTest run passed 38 tests and skipped one; `expert_parity` and `pool_test` could not
+read the separate Strata model fixture `pack/full/experts.bin`. Those two checks need that real expert pack
+and were not validated by the Ornith GGUF inference runs.
+
+On Windows, `STRATA_POLY_PREFETCH_EXPERTS=1` is an opt-in for models whose CPU experts are read from an SSD.
+It asks Windows for the selected experts' gate, up and down matrices together before computing them, while
+the GPU works on its cached experts. It uses the same weights and routing, with ordinary mapped reads as
+the fallback if the memory hint is unavailable or fails. It is off by default; a model already in RAM may
+not benefit. To enable it for one installed model, add this entry to its run config's `env` object:
+
+```json
+"env": {"STRATA_POLY_PREFETCH_EXPERTS": "1"}
+```
+
+On 2026-11-03, IQ1_S was compared with and without this option on the same RX 9070 XT / 7800X3D / 63 GB RAM
+Windows PC above. Each run started a new server from the same saved expert profile, then answered the same
+explanation, Python binary-search and record-lookup requests. Context capacity stayed at 32K, with FP16 KV,
+16 CPU threads, graph replay and the default expert-cache budget. No experts were skipped. The table gives
+medians of two runs per setting through the chat API; these are short tests on one PC, not general benchmarks.
+
+| Request (prompt / output tokens) | Default decode (tokens/s) | Read-ahead decode (tokens/s) | Default total (s) | Read-ahead total (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Explanation (35 / 62) | 5.1 | 6.4 | 19.6 | 14.7 |
+| Python binary search (40 / 94) | 3.0 | 4.9 | 38.4 | 29.2 |
+| Record lookup (1,700 / 16) | 2.4 | 3.7 | 59.0 | 67.5 |
+
+Coding decode ranged from 2.8-3.2 tokens/s without read-ahead and 4.5-5.2 with it; all four runs returned
+the same code. The longer request correctly found `1246`, but its prompt processing slowed from a median
+52.3 to 63.0 seconds. This option favors generation on this PC; it does not make every request faster.
+Smaller thread counts, larger VRAM reserves, smaller prompt buffers, disabling graph replay and disabling
+the full-model page warm-up did not establish a better overall configuration, so those defaults were kept.
+
+The HIP build passed 4,000 worker checks and the real IQ1_S GGUF's expert and matrix parity checks with
+read-ahead enabled. With the expert cache frozen and guessing disabled, a separate off/on comparison
+returned the same 32 generated token IDs and every printed top-three probability. The installer preserved
+the per-model `env` setting, and the generated launcher passed generation, follow-up and restart checks.
+
 ## How a backend works
 
 There are two levels.
