@@ -51,8 +51,8 @@ def haystack(n_chars: int) -> str:
     return "".join(parts)[:n_chars]
 
 
-def ask(url: str, key: str, prompt: str, timeout: float) -> tuple[str, int, float]:
-    body = {"model": "strata", "max_tokens": 40, "temperature": 0,
+def ask(url: str, key: str, prompt: str, timeout: float, max_tokens: int = 256) -> tuple[str, int, float]:
+    body = {"model": "strata", "max_tokens": max_tokens, "temperature": 0,
             "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "user", "content": prompt}]}
     headers = {"Content-Type": "application/json"}
@@ -72,6 +72,9 @@ def main() -> int:
     ap.add_argument("--lengths", default="32k", help="comma-separated, e.g. 1k,32k,128k,262k")
     ap.add_argument("--depths", default="10,50,90", help="where the code word sits, percent of the text")
     ap.add_argument("--timeout", type=float, default=1800)
+    ap.add_argument("--max-tokens", type=int, default=256,
+                    help="tokens the answer may use: thinking is off, but a model that opens with a preamble "
+                         "is cut before the code word and scores a false miss (default 256, was a fixed 40)")
     ap.add_argument("--out", help="also write the results as JSON")
     a = ap.parse_args()
     try:
@@ -96,7 +99,7 @@ def main() -> int:
             prompt = (text[:cut] + needle + text[cut:] +
                       "\n\nWhat is the secret code word mentioned in the text above? Reply with the code word only.")
             try:
-                answer, n, secs = ask(a.url, a.api_key, prompt, a.timeout)
+                answer, n, secs = ask(a.url, a.api_key, prompt, a.timeout, a.max_tokens)
             except (OSError, urllib.error.HTTPError) as e:
                 print(f"{L:>5} depth {d:>3}%: request failed ({e})")
                 rows.append({"length": L, "depth": d, "error": str(e)})
