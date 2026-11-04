@@ -53,6 +53,7 @@ T* dalloc(size_t n) {
 
 const char* name_of(int t) {
     switch (t) {
+        case 19: return "IQ1_S";
         case 16: return "IQ2_XXS";
         case 17: return "IQ2_XS";
         case 18: return "IQ3_XXS";
@@ -289,7 +290,7 @@ float time_ms(cudaStream_t s, int it, const auto& fn) {
 void bench(cudaStream_t s, std::mt19937& rng) {
     std::printf("\n--bench: microseconds per call, old (per-column decode) / new (decode once), idle GPU assumed\n");
     const int n_in = 2560, n_out = 8192, it = 200;
-    for (int t : {16, 17, 18, 21, 22, 29}) {
+    for (int t : {19, 16, 17, 18, 21, 22, 29}) {
         const auto w = random_rows(t, n_out, n_in, rng);
         uint8_t* dw = dalloc<uint8_t>(w.size());
         ck(cudaMemcpy(dw, w.data(), w.size(), cudaMemcpyHostToDevice), "w");
@@ -313,7 +314,7 @@ void bench(cudaStream_t s, std::mt19937& rng) {
         cudaFree(dw); cudaFree(dx); cudaFree(dxq); cudaFree(dy);
     }
     // the verify window's shape: 2560 x 640 experts, 16 groups of m entries each
-    for (int gu : {16, 17, 18, 21, 22, 29}) {
+    for (int gu : {19, 16, 17, 18, 21, 22, 29}) {
         std::printf("%-8s/Q2_0 grouped, 16 groups of m entries:", name_of(gu));
         for (int m : {1, 2, 3, 4, 8}) {
             Grouped G(gu, 42, 2560, 640, std::vector<int>(16, m), 8, rng);
@@ -409,14 +410,16 @@ int main(int argc, char** argv) {
     cudaStream_t s;
     ck(cudaStreamCreate(&s), "stream");
     std::mt19937 rng(18);
-    for (int t : {16, 17, 18, 20, 21, 22, 23, 29, 42}) {
+    for (int t : {19, 16, 17, 18, 20, 21, 22, 23, 29, 42}) {
         check_mmvq(t, 2560, 67, s, rng);   // the model's n_embd; 67 rows: a partial block of 4 rows
         check_mmvq(t, 1024, 5, s, rng);
     }
-    for (int gu : {16, 17, 18, 21, 22, 23, 29, 42}) {
+    for (int gu : {19, 16, 17, 18, 21, 22, 23, 29, 42}) {
         for (int dt : {20, 42}) check_grouped(gu, dt, 2560, 640, s, rng);   // the model's shape
         check_grouped(gu, 23, 1024, 512, s, rng);                           // IQ4_XS down needs n_ff % 256 == 0
     }
+    check_grouped(19, 19, 4096, 1024, s, rng);   // Ornith IQ1_S gate/up and down
+    check_grouped(19, 23, 4096, 1024, s, rng);   // mixed quantization
     check_q8_1_finite(s, rng);
     if (do_bench) bench(s, rng);
     std::printf("iq_multi_parity: %d failures\n", g_fail);

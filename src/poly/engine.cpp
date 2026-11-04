@@ -512,12 +512,7 @@ Engine::~Engine() {
     OnCard here(device_, split_);
     map_quit_.store(true);
     if (mapper_.joinable()) mapper_.join();
-    {
-        std::lock_guard<std::mutex> l(pool_m_);
-        pool_quit_ = true;
-    }
-    pool_cv_.notify_all();
-    for (std::thread& t : pool_threads_) t.join();
+    if (pool_reader_) pool_reader_->stop();
     if (follower_.joinable()) {
         {
             std::lock_guard<std::mutex> l(swap_m_);
@@ -1768,12 +1763,7 @@ void Engine::follow_loop() {
                 };
                 expert_bytes(L, (int) e, (int) e + 1, as(kDrop));
                 expert_bytes(T, te, te + 1, as(kTouch));
-                {
-                    std::lock_guard<std::mutex> l(pool_m_);
-                    pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
-                    pool_n_.fetch_add((int) jobs.size(), std::memory_order_release);
-                }
-                pool_cv_.notify_all();
+                pool_reader_->submit(jobs, ExpertReadQueue::Priority::pages);
             }
         }
         if (err == cudaSuccess) err = cudaEventRecord(s->done, cs(swap_st_));
@@ -2138,6 +2128,7 @@ void Engine::load(const Options& o) {
             }
         }
     }
+    prefetch_experts_ = expert_prefetch_enabled() && expert_prefetch_available();
     const int threads = opt_.threads > 0 ? opt_.threads : usable_cpus();
     mind_memory();
     // the routed experts in the mapped files, and of them the ones the CPU reads through the mapping: those the
@@ -2149,6 +2140,21 @@ void Engine::load(const Options& o) {
         if (L.moe)
             expert_runs(L, n_expert_, [&](int e) { return !L.slot[(size_t) e]; },
                         [&](const uint8_t*, size_t n) { outside_bytes_ += n; });
+    if (opt_.ram_experts_mib == kAutoRamExpertsMib) {
+        // VRAM first (fill_expert_cache()), then RAM: as many of the experts outside VRAM as fit in the RAM the
+        // machine has, less a margin for the OS and this process's buffers; what the budget leaves out comes
+        // from the files (the SSD) through pool_.  Each card of a layer split settles its own budget, so the
+        // margin is kept once per card, which leaves more for the OS rather than less.
+        opt_.ram_experts_mib = auto_ram_experts_mib(outside_bytes_, ram_available());
+        if (opt_.ram_experts_mib >= 0)
+            std::fprintf(stderr, "strata-poly: auto: %lld MiB of RAM for the %.1f GiB of experts outside VRAM; "
+                                 "the others come from the SSD when a token needs them (--ram-experts-mib auto)\n",
+                         (long long) opt_.ram_experts_mib, outside_gib());
+        else
+            std::fprintf(stderr, "strata-poly: auto: the %.1f GiB of experts outside VRAM all fit in RAM and "
+                                 "stay there (--ram-experts-mib auto)\n",
+                         outside_gib());
+    }
     if (opt_.ram_experts_mib >= 0) {
         // each size of slot takes the share of the budget its experts outside VRAM have of all of those
         pool_size_of_.assign(layers_.size(), 0);
@@ -2194,7 +2200,7 @@ void Engine::load(const Options& o) {
         pool_failed_.reset(new std::atomic<uint8_t>[slots]);
         for (size_t v = 0; v < slots; ++v) pool_pending_[v].store(0), pool_failed_[v].store(0);
         // 8: on the laptop 4 left a call waiting for its reads 8% longer; 12 were no better than 8
-        for (int t = 0; t < 8; ++t) pool_threads_.emplace_back([this] { pool_loop(); });
+        pool_reader_ = std::make_unique<ExpertReadQueue>(8, [this](const PoolJob& job) { pool_run(job); });
         pool_state_.reset(new std::atomic<uint8_t>[slots]);
         for (size_t s = 0; s < slots; ++s) pool_state_[s].store(0);
         // the next layer's top 8: the best of 0, 8, 12 and 16, and of 8 with the layer after's top 8 as well
@@ -2574,50 +2580,13 @@ void Engine::trim() {
 // thread keeps a handle to each file.  For the experts the RAM budget leaves out (Options::ram_experts_mib), which
 // a prompt batch copies to the card: through the mapping they came back into the working set a fault at a time.
 bool Engine::read_file(uint8_t* dst, const uint8_t* src, size_t n) const {
-    const FileView* v = nullptr;
-    for (const FileView& f : views_)
-        if (src >= f.base && src + n <= f.base + f.bytes) v = &f;
-    if (!v) return false;
-    const uint64_t off = (uint64_t) (src - v->base);
-#ifdef _WIN32
-    struct Handles {
-        std::map<std::string, HANDLE> h;
-        ~Handles() {
-            for (auto& [path, fh] : h) CloseHandle(fh);
-        }
-    };
-    thread_local Handles mine;
-    HANDLE& fh = mine.h[v->path];
-    if (!fh) fh = CreateFileA(v->path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (fh == INVALID_HANDLE_VALUE) return false;
-    for (size_t done = 0; done < n;) {
-        OVERLAPPED o{};
-        o.Offset = (DWORD) (off + done);
-        o.OffsetHigh = (DWORD) ((off + done) >> 32);
-        DWORD got = 0;
-        const DWORD want = (DWORD) std::min<size_t>(n - done, size_t(1) << 30);
-        if (!ReadFile(fh, dst + done, want, &got, &o) || got == 0) return false;
-        done += got;
+    const uintptr_t at = (uintptr_t) src;
+    for (const FileView& f : views_) {
+        const uintptr_t base = (uintptr_t) f.base;
+        if (at >= base && at - base <= f.bytes && n <= f.bytes - (at - base))
+            return read_expert_file(f.path, (uint64_t) (at - base), dst, n);
     }
-#else
-    struct Fds {
-        std::map<std::string, int> fd;
-        ~Fds() {
-            for (auto& [path, f] : fd)
-                if (f >= 0) ::close(f);
-        }
-    };
-    thread_local Fds mine;
-    auto it = mine.fd.find(v->path);
-    if (it == mine.fd.end()) it = mine.fd.emplace(v->path, ::open(v->path.c_str(), O_RDONLY | O_CLOEXEC)).first;
-    if (it->second < 0) return false;
-    for (size_t done = 0; done < n;) {
-        const ssize_t got = ::pread(it->second, dst + done, n - done, (off_t) (off + done));
-        if (got <= 0) return false;
-        done += (size_t) got;
-    }
-#endif
-    return true;
+    return false;
 }
 
 const Stats& Engine::stats() const {
@@ -2756,7 +2725,7 @@ void Engine::moe_router(const Layer& L, int n) {
 }
 
 // Layer j's likeliest prefetch_k_ experts of each of n tokens, as moe_router() guessed them before ev_: those the CPU
-// would read from the files get a slot now, and pool_threads_ read them while this layer is computed, every token's
+// would read from the files get a slot now, and the read queue reads them while this layer is computed, every token's
 // best guess first, then every token's second, and so on.  A slot read ahead is held through the calls up to its
 // layer's (a window's halves are a call each): held for the next call alone, it could go to the other half's misses
 // before its own half came to it.  It is on trial: one its layer does not use goes when the clock comes to it.
@@ -2866,12 +2835,7 @@ void Engine::rekeep() {
         expert_runs(L, n_expert_, [&](int e) { return a[e] && !b[e] && !L.slot[(size_t) e]; }, as(kDrop));
         expert_runs(L, n_expert_, [&](int e) { return !a[e] && b[e] && !L.slot[(size_t) e]; }, as(kTouch));
     }
-    {
-        std::lock_guard<std::mutex> l(pool_m_);
-        pool_pages_.insert(pool_pages_.end(), jobs.begin(), jobs.end());
-        pool_n_.fetch_add((int) jobs.size(), std::memory_order_release);
-    }
-    pool_cv_.notify_all();
+    pool_reader_->submit(jobs, ExpertReadQueue::Priority::pages);
 }
 
 // After the load: the slots take the experts the profile has used most of those outside kept_ and the card, read
@@ -3032,41 +2996,8 @@ void Engine::pool_run(const PoolJob& job) {
         pool_state_[v].store(pool_failed_[v].load(std::memory_order_relaxed) ? 2 : 0, std::memory_order_release);
 }
 
-// A read thread without a job spins 2 ms before it sleeps: an answer queues reads every layer, a fraction of a
-// millisecond apart.
-void Engine::pool_loop() {
-    for (;;) {
-        const Clock::time_point t0 = Clock::now();
-        while (pool_n_.load(std::memory_order_acquire) == 0 && Clock::now() - t0 < std::chrono::milliseconds(2))
-            _mm_pause();
-        PoolJob job;
-        {
-            std::unique_lock<std::mutex> l(pool_m_);
-            pool_cv_.wait(l, [&] { return pool_quit_ || !pool_jobs_.empty() || !pool_pages_.empty(); });
-            if (pool_quit_) return;
-            std::deque<PoolJob>& q = pool_jobs_.empty() ? pool_pages_ : pool_jobs_;
-            job = q.front();
-            q.pop_front();
-            pool_n_.fetch_sub(1, std::memory_order_relaxed);
-        }
-        pool_run(job);
-    }
-}
-
-// A thread that waits for a read takes the first piece queued (those of the reads a call waits for are first);
-// false when none is.  Spinning, the CPU's threads left a call's few late experts to the read threads alone.
-bool Engine::pool_help() {
-    PoolJob job;
-    {
-        std::lock_guard<std::mutex> l(pool_m_);
-        if (pool_jobs_.empty()) return false;
-        job = pool_jobs_.front();
-        pool_jobs_.pop_front();
-        pool_n_.fetch_sub(1, std::memory_order_relaxed);
-    }
-    pool_run(job);
-    return true;
-}
+// A waiting CPU worker helps the same queue as the I/O threads, without taking page maintenance work.
+bool Engine::pool_help() { return pool_reader_->help(); }
 
 // Expert e of L into slot s by the read threads, in pieces of 256 KiB: ahead of what is queued with `first`, for a
 // call that is about to compute it.  The threads that wait for it share its pieces; in pieces of 64 KiB a piece took
@@ -3089,13 +3020,8 @@ void Engine::pool_queue(const Layer& L, size_t e, int32_t s, bool first) {
     pool_failed_[(size_t) s].store(0, std::memory_order_relaxed);
     pool_pending_[(size_t) s].store(n, std::memory_order_relaxed);
     pool_state_[(size_t) s].store(1, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> l(pool_m_);
-        if (first) pool_jobs_.insert(pool_jobs_.begin(), jobs, jobs + n);
-        else pool_jobs_.insert(pool_jobs_.end(), jobs, jobs + n);
-        pool_n_.fetch_add(n, std::memory_order_release);
-    }
-    pool_cv_.notify_all();
+    pool_reader_->submit(std::span<const PoolJob>(jobs, (size_t) n),
+                         first ? ExpertReadQueue::Priority::demand : ExpertReadQueue::Priority::predicted);
 }
 
 // One token's router scores with Options::cache_bias added to the ones of the experts in VRAM.
@@ -3147,6 +3073,21 @@ void Engine::pool_read(const Layer& L, PoolRead& r) {
     r.ok = read_file(p, L.exp_gate + r.e * L.gu_stride, L.gu_bytes) &&
            read_file(p + L.gu_bytes, L.exp_up + r.e * L.u_stride, L.u_bytes) &&
            read_file(p + L.gu2(), L.exp_down + r.e * L.d_bytes, L.d_bytes);
+}
+
+// Pool reads own their destinations and completion state. Only the remaining mapped experts need hints;
+// hinting an anonymous staging slot does not read its GGUF and can race the actual reader's page work.
+void Engine::prefetch_cpu_experts(const Layer& L, int il, const CpuExpert* host, int count, int rows,
+                                 const std::function<void()>*& meanwhile) {
+    prepare_expert_prefetch(prefetch_experts_, std::span<const CpuExpert>(host, (size_t) count), rows,
+                            {L.gu_bytes, L.u_bytes, L.d_bytes},
+        [&](const CpuExpert& e) { return !pool_ || pool_slot_of(il, e.gate) == SIZE_MAX; },
+        [&] {
+            if (meanwhile) {
+                (*meanwhile)();
+                meanwhile = nullptr;   // CPU workers must not launch the same GPU work again
+            }
+        }, prefetch_expert_ranges);
 }
 
 // The routed experts of tokens that come a few at a time.  moe_router() is on its way, with ev_ behind it.  True
@@ -3349,6 +3290,7 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 if (!pool_help()) std::this_thread::yield();
             }
         };
+        prefetch_cpu_experts(L, il, host, n_host, m, meanwhile);
         cpu_experts(*workers_, host, n_host, m, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_,
                     h_x_ + (size_t) at * e_row, limit, gelu_, cpu, meanwhile, any_late ? late : nullptr, &wait);
         pool_reads_.clear();
@@ -3750,6 +3692,8 @@ void Engine::moe_rows(Layer& L, int il, int n) {
             ck(cudaStreamSynchronize(cs(st_)), "expert staging");
             done = Clock::now();
         });
+        const std::function<void()>* meanwhile = nullptr;   // card() is already running above
+        prefetch_cpu_experts(L, il, host_.data(), (int) host_.size(), n, meanwhile);
         cpu_experts(*workers_, host_.data(), (int) host_.size(), n, gt, ut, dt, n_embd_, n_ff_exp_, h_x_, limit, gelu_,
                     h_cpu_, nullptr);
         const double cpu = ms_since(start);
