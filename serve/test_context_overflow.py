@@ -112,6 +112,38 @@ class ContextOverflow(unittest.TestCase):
                         self.assertEqual(prepared, ids)
                         self.assertEqual(maximum, 1 if budget == 1 else room)
 
+    def test_truncate_middle_keeps_prompt_edges_and_requested_answer_room(self):
+        self.svc.truncate_middle = True
+        text = "BEGIN" + ("a" * 65500) + "MID_MARKER" + ("b" * 65500) + "LATEST"
+        ids = [ord(c) for c in text]
+        with mock.patch.object(self.svc, "encode_prompt", return_value=ids):
+            prepared, _, maximum = self.svc.prepare(
+                [{"role": "user", "content": "oversized"}], None, {}, 128)
+        expected_room = CTX - CTX_SLACK - 128
+        self.assertEqual(len(prepared), expected_room)
+        self.assertEqual(maximum, 128)
+        decoded = self.svc.tok.decode(prepared)
+        self.assertTrue(decoded.startswith("BEGIN"))
+        self.assertTrue(decoded.endswith("LATEST"))
+        self.assertNotIn("MID_MARKER", decoded)
+
+        with mock.patch.object(self.svc, "encode_prompt", return_value=ids):
+            prepared, _, maximum = self.svc.prepare(
+                [{"role": "user", "content": "oversized"}], None, {}, None)
+        self.assertEqual(len(prepared), CTX - CTX_SLACK - CTX // 8)
+        self.assertEqual(maximum, CTX // 8)
+
+    def test_truncate_middle_is_opt_in_and_does_not_hide_an_impossible_answer_budget(self):
+        ids = [ord("x")] * (CTX + 1)
+        with mock.patch.object(self.svc, "encode_prompt", return_value=ids):
+            with self.assertRaisesRegex(ValueError, "context window"):
+                self.svc.prepare([{"role": "user", "content": "oversized"}], None, {}, 16)
+
+        self.svc.truncate_middle = True
+        with mock.patch.object(self.svc, "encode_prompt", return_value=ids):
+            with self.assertRaisesRegex(ValueError, "context window"):
+                self.svc.prepare([{"role": "user", "content": "oversized"}], None, {}, CTX)
+
 
 if __name__ == "__main__":
     unittest.main()

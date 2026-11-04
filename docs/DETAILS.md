@@ -1033,7 +1033,8 @@ print(r.choices[0].message.content)
   throughout.
 - **Model settings in the web page (0.1.39, #564).** The About tab's Model settings card shows and changes a few of
   the keys above in `strata-<model>.json`: the `sampling` defaults (temperature, top_p, top_k, min_p),
-  `reasoning_budget_tokens`, `fit_max_tokens`, `anthropic_thinking`, `effort_position`, `aliases`, `idle_unload_s`,
+  `reasoning_budget_tokens`, `fit_max_tokens`, `drop_oldest`, `truncate_middle`, `anthropic_thinking`,
+  `effort_position`, `aliases`, `idle_unload_s`,
   `lazy_load`, `engine_silence_s`, `api_monitor`, `switch_on_request`, `open_browser` and `--vram-reserve-mib`. An empty field removes the
   key (its default). Every other key of the file stays as it is, the earlier file is kept as
   `strata-<model>.json.bak`, and the model uses the change from its next start, or the next switch to it. Only
@@ -1042,7 +1043,7 @@ print(r.choices[0].message.content)
 - **Switching models in the web page (#37).** With more than one model installed, the chat page's model list switches
   the server to another one without a restart: the loaded model is stopped first (its VRAM and memory are given back),
   then the other one starts. Each model runs with its own `strata-<model>.json`: its `sampling`, `reasoning_effort`,
-  `reasoning_budget_tokens`, `drop_oldest`, `preserve_thinking`, `aliases`, `idle_unload_s`, `before_load`,
+  `reasoning_budget_tokens`, `drop_oldest`, `truncate_middle`, `preserve_thinking`, `aliases`, `idle_unload_s`, `before_load`,
   `min_free_vram_mib` and the other keys of this list, and its own Chat settings shared with other apps
   (`strata-<model>.shared-settings.json`). The server's own keys come from the config it started with: `host`,
   `port`, `api_key`, `allowed_hosts`, `cors_origins`, `trusted_origins`, `api_monitor`, `mcp_servers`,

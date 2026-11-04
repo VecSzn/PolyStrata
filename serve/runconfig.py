@@ -26,6 +26,7 @@ EDITABLE = [
     ("fit_max_tokens", "bool", "Shorten a max_tokens that does not fit the context instead of answering 400"),
     ("drop_oldest", "bool", "Leave out a conversation's oldest turns when it no longer fits the context, instead of "
                             "answering 400 (the system prompt and the last turn stay)"),
+    ("truncate_middle", "bool", "Trim the middle of an oversized text prompt, keeping its beginning and ending"),
     ("preserve_thinking", "bool", "Keep the thinking of earlier turns in the prompt (templates that support it: "
                                   "Qwen3.6, Ornith, Tiel Coder)"),
     ("anthropic_thinking", ("enum", ["model", "on_request"]),

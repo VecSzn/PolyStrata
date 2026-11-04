@@ -206,23 +206,24 @@ class Switch(unittest.TestCase):
     def test_the_new_model_brings_its_own_settings(self):
         """#37: a switch used to keep the first model's settings except sampling, aliases and effort_position."""
         self.fresh_engines()
-        self.configure(self.b, drop_oldest=True, preserve_thinking=True, reasoning_effort="low",
+        self.configure(self.b, drop_oldest=True, truncate_middle=True, preserve_thinking=True, reasoning_effort="low",
                        reasoning_budget_tokens=512, anthropic_thinking="on_request", tool_call_recovery=True,
                        repeat_stop_tokens=9, reasoning_loop_recovery="stop", min_free_vram_mib=1000,
                        before_load=["true"], aliases=["b2"], sampling={"temperature": 0.3})
         self.svc.switch_model("beta")
         s = self.svc
-        self.assertEqual((s.drop_oldest, s.preserve_thinking, s.config_effort, s.reasoning_budget_tokens,
+        self.assertEqual((s.drop_oldest, s.truncate_middle, s.preserve_thinking, s.config_effort, s.reasoning_budget_tokens,
                           s.anthropic_think_unasked, s.tool_call_recovery, s.repeat_stop_tokens,
                           s.reasoning_loop_recovery, s.min_free_vram_mib, s.before_load, s.aliases,
                           s.sampling_defaults),
-                         (True, True, "low", 512, False, True, 9, "stop", 1000, ["true"], ["b2"], {"temperature": 0.3}))
+                         (True, True, True, "low", 512, False, True, 9, "stop", 1000, ["true"], ["b2"],
+                          {"temperature": 0.3}))
         self.svc.switch_model("alpha")                    # alpha's config sets none of them: each one's default again
-        self.assertEqual((s.drop_oldest, s.preserve_thinking, s.config_effort, s.reasoning_budget_tokens,
+        self.assertEqual((s.drop_oldest, s.truncate_middle, s.preserve_thinking, s.config_effort, s.reasoning_budget_tokens,
                           s.anthropic_think_unasked, s.tool_call_recovery, s.repeat_stop_tokens,
                           s.reasoning_loop_recovery, s.min_free_vram_mib, s.before_load, s.aliases,
                           s.sampling_defaults),
-                         (False, False, None, 0, True, False, S.REPEAT_STOP_TOKENS, False, 0, None, [], {}))
+                         (False, False, False, None, 0, True, False, S.REPEAT_STOP_TOKENS, False, 0, None, [], {}))
         self.assertEqual(s.reasoning_budget({}), None)
 
     def test_command_line_options_stay_for_every_model(self):
@@ -610,7 +611,8 @@ class Start(unittest.TestCase):
 
     def test_the_config_settings_are_as_before(self):
         """#37 moved the model's settings into model_settings(): main() sets what it set before (0.1.44.1-poly.6)."""
-        keys = {"drop_oldest": True, "preserve_thinking": True, "reasoning_close_retry": True, "fit_max_tokens": True,
+        keys = {"drop_oldest": True, "truncate_middle": True, "preserve_thinking": True,
+                "reasoning_close_retry": True, "fit_max_tokens": True,
                 "reasoning_effort": "low", "codex_thread_titles": True, "codex_compaction_cache": True,
                 "aliases": ["a1", "a2"], "anthropic_thinking": "on_request", "tool_call_recovery": True,
                 "warm_start": True, "repeat_stop_tokens": 7, "reasoning_budget_tokens": 512,
@@ -621,13 +623,14 @@ class Start(unittest.TestCase):
         got = {k: getattr(svc, k) for k in (
             "aliases", "anthropic_think_unasked", "backend", "before_load", "before_load_ignore_failure",
             "before_load_strict", "before_load_timeout_s", "codex_compaction_cache", "codex_thread_titles",
-            "config_effort", "drop_oldest", "fit_max_tokens", "gpu_index", "gpu_indices", "idle_unload_s",
+            "config_effort", "drop_oldest", "truncate_middle", "fit_max_tokens", "gpu_index", "gpu_indices", "idle_unload_s",
             "memory_debug", "min_free_vram_mib", "preserve_thinking", "reasoning_budget_tokens", "reasoning_close_retry",
             "reasoning_loop_recovery", "repeat_stop_tokens", "sampling_defaults", "tool_call_recovery", "warm_start")}
         self.assertEqual(got, {
             "aliases": ["a1", "a2"], "anthropic_think_unasked": False, "backend": "cuda", "before_load": "true",
             "before_load_ignore_failure": True, "before_load_strict": True, "before_load_timeout_s": 5.0,
             "codex_compaction_cache": True, "codex_thread_titles": True, "config_effort": "low", "drop_oldest": True,
+            "truncate_middle": True,
             "fit_max_tokens": True, "gpu_index": 0, "gpu_indices": [0], "idle_unload_s": 60.0, "memory_debug": True,
             "min_free_vram_mib": 1000, "preserve_thinking": True, "reasoning_budget_tokens": 512,
             "reasoning_close_retry": True, "reasoning_loop_recovery": "recover", "repeat_stop_tokens": 7,

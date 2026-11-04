@@ -51,6 +51,15 @@ class Apply(unittest.TestCase):
         new, _ = runconfig.apply({"sampling": {"top_k": 20}}, {"sampling.top_k": None})
         self.assertNotIn("sampling", new)                                 # an empty block goes
 
+    def test_truncate_middle_is_an_opt_in_boolean_setting(self):
+        cfg, changed = runconfig.apply(CFG, {"truncate_middle": True})
+        self.assertTrue(cfg["truncate_middle"])
+        self.assertEqual(changed, ["truncate_middle"])
+        cfg, _ = runconfig.apply(cfg, {"truncate_middle": None})
+        self.assertNotIn("truncate_middle", cfg)
+        with self.assertRaisesRegex(ValueError, "truncate_middle"):
+            runconfig.apply(CFG, {"truncate_middle": "yes"})
+
     def test_refused(self):
         for changes in ({"api_key": "x"}, {"host": "0.0.0.0"}, {"mcp_servers": {}}, {"before_load": "calc.exe"},
                         {"args": []}, {"exe": "evil.exe"}, {"trusted_origins": ["*"]}, {"allowed_hosts": ["*"]},
@@ -72,6 +81,7 @@ class Apply(unittest.TestCase):
         self.assertEqual(got["sampling.temperature"]["value"], 0.7)
         self.assertEqual(got["vram_reserve_mib"]["value"], 1500)
         self.assertIsNone(got["fit_max_tokens"]["value"])
+        self.assertIsNone(got["truncate_middle"]["value"])
         self.assertEqual(got["anthropic_thinking"]["choices"], ["model", "on_request"])
         self.assertNotIn("api_key", got)
         self.assertNotIn("mcp_servers", got)

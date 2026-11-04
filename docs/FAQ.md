@@ -157,6 +157,10 @@ window says how many messages it left out. Each request is cut again from the fu
 the model has forgotten what was dropped. Claude Code, Codex and OpenCode compact the conversation themselves and do
 not need it. A larger context (`--max-context` in the same file) keeps more of the chat.
 
+If one very long message still does not fit, `"truncate_middle": true` trims the middle of the rendered text prompt,
+keeping its beginning (including the system prompt in a normal-sized prompt) and its newest ending. The setting is off
+by default. It does not truncate prompts containing images.
+
 ### Can the model see what it thought in earlier turns?
 
 With Qwen3.6, Ornith and Tiel Coder, if you ask for it. Their template leaves the thinking of earlier answers out of

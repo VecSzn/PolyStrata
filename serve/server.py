@@ -14,7 +14,8 @@ Images (optional, when the config has a "vision" entry): OpenAI image_url parts 
 data, http(s) URLs or local file paths) go through `strata-vision` (the model's mmproj file) and reach the engine as
 embeddings (`GENI`).  JPEG/PNG/BMP/GIF go straight in; WebP, TIFF, AVIF, ... (agents like omp send WebP) are
 converted to PNG first with Pillow.
-Requests whose prompt plus max tokens exceed the engine's context are REJECTED with 400, never truncated.
+Requests whose prompt plus max tokens exceed the engine's context are rejected with 400 by default. The opt-in
+`truncate_middle` setting can trim an oversized text prompt while keeping its beginning and ending.
 An unset (or 0, or -1) max tokens means "unlimited": whatever the prompt leaves of the context.
 
 The engine boundary is `Engine.generate(prompt_ids, max_new, sampling, cancel) -> iterator of token ids`.
@@ -3221,6 +3222,7 @@ class Service:
         self.engine, self.tok, self.template, self.model, self.vision = engine, tokenizer, template, model_name, vision
         self.fit_max_tokens = fit_max_tokens          # --fit-max-tokens: clamp the output cap instead of 400
         self.drop_oldest = False                      # #17 (opt-in): a conversation too long loses its oldest turns
+        self.truncate_middle = False                  # opt-in: keep a prompt's beginning and ending when it will not fit
         self.preserve_thinking = False                # #25 (opt-in): earlier turns keep their thinking in the prompt
         self.reasoning_memory: collections.OrderedDict[str, str] = collections.OrderedDict()   # remember_reasoning()
         self.aliases: list[str] = []                  # #297: other names of the model (the config's `aliases`)
@@ -4468,6 +4470,26 @@ class Service:
                   f"were left out (drop_oldest)", flush=True)
         return messages, ids
 
+    def truncate_prompt_middle(self, ids, max_new):
+        """With "truncate_middle": true, keep the prompt's beginning and ending when text alone exceeds context.
+
+        Leave room for an explicitly requested answer, or one eighth of the context when no answer limit was given.
+        Image prompts are excluded by the caller because cutting encoded image embeddings would corrupt their layout.
+        """
+        ctx = self.engine.max_context or getattr(self.engine, "known_ctx", 0)
+        if ctx <= 0:
+            return ids
+        answer_room = max_new if max_new is not None and max_new > 0 else ctx // 8
+        prompt_room = ctx - CTX_SLACK - answer_room
+        if prompt_room < 1 or len(ids) <= prompt_room:
+            return ids
+        keep_start = (prompt_room + 1) // 2
+        keep_end = prompt_room - keep_start
+        removed = len(ids) - prompt_room
+        print(f"[strata] the prompt did not fit the context ({ctx} tokens): its {removed} middle tokens were "
+              f"left out (truncate_middle)", flush=True)
+        return ids[:keep_start] + (ids[-keep_end:] if keep_end else [])
+
     def forget_prompt(self, ids):
         if self.prompts is not None:
             self.prompts.forget(ids)
@@ -4488,9 +4510,11 @@ class Service:
             encoded_ids = ids
         if force and kwargs.get("enable_thinking", True) is False:
             ids = ids + self.tok.encode(force, parse_special=True)
+        images = images_of(messages)
+        if self.truncate_middle and not images:
+            ids = self.truncate_prompt_middle(ids, max_new)
         self.embeddings.path = None
         self.embeddings.keys = None
-        images = images_of(messages)
         if images:
             if self.vision is None:
                 raise ValueError("this server was started without the vision encoder (run setup again and choose "
@@ -7400,6 +7424,7 @@ def model_settings(cfg: dict, overrides: dict | None = None) -> dict:
         "fit_max_tokens": bool(over.get("fit_max_tokens")) or cfg.get("fit_max_tokens") is True,
         "reasoning_close_retry": cfg.get("reasoning_close_retry") is True,   # #1053: opt-in, off by default
         "drop_oldest": cfg.get("drop_oldest") is True,                       # #17: opt-in, off by default
+        "truncate_middle": cfg.get("truncate_middle") is True,               # opt-in, off by default
         "preserve_thinking": cfg.get("preserve_thinking") is True,           # #25: opt-in, off by default
         "config_effort": effort,
         "codex_thread_titles": cfg.get("codex_thread_titles") is True,       # #923: opt-in, off by default
