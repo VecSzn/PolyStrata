@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 450" width="960" height="450" role="img" aria-label="Writing speed in tokens per second. Laptop with an 8 GB card: LFM2.5-24B-A2B 70 to 73, Qwen3.6-35B-A3B 94 to 100, Gemma 4 26B-A4B 92 to 93, Ornith 1.5 76 to 82, Tiel Coder 35B-A3B 83, MiniCPM-V 4.7 64. Workstation with a 32 GB card: LFM2.5-24B-A2B 480 to 485, Qwen3.6-35B-A3B 394 to 395, Gemma 4 26B-A4B 353 to 356, Ornith 1.5 316 to 319, Tiel Coder 35B-A3B 337 to 345, MiniCPM-V 4.7 308 to 311, GLM 5.3 Flash 59 to 66, DeepSeek V4 Flash 56."><title>Writing speed of the eight added models, tokens per second</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 530" width="960" height="530" role="img" aria-label="Writing speed in tokens per second. Laptop with an 8 GB card: LFM2.5-24B-A2B 70 to 73, Qwen3.6-35B-A3B 94 to 100, Gemma 4 26B-A4B 92 to 93, Ornith 1.5 76 to 82, Tiel Coder 35B-A3B 83, MiniCPM-V 4.7 64, Flint 40B-A2.5B 61 to 63 (UD-Q3_K_XL, the size setup takes there), Clover-35B-A3B-Preview 68 to 73. Workstation with a 32 GB card: LFM2.5-24B-A2B 480 to 485, Qwen3.6-35B-A3B 394 to 395, Gemma 4 26B-A4B 353 to 356, Ornith 1.5 316 to 319, Tiel Coder 35B-A3B 337 to 345, MiniCPM-V 4.7 308 to 311, GLM 5.3 Flash 59 to 66, DeepSeek V4 Flash 56, Flint 40B-A2.5B 251 to 252, Kolibri 1 189 to 192 (Q2_K). GLM, DeepSeek and Kolibri 1 need more than the laptop's 32 GB of RAM; Clover was not measured on the workstation."><title>Writing speed of the eleven added models, tokens per second</title>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
 .h{font-size:21px;font-weight:700;fill:#f2f4f7}
@@ -8,7 +8,7 @@ text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Aria
 .v{font-size:14px;font-weight:700;fill:#f2f4f7}
 .t{fill:#1d2939}
 </style>
-<rect width="960" height="450" rx="14" fill="#101828"/>
+<rect width="960" height="530" rx="14" fill="#101828"/>
 <text x="32" y="46" class="h">Tokens per second while writing an answer</text>
 <text x="32" y="68" class="s">in a short chat, the first size of each model</text>
 
@@ -31,7 +31,16 @@ text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Aria
 <text x="32" y="320" class="m">MiniCPM-V 4.7</text>
 <rect x="176" y="306" width="240" height="18" rx="4" class="t"/><rect x="176" y="306" width="128" height="18" rx="4" fill="#ff8f7a"/>
 <text x="424" y="320" class="v">64</text>
-<text x="32" y="354" class="s">The card holds part of the experts, the CPU computes the rest.</text>
+<text x="32" y="354" class="m">Flint 40B-A2.5B</text>
+<rect x="176" y="340" width="240" height="18" rx="4" class="t"/><rect x="176" y="340" width="124" height="18" rx="4" fill="#d4e157"/>
+<text x="424" y="354" class="v">61-63</text>
+<text x="32" y="388" class="m">Clover-35B-A3B</text>
+<rect x="176" y="374" width="240" height="18" rx="4" class="t"/><rect x="176" y="374" width="143" height="18" rx="4" fill="#4fb3a0"/>
+<text x="424" y="388" class="v">68-73</text>
+<text x="32" y="422" class="s">The card holds part of the experts, the CPU computes the rest.</text>
+<text x="32" y="444" class="s">Flint: UD-Q3_K_XL, the size setup takes with 32 GB of RAM.</text>
+<text x="32" y="466" class="s">GLM, DeepSeek and Kolibri 1 need more than 32 GB of RAM.</text>
+<text x="32" y="488" class="s">Clover was not measured on the workstation.</text>
 
 <text x="512" y="110" class="p">Workstation: RTX 5090 (32 GB)</text>
 <text x="512" y="150" class="m">LFM2.5-24B-A2B</text>
@@ -58,5 +67,12 @@ text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Aria
 <text x="512" y="388" class="m">DeepSeek V4 Flash</text>
 <rect x="656" y="374" width="216" height="18" rx="4" class="t"/><rect x="656" y="374" width="24" height="18" rx="4" fill="#9db4cc"/>
 <text x="880" y="388" class="v">56</text>
-<text x="512" y="418" class="s">GLM and DeepSeek are files of 79 to 114 GB, mostly kept in RAM.</text>
+<text x="512" y="422" class="m">Flint 40B-A2.5B</text>
+<rect x="656" y="408" width="216" height="18" rx="4" class="t"/><rect x="656" y="408" width="108" height="18" rx="4" fill="#d4e157"/>
+<text x="880" y="422" class="v">251-252</text>
+<text x="512" y="456" class="m">Kolibri 1</text>
+<rect x="656" y="442" width="216" height="18" rx="4" class="t"/><rect x="656" y="442" width="82" height="18" rx="4" fill="#c49a6c"/>
+<text x="880" y="456" class="v">189-192</text>
+<text x="512" y="486" class="s">GLM and DeepSeek are files of 79 to 114 GB, mostly kept in RAM.</text>
+<text x="512" y="508" class="s">Kolibri 1: Q2_K, the size measured so far.</text>
 </svg>

@@ -1,0 +1,204 @@
+{
+  "suites": 28,
+  "failed_requests": 4,
+  "skips": 0,
+  "original_output_privacy_redaction": "Installation-path strings only; source hashes identify originals before redaction.",
+  "runs": [
+    {
+      "id": "gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram28-ctx65536",
+      "original_sha256": "ab86fd51d2af0013c2168b818d988480e0bc03379674624c20961db12862b952",
+      "published_sha256": "4982cde55c54fe6e55727eacbfe57bf811e8eaa928a856eb6fcce3169faaefeb",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram52-ctx65536",
+      "original_sha256": "4ad4ce9d90eda8a86c31d19b8a31a3f0e1dab90ad3bfd2b6e5bf5438733c04d2",
+      "published_sha256": "9b37afad94ca7faf5eca3f9cdaa97bb359d546fc049b7ab38df3bea794366993",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram28-ctx65536",
+      "original_sha256": "56ccbeff060dbeeaf616ad454599450988e83b33865d5557b9f01853a8765902",
+      "published_sha256": "648d07f7579326be99e83d79dc236ac8fe8790c973bf4e1187faa01acdf31667",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram52-ctx65536",
+      "original_sha256": "759548f4251e0e1506d3a071a213f7644346241aff0dbc09f918e9bb017935fb",
+      "published_sha256": "8fa0762cb9c7ecf32be9055f8448d3fcab7154e7b90aa4ebd5a3e311ef4d8bad",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "355b85d098e4bb00098a13ab20ee5d696e170995a4b037e4ef0be35d29055a03",
+      "published_sha256": "b7be4dbee6d7407b78c4d25cbf3445f84d1d7b5c1fc3f0d3fbe979e8e654071e",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "lfm25-ud-q4_k_xl-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "7ad4885126fe3f3049ba57343cff11d88c03a4be65bd55c754a0a996e0b11753",
+      "published_sha256": "68aaff198616ca51c091c164e0c756e5306a0d2ab772fa04196cef5b03f8f867",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "lfm25-ud-q4_k_xl-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "aea4b7f9dc9075951bc8a8b9594b6261213c745b8747824cf83aa6dcf6be308c",
+      "published_sha256": "1fa3f207ce36b16c48e557984707adcc210ddef4f75be06b9c0a52c796a1438d",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "lfm25-ud-q4_k_xl-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "ee47ab1aedeb414c7206f055357f27fb019d120e2cb4f3b96fe626c32b4c62ff",
+      "published_sha256": "09eb6bcb7d4758c2a9a013d22231da473485dd7f02a566d0f4b795be7bc57fb7",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "2fd901123f3a7d7830c473aabc3e30f83c8e7a30645f5e47e811d68366ab9b95",
+      "published_sha256": "3cd9acd71e1ca71c03e2dd0388fd3a6fbe50d17e4c9a7e247ee0a680daea457a",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "minicpmv-mix_q3gud_im-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "5d83eabbb6b3bedd1dd76b7773008c56016142121047313a0117bb12af9bd97f",
+      "published_sha256": "17873e4112d8780c4d17f3473b901c581f1d3d30b548252a256cd2040d5ce445",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "minicpmv-mix_q3gud_im-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "803a6b9934990581523662e005de9e8f503ae655175485a5a85eb2be42abf12b",
+      "published_sha256": "eab54ac37d0faf2f82434693732e99ab6300c642b3c6e6544b8b6b1dadc4682a",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "minicpmv-mix_q3gud_im-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "ae7599fbe29d3c9e76bfc25d556b984eb4839ef00b11e40016fce58286f69173",
+      "published_sha256": "914cb02756d02f56dc61f4374802c8fa47bd246147988401c1fb8560d4902745",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "ornith-apex-i-compact-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "798a2719f86c2bd9160246b08f91fb20e7af8126440f6a6e3e3a6b4e66dc1c90",
+      "published_sha256": "dfca5ed89031420929e09e0e0a97cb3eed6f7cedb00e0863efaf4990ef98b827",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "ornith-apex-i-compact-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "7e681a74953a579671bca44e1db32abefc68d4246fe75724e509b8712b8ff1bf",
+      "published_sha256": "fe9f58b225816f2e54473cf50444db3d067684163afec28c0ff8f5659cb1e3e0",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "ornith-apex-i-compact-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "da0d86de00d15503467b1c09134c9bb8fcb08f0b1bac4952fff8cb35843ec1ed",
+      "published_sha256": "a1d93b960203df5310dc14def147157ffc9607de2039a65fdd700c8030982f0e",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "ornith-apex-i-compact-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "685a327b1f5f7380462aeba8422e34e6b0c8445434661c4b03e4306d88f6ab40",
+      "published_sha256": "fcadf6693adb35f5939fb13f68932909298f35a884543907a50f9d68c00431f7",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q3_k_m-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "64725daa4b60245364d97cb40a85ff491a4c0733d13e5534b823ee408ed7cf46",
+      "published_sha256": "60160863a167d61c82dfd1c77d71e6bce59de72e38bec3ba72f8dd454d192a60",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q3_k_m-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "75969d15e07255accb4877971bd67ecae5408b4aea69ea7ea4d4cbb4a818fd21",
+      "published_sha256": "7c70dbe1c5791050f92c1308c0ccbe2e5fd7e35b61f183aae48837d517a43a8d",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q3_k_m-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "3471d12912ad37ca42d8b24c892af29c36758834f8409193c16b78141e7644ea",
+      "published_sha256": "57842d3db7bbbb4d75a03156d368cb8f9bbe6cdf123826b9901116c2baf4b763",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q3_k_m-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "1f503d505ea88da3f41211d694bb53f3d0850953328a25467ded3300ca2180bf",
+      "published_sha256": "fddf9ca8ab8854f9697a0d0731ff689e2e2ea063d1a80822c61f9e658924b95b",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q4_k_m-control-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "bb52344bd9300f33531e8ae5365c0f561375adb7635c43e7e13a55880c682d1a",
+      "published_sha256": "7519ff86fcec30355595b3cb4b8ca0488774eccb6fc9b9ca714c27366e601a8f",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q4_k_m-control-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "88c0a83920f7126a3c6b296cc06caa30156101bbdf5f2731ff630e0a4131693b",
+      "published_sha256": "9269c45a231c3c4dfecc558a0342682ecbc7f753fef06b7369b412e353caf3b0",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q4_k_m-control-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "f671c2ec4b828477b8997640be9775ce04b945ff2d36e7e3e101526865e8db52",
+      "published_sha256": "6f9e003b35dbade69d35c51f6c75b361a208c3da1cdee73fd33f409eb817cbe9",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "qwen36-ud-q4_k_m-control-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "34263b96b69302342375d05745b0e5046a190e11520b5447e153435acb93000e",
+      "published_sha256": "774e5a00fa25b8e084dbc6aaabd5f3e9707f5c4cbfa62b0c223f370490e93bb9",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "tiel-ud-q3_k_xl-reserve1024-poly2-ram28-ctx65536",
+      "original_sha256": "c3a1c78ee0ff67661e01d934b1ad9141ff460821a475315b4db7a079c8bfe043",
+      "published_sha256": "d5cc9571bd0cbb4781ef6742c5ab3dd62cae35bfafd06f1db46b7c149965b75f",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "tiel-ud-q3_k_xl-reserve1024-poly2-ram52-ctx65536",
+      "original_sha256": "bbe3f100abf51f7fb8ecfec6bce80b05c4fc9d69da11500d31b21e1addd23a25",
+      "published_sha256": "c7c62a9fd7839a2b1a04f529383a401caf2fce45c8764e2f5f1cf53f1b34bbab",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "tiel-ud-q3_k_xl-reserve1024-poly4-ram28-ctx65536",
+      "original_sha256": "d079b52dbd8734d7c8f7922a6a09ac3c4adf7fadf4ac12010acd4233eabd1753",
+      "published_sha256": "a0766feba4b4e5465250858eb0685dc182b37576733b8f88c4fbbfbf616450a5",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    },
+    {
+      "id": "tiel-ud-q3_k_xl-reserve1024-poly4-ram52-ctx65536",
+      "original_sha256": "765ec4af930d249753cbae994d896bf46fc8df57d773cfcc2ada07e786854b45",
+      "published_sha256": "5e152c3c513925b7a213ceabfeaa62f0ca495a7801c34338f31ae9fa956cd917",
+      "inference_results_unchanged": true,
+      "numeric_values_unchanged": true
+    }
+  ]
+}

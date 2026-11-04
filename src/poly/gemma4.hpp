@@ -12,11 +12,13 @@
 #pragma once
 
 #include "engine.hpp"
+#include "strata/poly/kernels.hpp"   // KvInt8: what cache_int8() hands the attention under --kv int8
 
 namespace strata::poly {
 
 class Gemma4 final : public Engine {
 public:
+    ~Gemma4() override;
     size_t card_row_bytes() const override;
     void save_card_rows(int64_t first, int64_t n, uint8_t* dst) override;
     void load_card_rows(const uint8_t* src, int64_t from, int64_t count, int64_t first, int64_t n) override;
@@ -61,6 +63,19 @@ private:
         Dev wq, wk, wv, wo, q_norm, k_norm, post_attn;   ///< wv is absent where the values are the keys' projection
         uint16_t* keys = nullptr;   ///< rows of n_kv * dim, fp16: max_context of them, or ring_ in a window layer
         uint16_t* vals = nullptr;
+        // --kv int8 keeps the same rows as codes with a delta a block of kQ8_0Values values, in two arrays each so
+        // that a reader's four codes are one aligned load (store_int8).  One side of a layer is either the pair above
+        // or the four below: they are not both filled.
+        int8_t* k_code = nullptr;   ///< n_kv * dim codes a row, back to back
+        uint16_t* k_delta = nullptr;   ///< n_kv * dim / kQ8_0Values halves a row, one a block
+        int8_t* v_code = nullptr;
+        uint16_t* v_delta = nullptr;
+        // The halves a prompt batch's cuBLAS reads: the model's one pair, not this layer's (a pair a layer would
+        // cost as much as the fp16 cache the quantization replaced), so a layer that is not the one that left it
+        // converts its own codes in from row 0.  attend_q8 is a single-query attention - its readers are written
+        // for a decode - so a batch of tokens goes through these.
+        uint16_t* k_f16 = nullptr;
+        uint16_t* v_f16 = nullptr;
         Dev ffn_gate, ffn_up, ffn_down;   ///< the dense MLP
         Dev post_mlp, pre_moe, post_moe, post_ffn, rscale;
         std::vector<float> escale;   ///< what each expert's output is multiplied by
@@ -79,7 +94,10 @@ private:
     void load_draft_shape();
     void attn(Block& B, int64_t pos, int n);
     void attn_rows(Block& B, int n);
-    void store(const float* x, uint16_t* cache, const Block& B, int64_t pos, int n);
+    void store(const float* x, const Block& B, int64_t pos, int n, bool value);
+    /// One side of a layer's cache as the (code, delta) pair attend_int8 reads: the fp16 pointers under --kv int8
+    /// would be null, so the callers take this instead of naming keys/vals themselves.
+    KvInt8 cache_int8(const Block& B, bool value) const;
     template <class F>
     void window_runs(int64_t pos, F&& f) const;
 
@@ -99,6 +117,14 @@ private:
     float *qraw_ = nullptr, *q_ = nullptr, *kraw_ = nullptr, *k_ = nullptr, *vraw_ = nullptr, *v_ = nullptr,
           *att_ = nullptr, *score_ = nullptr, *mlp_ = nullptr, *rin_ = nullptr;
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
+    int max_dim_ = 0;          ///< the wider of the two heads, which the int8 query scratch is sized for
+    size_t twin_halves_ = 0;   ///< --kv int8: the halves one side of the fp16 twin holds (widest layer's rows)
+    uint16_t* sh_k_f16_ = nullptr;   ///< the pair a prompt batch reads, one for the whole model
+    uint16_t* sh_v_f16_ = nullptr;
+    void twin_cover(size_t halves);
+
+    int8_t* q8c_ = nullptr;    ///< --kv int8: this call's queries as codes, a chunk at a time, for attend_int8's dp4a
+    uint16_t* q8d_ = nullptr;  ///< and their deltas
 
 
     // the draft model: its width and its MLPs', its layers, the projections in and out, its output norm and its

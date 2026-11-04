@@ -8,6 +8,7 @@
 #pragma once
 
 #include "engine.hpp"
+#include "gdn_mma_control.hpp"
 
 namespace strata::poly {
 
@@ -16,7 +17,7 @@ public:
     size_t card_row_bytes() const override;
     void save_card_rows(int64_t first, int64_t n, uint8_t* dst) override;
     void load_card_rows(const uint8_t* src, int64_t from, int64_t count, int64_t first, int64_t n) override;
-    bool sees() const override { return true; }
+    bool sees() const override { return !clover_; }
 
 protected:
     void load_geometry() override;
@@ -44,6 +45,8 @@ protected:
     int head_key(int il, int n) const override;
     bool batch_heads() const override { return true; }
     int64_t turn(int64_t row) const override;
+    int block_mask() const override { return mask_; }
+    void route_block(int il, float* scores, int n) override;
 
 private:
     /// A layer's weights beside the ones every architecture has (Layer), and its places in the state and caches.
@@ -52,6 +55,9 @@ private:
         Dev wo;
         // gated delta net
         Dev wqkv, wz, conv, dt, a, alpha, beta, o_norm;
+        // Clover's, for a block of tokens that see each other (gdn_block()): the convolution's taps over the next
+        // three tokens, and a head's logit scale and the bias and log factor of its weight on the state
+        Dev conv_right, bd_scale, bd_hist_b, bd_hist_c;
         float* past = nullptr;   ///< the convolution's: 3 * conv_dim
         float* s = nullptr;      ///< v_heads * s_dim * s_dim
         // attention
@@ -68,13 +74,19 @@ private:
     };
 
     void gdn(Block& B, int n);
+    void gdn_block_pass(Block& B, int n);
     void attn(Block& B, int64_t pos, int n);
+    void attn_block_pass(Block& B, int64_t pos, int n);
     void attn_rows(Block& B, int n);
     void attn_store(Block& B, int64_t pos, int n);
     void turn_of(int64_t row, int32_t* thw) const;
     const int32_t* turns(int64_t pos, int n, int64_t* first);
 
     std::vector<Block> blocks_;   ///< one a layer of layers_
+    bool clover_ = false;         ///< a Clover file (architecture clover_moe): text only, its ssm_a is A_log itself
+    int mask_ = -1;               ///< Clover's mask token, which its block of guesses is filled with; -1: no block
+    float coreset_ = 0.f;         ///< Clover: a block's tokens choose among the experts of this share of its weight
+                                  ///< (moe_block_coreset_top_p); 0: among all
     int n_head_ = 0, n_kv_ = 0, head_dim_ = 0, n_rot_ = 0;
     float theta_scale_ = 0;   ///< a rotary pair turns by position * theta_scale^pair
     int sections_ = 1;        ///< the pairs the rotary embedding's three axes take in turn before they start over
@@ -85,6 +97,7 @@ private:
     uint64_t axes_set_ = 0;
     int s_dim_ = 0, k_heads_ = 0, v_heads_ = 0, d_inner_ = 0, conv_dim_ = 0;
     int n_gdn_ = 0, n_attn_ = 0;
+    GdnMmaControl gdn_mma_;           ///< captured request and per-engine capability (STRATA_GDN_MMA=1)
     int chunk_ = 1;   ///< tokens the attention takes at a time
 
     // device scratch
@@ -94,6 +107,10 @@ private:
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
     float* q8w_ = nullptr;             ///< a q8 prompt batch's K and V blocks, dequantized to fp16 (kwork | vwork)
     size_t work_halves_ = 0;           ///< the halves of each of q8w_'s two halves (kQ8WorkRows rows at most)
+    bool fattn_ = false;               ///< a prompt batch through fattn_q8() / fattn_f16() (STRATA_FATTN=0: never)
+    bool fdec_ = false;                ///< a few tokens through fdec_q8() / fdec_f16() (STRATA_FDEC=0: never)
+    int64_t fdec_from_ = 0;            ///< ...once the cache holds this many positions (STRATA_FDEC=1: from the first)
+    bool hip_value_split_logged_ = false;   ///< STRATA_HIP_VALUE_SPLIT has reported its availability
 
 };
 

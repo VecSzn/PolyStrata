@@ -1,0 +1,36 @@
+{
+  "exe": "<baseline>/upstream/engine-poly/strata-poly",
+  "args": [
+    "--model",
+    "<installation>/data/models/lfm25-UD-Q4_K_XL/LFM2.5-24B-A2B-UD-Q4_K_XL.gguf",
+    "--max-context",
+    "65536",
+    "--expert-profile",
+    "<experiment>/official/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/out/expert-profile.txt",
+    "--conversation-cache-mib",
+    "0",
+    "--prompt-batch",
+    "2048",
+    "--kv-whole",
+    "--threads",
+    "8",
+    "--vram-reserve-mib",
+    "1024"
+  ],
+  "cwd": "<baseline>/upstream",
+  "tokenizer": "<installation>/data/packs/lfm25-ud-q4_k_xl/tokenizer",
+  "model_name": "lfm2.5-24b-a2b-ud-q4_k_xl",
+  "display_name": "LFM2.5-24B-A2B UD-Q4_K_XL",
+  "log": "<experiment>/official/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/out/engine.log",
+  "lib_dirs": [
+    "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+    "<installation>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+  ],
+  "port": 8080,
+  "gpu": 0,
+  "gpus_asked": true,
+  "host": "127.0.0.1",
+  "open_browser": false,
+  "reasoning_budget_tokens": 512,
+  "benchmark_mtp": 0
+}

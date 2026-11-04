@@ -1,0 +1,27 @@
+{
+  "quality-0": {
+    "off_passed": true,
+    "on_passed": true,
+    "same_api_message": true
+  },
+  "quality-1": {
+    "off_passed": true,
+    "on_passed": true,
+    "same_api_message": true
+  },
+  "recall_96k": {
+    "off_passed": false,
+    "on_passed": false,
+    "same_api_message": true
+  },
+  "code-merge": {
+    "off_passed": true,
+    "on_passed": true,
+    "same_api_message": true
+  },
+  "code-config": {
+    "off_passed": true,
+    "on_passed": true,
+    "same_api_message": true
+  }
+}

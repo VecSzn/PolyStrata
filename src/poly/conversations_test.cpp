@@ -1,12 +1,14 @@
 // src/poly/conversations_test.cpp - Conversations against an engine whose state can be checked: after every
 // request the engine must hold exactly what reading the prompt from its first token gives.
 //
-//   g++ -std=c++20 src/poly/conversations_test.cpp -o conversations_test && ./conversations_test
+//   g++ -std=c++20 src/poly/conversations_test.cpp src/poly/spill.cpp -o conversations_test && ./conversations_test
 #include "conversations.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <thread>
 
 using strata::poly::CacheOptions;
 using strata::poly::Conversations;
@@ -118,6 +120,7 @@ struct Chat {
             ids.push_back(t);
         }
         check(e.holds(ids) && kept.seq() == ids, "the engine holds the prompt and the reply");
+        kept.release();   // between requests, as the server does: what comes back is read from the file cache
         return from;
     }
 };
@@ -314,7 +317,30 @@ void long_read() {
     check(left[1] == six, "which are five of the fifteen inside, beside the one before the prompt's last token");
 }
 
+// What is kept leaves the heap for a temporary file after a release, and reads back the same, before and after its
+// pages leave the process again.  The writer is a thread: the heap goes once it is done and a release follows.
+void spill() {
+    const size_t n = (size_t(3) << 20) + 123;   // not a whole number of pages
+    auto s = std::make_shared<const strata::poly::Spill>(n);
+    uint8_t* heap = s->data();
+    check(heap != nullptr && s->bytes() == n, "a spill has its bytes");
+    for (size_t i = 0; i < n; ++i) heap[i] = (uint8_t) (i * 131 + (i >> 9));
+    std::vector<uint8_t> want(heap, heap + n);
+    s->release();   // hands it to the writer
+    const uint8_t* p = heap;
+    for (int k = 0; k < 500 && p == heap; ++k) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        s->release();   // frees the heap once it is written
+        p = s->data();
+    }
+    check(p != heap, "the heap is let go once the file holds it");
+    check(std::memcmp(p, want.data(), n) == 0, "the file holds the same bytes");
+    s->release();   // the pages the read brought back leave the process
+    check(std::memcmp(s->data(), want.data(), n) == 0, "and reads back the same after its pages left");
+}
+
 int main() {
+    spill();
     for (const int64_t f : {0, 6000, 700}) {   // 700: reads that start and end between checkpoints
         far = f;
         one_conversation();

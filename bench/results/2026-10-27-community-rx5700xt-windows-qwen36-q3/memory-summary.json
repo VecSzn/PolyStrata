@@ -1,0 +1,19 @@
+{
+  "sample_count": 260,
+  "sampling_target_seconds": 2,
+  "system_baseline_in_use_bytes": 19038568448.0,
+  "system_sampled_peak_in_use_bytes": 38669524992,
+  "system_observed_increase_bytes": 19630956544.0,
+  "system_min_available_bytes": 235741868032,
+  "system_sampled_peak_commit_bytes": 30904037376,
+  "system_after_cleanup_in_use_bytes": 19112734720,
+  "engine_sampled_peak_rss_bytes": 19267747840,
+  "engine_largest_observed_lifetime_peak_working_set_bytes": 19268096000,
+  "engine_sampled_peak_private_commit_bytes": 2651787264,
+  "gpu_sample_count": 96,
+  "gpu_sampled_peak_dedicated_bytes": 6584840192,
+  "gpu_sampled_peak_shared_bytes": 1850355712,
+  "scope": "Whole-system increase includes other applications/monitors; private commit, mapped RSS, GPU shared and cache overlap and must not be added.",
+  "monitor_duration_s": 523.445316,
+  "limitations": "Sampled values are lower bounds on instantaneous peaks. GPU monitor has a startup gap; 96 GPU samples versus 260 RAM samples. No reliable 32K/64K RAM peak was captured."
+}

@@ -1,0 +1,28 @@
+{
+  "profile": "qwen36-ud-q3_k_m-reserve1024",
+  "release": "v0.1.45-poly.4",
+  "source_commit": "145493e66580c80bba09b0130f667a2b1789da69",
+  "engine_sha256": "372c6ed707d302c470b864a8fc24ff2a3e462f94cb33c0956c20205a95ef9785",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 28,
+  "docker_memory_bytes": 30064771072,
+  "docker_memory_swap_combined_bytes": 30064771072,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "b28390c7f0eb6ed55b7bcaec5644640135de0becaa9a093580f9c80ffb00605c",
+    "file": "../../initial-expert-profiles/b28390c7f0eb6ed55b7bcaec5644640135de0becaa9a093580f9c80ffb00605c.txt"
+  },
+  "source_config_sha256": "ed22f952f9b8e1377daabc22f0308e0e0823eef77bea5bbc14ed6ffad607275e",
+  "original_results_sha256": "3471d12912ad37ca42d8b24c892af29c36758834f8409193c16b78141e7644ea",
+  "published_results_sha256": "57842d3db7bbbb4d75a03156d368cb8f9bbe6cdf123826b9901116c2baf4b763",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+      "bytes": 17104402720,
+      "sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1",
+      "role": "model"
+    }
+  ]
+}

@@ -26,7 +26,7 @@
 
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "logs/iq_fixture";
-    const char* names[] = {"IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ3_XXS", "IQ3_S", "IQ1_M", "IQ4_NL", "IQ4_XS", "Q2_0", "Q3_K"};
+    const char* names[] = {"IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ3_XXS", "IQ3_S", "IQ1_S", "IQ1_S_GATE", "IQ1_S_DOWN", "IQ1_M", "IQ4_NL", "IQ4_XS", "Q2_0", "Q3_K"};
     int failures = 0, missing = 0;
     cudaStream_t s;
     cudaStreamCreate(&s);
@@ -99,6 +99,25 @@ int main(int argc, char** argv) {
                     ++multi_bad;
                 }
             }
+#if !defined(STRATA_HIP_GFX906)
+            if (type == 19) {
+                // The expert cache uses the slots dispatch, not only the single-matrix entry point.
+                strata::kernels::MmvqSlots slots{};
+                for (int c = 0; c < MC; ++c) {
+                    slots.w[c] = dw;
+                    slots.x[c] = (const uint8_t*) xq + (size_t) c * cols / 32 * 36;
+                    slots.y[c] = dy + (size_t) c * rows;
+                }
+                cudaMemsetAsync(dy, 0, y.size() * 4, s);
+                const bool launched = strata::kernels::native_mmvq_slots(type, slots, MC, cols, rows, s);
+                cudaStreamSynchronize(s);
+                cudaMemcpy(yn.data(), dy, yn.size() * 4, cudaMemcpyDeviceToHost);
+                if (!launched || std::memcmp(yn.data(), y.data(), y.size() * 4) != 0) {
+                    std::printf("%-8s IQ1_S expert slots unavailable or differ from single calls\n", nm);
+                    ++multi_bad;
+                }
+            }
+#endif
         } catch (const std::exception& e) { std::printf("%-8s mmvq: %s\n", nm, e.what()); ++failures; continue; }
         double num = 0, den = 0;
         for (int c = 0; c < MC; ++c)

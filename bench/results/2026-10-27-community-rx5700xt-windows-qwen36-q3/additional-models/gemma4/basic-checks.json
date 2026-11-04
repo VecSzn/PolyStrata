@@ -1,0 +1,111 @@
+[
+  {
+    "name": "arithmetic",
+    "expected": "391",
+    "response": {
+      "first": 1.8216512999497354,
+      "total": 1.9733476999681443,
+      "text": "391",
+      "usage": {
+        "prompt_tokens": 30,
+        "completion_tokens": 4,
+        "total_tokens": 34,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 30,
+        "prompt_ms": 1817.1,
+        "prompt_per_token_ms": 60.57,
+        "prompt_per_second": 16.5,
+        "predicted_n": 4,
+        "predicted_ms": 152.5,
+        "predicted_per_token_ms": 38.125,
+        "predicted_per_second": 26.2,
+        "draft_n": 3,
+        "draft_n_accepted": 3
+      },
+      "err": null,
+      "pieces": 3
+    },
+    "metrics": {
+      "ok": true,
+      "err": null,
+      "ttft_s": 1.822,
+      "total_s": 1.973,
+      "prompt_tokens": 30,
+      "reused_tokens": 0,
+      "read_tokens": 30,
+      "generated_tokens": 4,
+      "prompt_tps": 16.5,
+      "prompt_tps_source": "engine",
+      "decode_tps": 26.2,
+      "decode_tps_source": "engine",
+      "prompt_ms": 1817.1,
+      "decode_ms": 152.5,
+      "drafts_offered": 3,
+      "drafts_accepted": 3
+    },
+    "passed": true
+  },
+  {
+    "name": "json_sort",
+    "expected": {
+      "sorted": [
+        1,
+        2,
+        7,
+        9
+      ]
+    },
+    "response": {
+      "first": 0.8600560000631958,
+      "total": 1.7841175000648946,
+      "text": "```json\n{\n  \"sorted\": [1, 2, 7, 9]\n}\n```",
+      "usage": {
+        "prompt_tokens": 41,
+        "completion_tokens": 26,
+        "total_tokens": 67,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 41,
+        "prompt_ms": 847.4,
+        "prompt_per_token_ms": 20.668,
+        "prompt_per_second": 48.4,
+        "predicted_n": 26,
+        "predicted_ms": 923.6,
+        "predicted_per_token_ms": 35.523,
+        "predicted_per_second": 28.2,
+        "draft_n": 21,
+        "draft_n_accepted": 19
+      },
+      "err": null,
+      "pieces": 21
+    },
+    "metrics": {
+      "ok": true,
+      "err": null,
+      "ttft_s": 0.86,
+      "total_s": 1.784,
+      "prompt_tokens": 41,
+      "reused_tokens": 0,
+      "read_tokens": 41,
+      "generated_tokens": 26,
+      "prompt_tps": 48.4,
+      "prompt_tps_source": "engine",
+      "decode_tps": 28.2,
+      "decode_tps_source": "engine",
+      "prompt_ms": 847.4,
+      "decode_ms": 923.6,
+      "drafts_offered": 21,
+      "drafts_accepted": 19
+    },
+    "passed": false
+  }
+]

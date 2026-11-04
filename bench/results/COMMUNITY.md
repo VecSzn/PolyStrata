@@ -1,5 +1,10 @@
 # Community bench results, index
 
+Recent report: [RX 5700 XT on Windows, four models](2026-10-27-community-rx5700xt-windows-qwen36-q3/)
+includes four official 32K suites (Qwen3.6, Ornith, Tiel and Gemma QAT), custom
+64K/128K probes and a paired tail-skip comparison, using a manual adapter for the
+unvalidated gfx1010 HIP target.
+
 One row per community folder in this directory (ported for 0.1.40.2 and 0.1.41 from the community bench PRs, authors credited in the commits). Raw dumps, logs and binaries were trimmed from the folders; each trimmed folder has a `TRIMMED.md` listing what was left out. The README in each folder has the full method.
 
 How to read the table:

@@ -610,13 +610,179 @@ let settings = {...DEFAULTS, ...store.get("sampling", {})};
 if (samplingUntouched(settings)) settings.temperature = DEFAULTS.temperature;
 let messages = store.get("chat", []);
 let attachments = [];                 // {name, url}
-let busy = null;                      // {controller, msg}
+let busy = null;                      // {controller, msg, cutoff?}
 
 function saveChat() {
   store.set("chat", messages.map((m) => ({...m, images: (m.images || []).map((i) => ({name: i.name})),
                                            files: (m.files || []).map((f) => ({name: f.name}))})));
 }
 function timeStr(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); }
+
+// ------------------------------------------------------------------ swipes
+// Each assistant message carries its own variants. m.text/m.reasoning/m.tools/m.meta always hold the
+// *current* one; m.swipes[m.swipeIndex] mirrors it, so navigating is just save-current / load-target.
+// Regenerating discards any variants after the current one and appends the new one at the end.
+function swipeInit(m) {
+  if (!Array.isArray(m.swipes) || !m.swipes.length) {
+    m.swipes = [{text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null}];
+    m.swipeIndex = 0;
+  }
+}
+function swipeSnapshot(m) {
+  return {text: m.text || "", reasoning: m.reasoning || "", tools: m.tools || null, meta: m.meta || null};
+}
+function swipeSave(m) {
+  swipeInit(m);
+  m.swipes[m.swipeIndex] = swipeSnapshot(m);
+}
+function swipeLoad(m) {
+  swipeInit(m);
+  const s = m.swipes[m.swipeIndex] || {};
+  m.text = s.text || ""; m.reasoning = s.reasoning || ""; m.tools = s.tools || null; m.meta = s.meta || null;
+  m.thinkSecs = null; m.stopped = false; m.error = null; m.limit = null;
+}
+
+// The streaming itself, shared by send() and regenerateMessage(). On abort it sets m.stopped and returns
+// normally (so the caller can still save the partial answer); on any other error it rethrows.
+async function streamInto(m, el, signal) {
+  const body = {model: health.model, messages: apiMessages(), stream: true, reasoning_effort: settings.thinking};
+  if (!(settings.temperature > 0)) {
+    body.temperature = 0;
+  } else if (!samplingUntouched(settings)) {
+    Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
+  }
+  if (settings.seed) body.seed = +settings.seed;
+  if (settings.max) body.max_tokens = +settings.max;
+  if (projectionLoaded()) body.experimental_speed_projection = !!settings.esp;
+  if (settings.mcp !== false && mcpInfo.tools > 0) body.strata_mcp = true;
+
+  let firstAt = null, thinkStart = null, usage = null, frame = 0;
+  const paint = () => { frame = 0; updateAssistant(el, m, true); scrollDown(); };
+  try {
+    const r = await fetch("v1/chat/completions", {method: "POST", headers: headers(true),
+                                                   body: JSON.stringify(body), signal});
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json()).error.message || msg; } catch (e) { /* not json */ }
+      if (r.status === 401) msg = "This server needs an API key: add it under About > Settings.";
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;              // ": keep-alive" comments while a long prompt is read
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        let j;
+        try { j = JSON.parse(data); } catch (e) { continue; }
+        if (j.error) throw new Error(j.error.message || "the engine reported an error");
+        if (j.usage) usage = j.usage;
+        if (j.strata_mcp) onTool(m, j.strata_mcp);
+        const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
+        const lastTool = m.tools && m.tools.length ? m.tools[m.tools.length - 1] : null;   // a new round after a tool
+        if (d.reasoning_content) {
+          if (!firstAt) firstAt = performance.now();
+          if (!thinkStart) thinkStart = performance.now();
+          if (lastTool && m.reasoning && lastTool.rat === m.reasoning.length) m.reasoning += "\n\n";
+          m.reasoning += d.reasoning_content;
+        }
+        if (d.content) {
+          if (!firstAt) firstAt = performance.now();
+          if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
+          if (lastTool && m.text && lastTool.at === m.text.length) m.text += "\n\n";
+          m.text += d.content;
+        }
+        if (!frame) frame = requestAnimationFrame(paint);
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      m.stopped = true;
+    } else {
+      if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
+      if (frame) cancelAnimationFrame(frame);
+      throw e;
+    }
+  }
+  if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
+  if (frame) cancelAnimationFrame(frame);
+  const n = usage ? usage.completion_tokens : null;
+  if (n && firstAt) {
+    const secs = (performance.now() - firstAt) / 1000;
+    m.meta = `${fmt(n)} tokens${secs > 0.25 ? ` · ${fmt(n / secs, 1)} tok/s` : ""}${m.stopped ? " · stopped" : ""}` +
+             (projectionLoaded() ? (settings.esp ? " · projection on" : " · projection off") : "");
+  } else if (m.stopped) {
+    m.meta = "Stopped";
+  }
+  for (const t of m.tools || []) if (t.state === "writing" || t.state === "running") { t.state = "skipped"; t.ms = null; }
+  const ran = (m.tools || []).filter((t) => t.state === "done" || t.state === "error").length;
+  if (ran) m.meta = `${m.meta ? `${m.meta} · ` : ""}${ran} tool call${ran > 1 ? "s" : ""}`;
+  if (m.limit) m.meta = `${m.meta || ""} · stopped at the limit of ${m.limit} tool rounds (mcp.max_rounds)`;
+  updateAssistant(el, m, false);
+}
+
+// Regenerates the answer at messages[i]: keeps the previous one as a variant, discards any variants after
+// the current one, streams a new answer into the same message. On failure the previous answer is restored.
+async function regenerateMessage(i) {
+  if (busy) { toast("warn", "Still writing", "Stop the answer first."); return; }
+  const m = messages[i];
+  if (!m || m.role !== "assistant") return;
+  const el = $("chat").querySelector(`.st-msg[data-i="${i}"]`);
+  if (!el) return;
+  swipeInit(m);
+  swipeSave(m);
+  m.swipes.length = m.swipeIndex + 1;          // a new variant discards the ones after the current one
+  const keep = swipeSnapshot(m);
+  m.text = ""; m.reasoning = ""; m.tools = null; m.meta = null;
+  m.thinkSecs = null; m.stopped = false; m.error = null; m.limit = null;
+  const controller = new AbortController();
+  busy = {controller, msg: m, cutoff: i};
+  if (i < messages.length - 1) {
+    toast("info", "Regenerating an earlier message",
+          `${messages.length - i - 1} later message(s) stay in the chat, and the next request will still see them.`,
+          7000);
+  }
+  setBusy(true);
+  updateAssistant(el, m, true);
+  try {
+    await streamInto(m, el, controller.signal);
+    m.swipes.push(swipeSnapshot(m));
+    m.swipeIndex = m.swipes.length - 1;
+  } catch (e) {
+    m.error = e.message || String(e);
+    toast("error", "Regeneration failed", m.error, 6000);
+    Object.assign(m, keep);
+    m.swipes[m.swipeIndex] = keep;
+  }
+  busy = null;
+  setBusy(false);
+  updateAssistant(el, m, false);
+  saveChat();
+  scrollDown();
+}
+
+// Moves between variants: saves the current answer, loads the neighbour.
+function swipeGo(i, delta) {
+  if (busy) return;
+  const m = messages[i];
+  if (!m || m.role !== "assistant") return;
+  swipeInit(m);
+  const n = m.swipes.length;
+  if (n < 2) return;
+  swipeSave(m);
+  m.swipeIndex = (m.swipeIndex + delta + n) % n;
+  swipeLoad(m);
+  const el = $("chat").querySelector(`.st-msg[data-i="${i}"]`);
+  if (el) updateAssistant(el, m, false);
+  saveChat();
+}
 
 function msgEl(m, i) {
   const el = document.createElement("div");
@@ -656,6 +822,10 @@ function msgEl(m, i) {
     el.innerHTML = `<details class="st-collapse think" hidden><summary>${icon("thinking", "st-icon st-icon--sm")}<span class="think-title"></span>` +
       `${icon("chevron", "st-icon st-icon--sm st-chev")}</summary><div class="st-collapse__body thinking"></div></details>` +
       `<div class="st-bubble"></div><div class="st-msg__meta"><span class="meta-text"></span>` +
+      `<button class="st-btn st-btn--icon" data-msg-regen aria-label="Regenerate" title="Regenerate">↻</button>` +
+      `<button class="st-btn st-btn--icon" data-msg-prev aria-label="Previous variant" title="Previous variant">‹</button>` +
+      `<span class="swipe-count" data-swipe-count></span>` +
+      `<button class="st-btn st-btn--icon" data-msg-next aria-label="Next variant" title="Next variant">›</button>` +
       `<button class="st-btn st-btn--icon" data-msg-copy aria-label="Copy the answer" title="Copy">${icon("copy")}</button></div>`;
     updateAssistant(el, m, false);
   }
@@ -735,6 +905,17 @@ function updateAssistant(el, m, streaming) {
   }
   el.querySelector(".meta-text").textContent = m.meta || (streaming ? "" : m.stopped ? "Stopped" : "");
   el.querySelector("[data-msg-copy]").hidden = streaming || !m.text;
+  // swipe controls: regenerate disabled while streaming; prev/next shown when there is more than one variant
+  const rg = el.querySelector("[data-msg-regen]");
+  const pv = el.querySelector("[data-msg-prev]");
+  const nx = el.querySelector("[data-msg-next]");
+  const cnt = el.querySelector("[data-swipe-count]");
+  const n = Array.isArray(m.swipes) ? m.swipes.length : 1;
+  const idx = m.swipeIndex || 0;
+  if (rg) rg.disabled = streaming;
+  if (pv) pv.hidden = streaming || n < 2;
+  if (nx) nx.hidden = streaming || n < 2;
+  if (cnt) { cnt.hidden = streaming || n < 2; cnt.textContent = n > 1 ? `${idx + 1}/${n}` : ""; }
 }
 function renderChat() {
   const chat = $("chat");
@@ -747,6 +928,12 @@ function nearBottom() { const s = $("chat-scroll"); return s.scrollHeight - s.sc
 function scrollDown(force) { const s = $("chat-scroll"); if (force || nearBottom()) s.scrollTop = s.scrollHeight; }
 
 $("chat").addEventListener("click", (e) => {
+  const rg = e.target.closest("[data-msg-regen]");
+  if (rg) { regenerateMessage(+rg.closest(".st-msg").dataset.i); return; }
+  const pv = e.target.closest("[data-msg-prev]");
+  if (pv) { swipeGo(+pv.closest(".st-msg").dataset.i, -1); return; }
+  const nx = e.target.closest("[data-msg-next]");
+  if (nx) { swipeGo(+nx.closest(".st-msg").dataset.i, +1); return; }
   const cc = e.target.closest("[data-code-copy]");
   if (cc) { copyText(cc.closest(".st-code").querySelector("pre").textContent, cc); return; }
   const mc = e.target.closest("[data-msg-copy]");
@@ -772,7 +959,9 @@ $("chat").addEventListener("toggle", (e) => {
 
 function apiMessages() {
   const out = [];
-  for (const m of messages) {
+  const end = busy && busy.cutoff != null ? busy.cutoff + 1 : messages.length;
+  for (let k = 0; k < end; k++) {
+    const m = messages[k];
     if (m.role === "user") {
       const imgs = (m.images || []).filter((i) => i.url);
       const text = userText(m);
@@ -833,85 +1022,15 @@ async function send() {
   const controller = new AbortController();
   busy = {controller, msg: m};
   setBusy(true);
-
-  const body = {model: health.model, messages: apiMessages(), stream: true,
-                reasoning_effort: settings.thinking};
-  if (!(settings.temperature > 0)) {
-    body.temperature = 0;
-  } else if (!samplingUntouched(settings)) {
-    Object.assign(body, {temperature: +settings.temperature, top_p: +settings.top_p, top_k: +settings.top_k});
-  }
-  if (settings.seed) body.seed = +settings.seed;
-  if (settings.max) body.max_tokens = +settings.max;
-  if (projectionLoaded()) body.experimental_speed_projection = !!settings.esp;
-  if (settings.mcp !== false && mcpInfo.tools > 0) body.strata_mcp = true;   // this server may run MCP tools for it
-
-  let firstAt = null, thinkStart = null, usage = null, frame = 0;
-  const paint = () => { frame = 0; updateAssistant(el, m, true); scrollDown(); };
   try {
-    const r = await fetch("v1/chat/completions", {method: "POST", headers: headers(true), body: JSON.stringify(body),
-                                                   signal: controller.signal});
-    if (!r.ok) {
-      let msg = `HTTP ${r.status}`;
-      try { msg = (await r.json()).error.message || msg; } catch (e) { /* not json */ }
-      if (r.status === 401) msg = "This server needs an API key: add it under About > Settings.";
-      throw new Error(msg);
-    }
-    const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const {value, done} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line.startsWith("data:")) continue;              // ": keep-alive" comments while a long prompt is read
-        const data = line.slice(5).trim();
-        if (data === "[DONE]") continue;
-        let j;
-        try { j = JSON.parse(data); } catch (e) { continue; }
-        if (j.error) throw new Error(j.error.message || "the engine reported an error");
-        if (j.usage) usage = j.usage;
-        if (j.strata_mcp) onTool(m, j.strata_mcp);
-        const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
-        const lastTool = m.tools && m.tools.length ? m.tools[m.tools.length - 1] : null;   // a new round after a tool
-        if (d.reasoning_content) {
-          if (!firstAt) firstAt = performance.now();
-          if (!thinkStart) thinkStart = performance.now();
-          if (lastTool && m.reasoning && lastTool.rat === m.reasoning.length) m.reasoning += "\n\n";
-          m.reasoning += d.reasoning_content;
-        }
-        if (d.content) {
-          if (!firstAt) firstAt = performance.now();
-          if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
-          if (lastTool && m.text && lastTool.at === m.text.length) m.text += "\n\n";
-          m.text += d.content;
-        }
-        if (!frame) frame = requestAnimationFrame(paint);
-      }
-    }
+    await streamInto(m, el, controller.signal);
   } catch (e) {
-    if (e.name === "AbortError") m.stopped = true;
-    else { m.error = e.message || String(e); toast("error", "The request failed", m.error, 6000); }
+    m.error = e.message || String(e);
+    toast("error", "The request failed", m.error, 6000);
+    updateAssistant(el, m, false);
   }
-  if (thinkStart && m.thinkSecs == null) m.thinkSecs = (performance.now() - thinkStart) / 1000;
-  const n = usage ? usage.completion_tokens : null;
-  if (n && firstAt) {
-    const secs = (performance.now() - firstAt) / 1000;
-    m.meta = `${fmt(n)} tokens${secs > 0.25 ? ` · ${fmt(n / secs, 1)} tok/s` : ""}${m.stopped ? " · stopped" : ""}` +
-             (projectionLoaded() ? (settings.esp ? " · projection on" : " · projection off") : "");
-  } else if (m.stopped) {
-    m.meta = "Stopped";
-  }
-  for (const t of m.tools || []) if (t.state === "writing" || t.state === "running") { t.state = "skipped"; t.ms = null; }
-  const ran = (m.tools || []).filter((t) => t.state === "done" || t.state === "error").length;
-  if (ran) m.meta = `${m.meta ? `${m.meta} · ` : ""}${ran} tool call${ran > 1 ? "s" : ""}`;
-  if (m.limit) m.meta = `${m.meta || ""} · stopped at the limit of ${m.limit} tool rounds (mcp.max_rounds)`;
   busy = null;
   setBusy(false);
-  if (frame) cancelAnimationFrame(frame);
   updateAssistant(el, m, false);
   saveChat();
   scrollDown();

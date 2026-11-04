@@ -1,0 +1,1 @@
+ready: http://127.0.0.1:8091/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 65536 tokens)

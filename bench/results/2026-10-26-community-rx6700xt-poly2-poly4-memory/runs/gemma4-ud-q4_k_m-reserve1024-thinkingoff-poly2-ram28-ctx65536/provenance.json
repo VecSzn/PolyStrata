@@ -1,0 +1,34 @@
+{
+  "profile": "gemma4-ud-q4_k_m-reserve1024-thinkingoff",
+  "release": "v0.1.45-poly.2",
+  "source_commit": "974552f562aecb3e86cdd2679e76e4515b52b9d2",
+  "engine_sha256": "5cecdf2d8354ae704e456914c8d453d3497dfa8200b52e6c0f61802d52912aca",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 28,
+  "docker_memory_bytes": 30064771072,
+  "docker_memory_swap_combined_bytes": 30064771072,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "85bbbf6fd0b3ce46bb43cddb804733f90aa662cd3e174e624779a3511ddbad4b",
+    "file": "../../initial-expert-profiles/85bbbf6fd0b3ce46bb43cddb804733f90aa662cd3e174e624779a3511ddbad4b.txt"
+  },
+  "source_config_sha256": "0d2f07e85dc1a7ea0a2c9e8bf9ca236b4e4daaf5a8edf34a40716a6de5dae8fa",
+  "original_results_sha256": "ab86fd51d2af0013c2168b818d988480e0bc03379674624c20961db12862b952",
+  "published_results_sha256": "4982cde55c54fe6e55727eacbfe57bf811e8eaa928a856eb6fcce3169faaefeb",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+      "bytes": 16947541728,
+      "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+      "role": "model"
+    },
+    {
+      "filename": "mtp-gemma-4-26B-A4B-it-Q8_0.gguf",
+      "bytes": 461766816,
+      "sha256": "6326fb9f5e487aa8dcdd313a091e3c67724cb2a666ec3b7d2895b5b26d93ed1b",
+      "role": "draft-model"
+    }
+  ]
+}

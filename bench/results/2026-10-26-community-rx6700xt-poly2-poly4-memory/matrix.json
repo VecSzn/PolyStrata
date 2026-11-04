@@ -1,0 +1,24 @@
+{
+  "profiles": [
+    "qwen36-ud-q3_k_m-reserve1024",
+    "ornith-apex-i-compact-reserve1024",
+    "tiel-ud-q3_k_xl-reserve1024",
+    "gemma4-ud-q4_k_m-reserve1024-thinkingoff",
+    "minicpmv-mix_q3gud_im-reserve1024",
+    "lfm25-ud-q4_k_xl-reserve1024",
+    "qwen36-ud-q4_k_m-control-reserve1024"
+  ],
+  "releases": [
+    "poly2",
+    "poly4"
+  ],
+  "memory_gib": [
+    28,
+    52
+  ],
+  "context": 65536,
+  "runs": 3,
+  "long": true,
+  "order": "profile then28/52GiB with alternating release order by RAM; repeat count within upstream suite",
+  "expected_profiles": 28
+}

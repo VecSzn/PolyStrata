@@ -1,0 +1,113 @@
+[
+  {
+    "profile": "gemma4-ud-q4_k_m-reserve1024-thinkingoff",
+    "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+    "installer_revision": "c099eb48e663fd284577b04978a94ffccb261841",
+    "repository_url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/c099eb48e663fd284577b04978a94ffccb261841",
+    "files": [
+      {
+        "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+        "bytes": 16947541728,
+        "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+        "role": "model"
+      },
+      {
+        "filename": "mtp-gemma-4-26B-A4B-it-Q8_0.gguf",
+        "bytes": 461766816,
+        "sha256": "6326fb9f5e487aa8dcdd313a091e3c67724cb2a666ec3b7d2895b5b26d93ed1b",
+        "role": "draft-model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "lfm25-ud-q4_k_xl-reserve1024",
+    "repository": "unsloth/LFM2.5-24B-A2B-GGUF",
+    "installer_revision": "faa77113e93335b63423e9e8d33395f86eaf8946",
+    "repository_url": "https://huggingface.co/unsloth/LFM2.5-24B-A2B-GGUF/tree/faa77113e93335b63423e9e8d33395f86eaf8946",
+    "files": [
+      {
+        "filename": "LFM2.5-24B-A2B-UD-Q4_K_XL.gguf",
+        "bytes": 14876901632,
+        "sha256": "a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "minicpmv-mix_q3gud_im-reserve1024",
+    "repository": "openbmb/MiniCPM-V-4.7-35B-A3B-gguf",
+    "installer_revision": "77f6d8cb08b2b115ce27d2e2ac1359e126921689",
+    "repository_url": "https://huggingface.co/openbmb/MiniCPM-V-4.7-35B-A3B-gguf/tree/77f6d8cb08b2b115ce27d2e2ac1359e126921689",
+    "files": [
+      {
+        "filename": "MiniCPM-V-4_7-35B-A3B-mix_q3gud_im.gguf",
+        "bytes": 15503944928,
+        "sha256": "6bfeefbfc723ab6fe557fcea28b31253e14128efe8d8d5774e3256a547b3a946",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "ornith-apex-i-compact-reserve1024",
+    "repository": "mudler/Ornith-1.5-35B-A3B-APEX-MTP-GGUF",
+    "installer_revision": "4c326713c52d13fdb40983a2a09a46cca8e88739",
+    "repository_url": "https://huggingface.co/mudler/Ornith-1.5-35B-A3B-APEX-MTP-GGUF/tree/4c326713c52d13fdb40983a2a09a46cca8e88739",
+    "files": [
+      {
+        "filename": "Ornith-1.5-35B-A3B-APEX-MTP-I-Compact.gguf",
+        "bytes": 17437861408,
+        "sha256": "67e6cdff678e67180d3cd4eef55277277563319057de287b8855c4d1fbff4165",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "qwen36-ud-q3_k_m-reserve1024",
+    "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "installer_revision": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "repository_url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/tree/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "files": [
+      {
+        "filename": "Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+        "bytes": 17104402720,
+        "sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "qwen36-ud-q4_k_m-control-reserve1024",
+    "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "installer_revision": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "repository_url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/tree/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+    "files": [
+      {
+        "filename": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+        "bytes": 22663387424,
+        "sha256": "0b21525e972670ed59e1812e170b27c26355381f0656ecc4e25617ece7dac58b",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  },
+  {
+    "profile": "tiel-ud-q3_k_xl-reserve1024",
+    "repository": "peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP",
+    "installer_revision": "bbe9e566f39e4fc9652ac66b71968289a03c520a",
+    "repository_url": "https://huggingface.co/peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP/tree/bbe9e566f39e4fc9652ac66b71968289a03c520a",
+    "files": [
+      {
+        "filename": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+        "bytes": 17234935648,
+        "sha256": "46b8fbeba6e888c9a101e49cc717baa9bb8dfa0d203ec7b3185288159543ec14",
+        "role": "model"
+      }
+    ],
+    "hash_provenance": "Previously verified full-file hashes; same files reused through read-only model mounts. No new full-model hashing was performed during the concurrent quality campaign."
+  }
+]

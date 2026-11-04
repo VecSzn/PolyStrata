@@ -1,0 +1,65 @@
+{
+  "configured_context": 131072,
+  "kv": "fp16 upstream default",
+  "estimated_input_target": 119000,
+  "output_allowance": 128,
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 498.798,
+    "total_s": 500.899,
+    "prompt_tokens": 116115,
+    "reused_tokens": 0,
+    "read_tokens": 116115,
+    "generated_tokens": 48,
+    "prompt_tps": 232.8,
+    "prompt_tps_source": "engine",
+    "decode_tps": 22.8,
+    "decode_tps_source": "engine",
+    "prompt_ms": 498695.3,
+    "decode_ms": 2103.6,
+    "drafts_offered": 35,
+    "drafts_accepted": 35
+  },
+  "response": {
+    "first": 498.7981964000501,
+    "total": 500.89890260004904,
+    "text": "{\n  \"alpha\": \"CEDAR-8462\",\n  \"beta\": \"HARBOR-1753\",\n  \"gamma\": \"QUARTZ-9207\"\n}",
+    "usage": {
+      "prompt_tokens": 116115,
+      "completion_tokens": 48,
+      "total_tokens": 116163,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 116115,
+      "prompt_ms": 498695.3,
+      "prompt_per_token_ms": 4.295,
+      "prompt_per_second": 232.8,
+      "predicted_n": 48,
+      "predicted_ms": 2103.6,
+      "predicted_per_token_ms": 43.825,
+      "predicted_per_second": 22.8,
+      "draft_n": 35,
+      "draft_n_accepted": 35
+    },
+    "err": null,
+    "pieces": 43
+  },
+  "passed": true,
+  "scope": "One three-fact retrieval, not broad full-window quality",
+  "fixture": {
+    "generator": "reproduce.py",
+    "seed": 219,
+    "filler_words": 110484,
+    "utf8_lf_sha256": "6f7b5a2ea5f52d23e326c016546ea946ea950b45200503d20272c6896523cdea",
+    "expected": {
+      "alpha": "CEDAR-8462",
+      "beta": "HARBOR-1753",
+      "gamma": "QUARTZ-9207"
+    }
+  }
+}

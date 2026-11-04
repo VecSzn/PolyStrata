@@ -63,6 +63,11 @@ size_t Mmq::q8_bytes(int64_t rows, int64_t cols) {
     return (size_t) rows * (size_t) (pad512(cols) / QK8_1_MMQ) * sizeof(block_q8_1_mmq) + 128 * sizeof(block_q8_1_mmq);
 }
 
+bool Mmq::half_sums(int type) {
+    const mmq_q8_1_ds_layout layout = mmq_get_q8_1_ds_layout((ggml_type) type);
+    return layout == MMQ_Q8_1_DS_LAYOUT_DS4 || layout == MMQ_Q8_1_DS_LAYOUT_D2S6;
+}
+
 void Mmq::quantize(const float* x, const int32_t* ids, void* xq, int type, int64_t cols, int64_t ld, int64_t rows,
                    void* stream) {
     if (rows <= 0) return;

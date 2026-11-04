@@ -1,0 +1,66 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-long", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/out,dst=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--long", "--clients", "2", "--out", "/opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/out/official-long"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Note: the server runs 1 request(s) at a time (--batch), so 2 clients will partly wait their turn.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.30 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 74.5 tok/s, first token 0.206 s, 100 tokens
+  run 1 q2: decode 74.5 tok/s, first token 0.208 s, 100 tokens
+  run 1 q3: decode 71.2 tok/s, first token 0.198 s, 100 tokens
+  run 2 q1: decode 80.5 tok/s, first token 0.207 s, 100 tokens
+  run 2 q2: decode 85.7 tok/s, first token 0.223 s, 100 tokens
+  run 2 q3: decode 79.8 tok/s, first token 0.217 s, 100 tokens
+  run 3 q1: decode 81.9 tok/s, first token 0.223 s, 100 tokens
+  run 3 q2: decode 89.3 tok/s, first token 0.217 s, 100 tokens
+  run 3 q3: decode 82.6 tok/s, first token 0.207 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4126 tokens, prompt 1528.6 tok/s (0 reused), first token 2.717 s
+  run 2: 4126 tokens, prompt 1571.6 tok/s (0 reused), first token 2.642 s
+  run 3: 4126 tokens, prompt 1585.4 tok/s (0 reused), first token 2.62 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16490 tokens, prompt 1469.5 tok/s (0 reused), first token 11.251 s
+  run 2: 16490 tokens, prompt 1490.1 tok/s (0 reused), first token 11.095 s
+  run 3: 16490 tokens, prompt 1495.3 tok/s (0 reused), first token 11.057 s
+agent: a session of 6 turns with four tools, x 3 runs
+    FAILED: no token came back
+  run 2 turn 0: prompt 396, reused 0, read 396, first token 0.641 s
+  run 2 turn 1: prompt 3754, reused 391, read 3363, first token 2.143 s
+  run 2 turn 2: prompt 5426, reused 3749, read 1677, first token 1.938 s
+  run 2 turn 3: prompt 8592, reused 5421, read 3171, first token 2.875 s
+  run 2 turn 4: prompt 11619, reused 8587, read 3032, first token 2.751 s
+  run 2 turn 5: prompt 14472, reused 11614, read 2858, first token 3.168 s
+  run 3 turn 0: prompt 396, reused 0, read 396, first token 0.676 s
+  run 3 turn 1: prompt 3730, reused 391, read 3339, first token 2.215 s
+  run 3 turn 2: prompt 5396, reused 3725, read 1671, first token 1.953 s
+  run 3 turn 3: prompt 8562, reused 5391, read 3171, first token 2.885 s
+  run 3 turn 4: prompt 11589, reused 8557, read 3032, first token 2.763 s
+  run 3 turn 5: prompt 14442, reused 11584, read 2858, first token 3.154 s
+concurrency: 2 requests at once x 3 rounds, 128 new tokens each
+  round 1: 256 tokens in 3.9 s = 65.6 tok/s total
+  round 2: 256 tokens in 3.5 s = 73.2 tok/s total
+  round 3: 256 tokens in 3.4 s = 75.0 tok/s total
+32K prompt: 3 fresh prompts of about 32768 tokens, 24 new tokens
+  run 1: 32875 tokens, prompt 1113.9 tok/s (0 reused), first token 29.564 s
+  run 2: 32875 tokens, prompt 1121.7 tok/s (0 reused), first token 29.358 s
+  run 3: 32875 tokens, prompt 1120.6 tok/s (0 reused), first token 29.386 s
+
+Results (median, range over the runs):
+  chat decode tok/s                     80.50   (71.20 - 89.30, n=9)
+  chat first token (s)                   0.21   (0.20 - 0.22, n=9)
+  4K prompt tok/s                     1571.60   (1528.60 - 1585.40, n=3)
+  4K first token (s)                     2.64   (2.62 - 2.72, n=3)
+  16K prompt tok/s                    1490.10   (1469.50 - 1495.30, n=3)
+  16K first token (s)                   11.10   (11.06 - 11.25, n=3)
+  32K prompt tok/s                    1120.60   (1113.90 - 1121.70, n=3)
+  32K first token (s)                   29.39   (29.36 - 29.56, n=3)
+  agent cache hit %                     67.83   (67.81 - 67.85, n=2)
+  agent re-read tokens/session         311.00   (0.00 - 334.00, n=3)
+  agent turn first token (s)             2.76   (1.94 - 3.17, n=10)
+  agent decode tok/s                    72.15   (56.60 - 84.70, n=10)
+  2 clients total tok/s                 73.20   (65.56 - 74.97, n=3)
+  (1 failed request(s), 0 skipped test(s): see the report)
+
+Report: /opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/out/official-long/2026-10-19-community-cpu-lfm2-5-24b-a2b-ud-q4-k-xl/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/lfm25-ud-q4_k_xl-reserve1024-ctx65536/out/official-long/2026-10-19-community-cpu-lfm2-5-24b-a2b-ud-q4-k-xl (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

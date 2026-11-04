@@ -1,0 +1,70 @@
+
+COMMAND ["docker", "run", "--rm", "--name", "poly-client-official-long", "--network", "container:polystrata-host6-inference", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HOME=/tmp", "--pids-limit", "128", "--memory", "1536m", "--memory-swap", "1536m", "--cpus", "1", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m", "--mount", "type=bind,src=/opt/polystrata-host6/upstream,dst=/opt/polystrata-host6/upstream,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/data,dst=/opt/polystrata-host6/data,readonly", "--mount", "type=bind,src=/opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/out,dst=/opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/out", "--mount", "type=bind,src=/opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/config.json,dst=/config.json,readonly", "sha256:3273611332bfcb24e8421ac4d9cf7822b3ef638795f87b91083706e5d62e4336", "/opt/polystrata-host6/upstream/tools/strata_bench.py", "--url", "http://127.0.0.1:8080", "--config", "/config.json", "--runs", "3", "--long", "--clients", "2", "--out", "/opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/out/official-long"]
+Using the PolyStrata server already running at http://127.0.0.1:8080.
+Note: the server runs 1 request(s) at a time (--batch), so 2 clients will partly wait their turn.
+Running the suite (about 3-10 minutes) ...
+warming up (not measured) ...
+  calibrated: about 1.00 tokens per word
+chat: 3 short questions x 3 runs, up to 100 new tokens
+  run 1 q1: decode 85.2 tok/s, first token 0.454 s, 100 tokens
+  run 1 q2: decode 66.9 tok/s, first token 0.526 s, 100 tokens
+  run 1 q3: decode 59.0 tok/s, first token 0.555 s, 100 tokens
+  run 2 q1: decode 91.8 tok/s, first token 0.556 s, 100 tokens
+  run 2 q2: decode 76.9 tok/s, first token 0.545 s, 100 tokens
+  run 2 q3: decode 68.8 tok/s, first token 0.566 s, 100 tokens
+  run 3 q1: decode 88.6 tok/s, first token 0.571 s, 100 tokens
+  run 3 q2: decode 73.9 tok/s, first token 0.527 s, 100 tokens
+  run 3 q3: decode 71.8 tok/s, first token 0.558 s, 100 tokens
+4K prompt: 3 fresh prompts of about 4096 tokens, 24 new tokens
+  run 1: 4101 tokens, prompt 933.8 tok/s (0 reused), first token 4.439 s
+  run 2: 4101 tokens, prompt 936.0 tok/s (0 reused), first token 4.385 s
+  run 3: 4101 tokens, prompt 932.6 tok/s (0 reused), first token 4.401 s
+16K prompt: 3 fresh prompts of about 16384 tokens, 24 new tokens
+  run 1: 16390 tokens, prompt 976.0 tok/s (0 reused), first token 17.048 s
+  run 2: 16390 tokens, prompt 985.3 tok/s (0 reused), first token 16.643 s
+  run 3: 16390 tokens, prompt 985.5 tok/s (0 reused), first token 16.639 s
+agent: a session of 6 turns with four tools, x 3 runs
+  run 1 turn 0: prompt 396, reused 0, read 396, first token 1.098 s
+  run 1 turn 1: prompt 4162, reused 389, read 3773, first token 4.378 s
+  run 1 turn 2: prompt 5869, reused 4155, read 1714, first token 2.372 s
+  run 1 turn 3: prompt 9358, reused 5862, read 3496, first token 5.395 s
+  run 1 turn 4: prompt 12370, reused 9351, read 3019, first token 4.625 s
+  run 1 turn 5: prompt 15420, reused 12363, read 3057, first token 4.639 s
+  run 2 turn 0: prompt 396, reused 0, read 396, first token 1.032 s
+  run 2 turn 1: prompt 4162, reused 389, read 3773, first token 4.41 s
+  run 2 turn 2: prompt 5869, reused 4155, read 1714, first token 2.39 s
+  run 2 turn 3: prompt 9361, reused 5862, read 3499, first token 5.323 s
+  run 2 turn 4: prompt 12372, reused 9354, read 3018, first token 4.662 s
+  run 2 turn 5: prompt 15420, reused 12365, read 3055, first token 4.715 s
+  run 3 turn 0: prompt 396, reused 0, read 396, first token 1.008 s
+  run 3 turn 1: prompt 4162, reused 389, read 3773, first token 4.448 s
+  run 3 turn 2: prompt 5869, reused 4155, read 1714, first token 2.39 s
+  run 3 turn 3: prompt 9358, reused 5862, read 3496, first token 5.257 s
+  run 3 turn 4: prompt 12370, reused 9351, read 3019, first token 4.636 s
+  run 3 turn 5: prompt 15418, reused 12363, read 3055, first token 4.674 s
+concurrency: 2 requests at once x 3 rounds, 128 new tokens each
+  round 1: 256 tokens in 5.3 s = 48.0 tok/s total
+  round 2: 256 tokens in 5.1 s = 49.8 tok/s total
+  round 3: 256 tokens in 5.0 s = 51.4 tok/s total
+32K prompt: 3 fresh prompts of about 32768 tokens, 24 new tokens
+  run 1: 32774 tokens, prompt 815.2 tok/s (0 reused), first token 40.853 s
+  run 2: 32774 tokens, prompt 821.1 tok/s (0 reused), first token 39.928 s
+  run 3: 32774 tokens, prompt 819.1 tok/s (0 reused), first token 40.025 s
+
+Results (median, range over the runs):
+  chat decode tok/s                     73.90   (59.00 - 91.80, n=9)
+  chat first token (s)                   0.56   (0.45 - 0.57, n=9)
+  4K prompt tok/s                      933.80   (932.60 - 936.00, n=3)
+  4K first token (s)                     4.40   (4.38 - 4.44, n=3)
+  16K prompt tok/s                     985.30   (976.00 - 985.50, n=3)
+  16K first token (s)                   16.64   (16.64 - 17.05, n=3)
+  32K prompt tok/s                     819.10   (815.20 - 821.10, n=3)
+  32K first token (s)                   40.02   (39.93 - 40.85, n=3)
+  agent cache hit %                     68.08   (68.08 - 68.08, n=3)
+  agent re-read tokens/session         253.00   (251.00 - 253.00, n=3)
+  agent turn first token (s)             4.64   (2.37 - 5.39, n=15)
+  agent decode tok/s                    71.50   (55.40 - 75.70, n=15)
+  2 clients total tok/s                 49.76   (47.96 - 51.43, n=3)
+
+Report: /opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/out/official-long/2026-10-19-community-cpu-gemma-4-26b-a4b-ud-q4-k-m/README.md
+Share it: open a pull request that adds the folder /opt/polystrata-host6/results/gemma4-ud-q4_k_m-reserve1024-ctx65536/out/official-long/2026-10-19-community-cpu-gemma-4-26b-a4b-ud-q4-k-m (see docs/COMMUNITY_BENCHMARKS.md), or paste README.md into a GitHub issue. Home folders, user and host names and IP addresses are already replaced; read it once before you share it.

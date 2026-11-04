@@ -1,0 +1,26 @@
+{
+  "exe": "<workspace>\\source\\engine-poly\\strata-poly.exe",
+  "args": [
+    "--model",
+    "<workspace>\\campaign3h\\ornith\\models\\Ornith-1.5-35B-A3B-APEX-MTP-I-Compact.gguf",
+    "--max-context",
+    "32768",
+    "--expert-profile",
+    "<workspace>\\campaign3h\\ornith\\data\\packs\\ornith-apex-i-compact\\expert-profile.txt",
+    "--conversation-cache-mib",
+    "auto",
+    "--kv-whole"
+  ],
+  "cwd": "<workspace>\\source",
+  "tokenizer": "<workspace>\\campaign3h\\ornith\\data\\packs\\ornith-apex-i-compact\\tokenizer",
+  "model_name": "ornith-1.5-35b-a3b-apex-i-compact",
+  "display_name": "Ornith 1.5 35B-A3B APEX-I-COMPACT",
+  "log": "<workspace>\\campaign3h\\ornith\\engine-standard.log",
+  "lib_dirs": [
+    "<workspace>\\source\\.rocm-win\\Lib\\site-packages\\_rocm_sdk_devel\\bin"
+  ],
+  "port": 18085,
+  "backend": "hip",
+  "hip_ordinal": 0,
+  "open_browser": false
+}

@@ -1,0 +1,15 @@
+{
+  "source_commit": "cc508adc50c32e0a98bd9bc1c5688ab5195b2538",
+  "engine_sha256": "a712397d4e2d82d8c207627766ba991e615ae7fc648d90e6ebfddf4c970ae959",
+  "official_results_sha256": {
+    "ornith": "ddb3cb1c38c42966c10b3dfe2d3ba0cfa40b774a12acbdd75482f52bacbe549a",
+    "tiel": "7cc3c1198fa3b46d9aa0804a7bfb2111768296a0cb725c8d46339e1bc2f7b85b",
+    "gemma4": "dc541253f36f1d81bbc9dbe3be100438e239ebe7159c044c866a491472f425b9"
+  },
+  "original_qwen_results_sha256": "9e285f27a562f3f5a9c84ca6d6bbd1e533bd15f4f7eb158e3252c8e6fa6d3c59",
+  "official_tool": "unmodified tools/strata_bench.py",
+  "official_suite_count": 4,
+  "official_measured_requests": 132,
+  "official_request_errors": 0,
+  "supplementary_scope": "Custom probes and paired tail-skip comparison are separate from the official suite."
+}

@@ -1850,6 +1850,15 @@ class GpuChoice(unittest.TestCase):
         self.assertEqual(plain.get("CUDA_VISIBLE_DEVICES"), os.environ.get("CUDA_VISIBLE_DEVICES"))
         self.assertEqual(plain.get("CUDA_DEVICE_ORDER"), os.environ.get("CUDA_DEVICE_ORDER"))
 
+    def test_gdn_mma_env_override(self):
+        """The existing model env map can opt out of a parent process's kernel request."""
+        from serve.server import child_env
+        with mock.patch.dict(os.environ, {"STRATA_GDN_MMA": "1"}):
+            self.assertEqual(child_env({})["STRATA_GDN_MMA"], "1")
+            self.assertEqual(child_env({"env": {"STRATA_GDN_MMA": 0}})["STRATA_GDN_MMA"], "0")
+            self.assertEqual(child_env({"env": {"STRATA_GDN_MMA": "1"}})["STRATA_GDN_MMA"], "1")
+            self.assertEqual(os.environ["STRATA_GDN_MMA"], "1")
+
     def test_card_order(self):
         """#1352: with an auto layer split the faster card (SMs x clock) goes last; ties, a manual split, a
         measurement we lack, HIP and "gpu_order": "as_given" keep the config's order."""
@@ -4248,6 +4257,30 @@ class ThinkingBudget(unittest.TestCase):
                                                      "messages": [{"role": "user", "content": "2+2?"}]})
         self.assertEqual(len(self.engine.prompts), 3)              # thinking off: no budget, one prompt each
 
+    def test_a_reply_the_context_cut_short_gets_the_answer_room(self):
+        """Issue 16: no max_tokens and a nearly full context left Flint 416 tokens, which it thought through: the room
+        is the context's doing, not a small cap the client asked for, so the thinking is closed in time there too."""
+        self.engine.THOUGHT = "Let me think step by step about two plus two. " * 40    # 1,800 reasoning tokens
+        self.engine.max_context = 900
+        code, b = self.post("/v1/chat/completions", {"model": "m", "messages": [{"role": "user", "content": "2+2?"}]})
+        self.assertEqual(code, 200, b)
+        self.assertEqual(b["choices"][0]["message"]["content"], ThinkingEngine.ANSWER)
+        self.assertEqual(b["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(len(self.engine.prompts), 2)              # the wrap-up continuation
+
+    def test_a_context_too_full_for_the_wrap_up_says_so(self):
+        from serve.frontend import openai_to_messages
+        self.engine.THOUGHT = "Let me think step by step about two plus two. " * 40
+        prompt = self.svc.encode_prompt(*openai_to_messages({"messages": [{"role": "user", "content": "2+2?"}]}))
+        self.engine.max_context = len(prompt) + CTX_SLACK + 40      # 40 tokens left: the wrap-up alone takes more
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code, b = self.post("/v1/chat/completions", {"model": "m",
+                                                         "messages": [{"role": "user", "content": "2+2?"}]})
+        self.assertEqual((code, b["choices"][0]["finish_reason"]), (200, "length"), b)
+        self.assertIn("reached the end of the context while still thinking", out.getvalue())
+        self.assertIn("--max-context", out.getvalue())
+
     def test_anthropic_thinking_budget_tokens_is_a_budget(self):
         """0.1.45: thinking {type: enabled, budget_tokens: N} closes the thinking after N tokens (it was only a level)."""
         from serve.server import REASONING_WRAP_UP
@@ -5793,7 +5826,8 @@ class VisionArgs(unittest.TestCase):
             return Proc()
 
         with mock.patch.object(server.subprocess, "Popen", popen), mock.patch.object(server, "contain"):
-            server.Vision({"exe": "strata-vision", "mmproj": "m.gguf", "model": "t.gguf", **cfg})
+            # kept running: on the CPU an encoder starts with the first picture by default
+            server.Vision({"exe": "strata-vision", "mmproj": "m.gguf", "model": "t.gguf", "elastic": False, **cfg})
         return seen[0]
 
     def test_min_tokens_is_passed_only_when_set(self):

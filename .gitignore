@@ -35,6 +35,7 @@ td.log
 /run-*.bat
 /run-*.sh
 /strata-*.json
+/strata-*.json.bak
 /strata-*.log
 /strata-*.warm-start
 /build-strata.bat
@@ -52,6 +53,7 @@ build-vision-cuda12.bat
 /engine-cuda12/
 /engine-poly/
 /build-strata-poly.bat
+/build-poly-hip.bat
 /build-vision-poly.bat
 /engine-glm/
 /build-strata-glm.bat
@@ -71,3 +73,5 @@ build-vision-cuda12.bat
 
 # local Windows HIP packaging output
 dist-hip/
+
+.agents/

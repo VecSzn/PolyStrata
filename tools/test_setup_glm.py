@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -114,7 +115,8 @@ class Estimates(unittest.TestCase):
         with mock.patch.object(setup, "WIN", False):   # #11: AMD on Linux runs it
             self.assertNotIn("does not run", setup.poly_verdict(setup.MODELS[M], 256, 24.0, True))
         with mock.patch.object(setup, "WIN", True):
-            self.assertIn("AMD", setup.poly_verdict(setup.MODELS[M], 256, 24.0, True))   # only AMD on Windows is left out
+            self.assertIn("compiled locally", setup.poly_verdict(setup.MODELS[M], 256, 24.0, True))
+            self.assertTrue(setup.poly_fits(setup.MODELS[M], 256, 24.0, True))
         self.assertIn("does not fit", setup.poly_verdict(setup.MODELS[M], 256, 12.0, False))
         self.assertIn("fits by setup's estimate", setup.poly_verdict(setup.MODELS[M], 128, 31.84, False))
         self.assertIn("read from the SSD", setup.poly_verdict(setup.MODELS[M], 64, 31.84, False))
@@ -169,12 +171,45 @@ class Config(unittest.TestCase):
             mine.mkdir()
             with mock.patch.object(sys, "executable", str(mine / "python")), \
                     mock.patch.object(setup.shutil, "which", lambda n: "/usr/bin/" + n), \
-                    mock.patch.object(setup.Path, "home", lambda: Path(t) / "home"):
+                    mock.patch.object(setup.Path, "home", lambda: Path(t) / "home"), \
+                    mock.patch.object(setup, "out", lambda c: "cmake version 3.31.6\n"), \
+                    mock.patch.object(setup, "run") as run:
                 self.assertEqual(setup.find_tool("cmake"), "/usr/bin/cmake")       # none of its own: PATH's
                 (mine / name).write_text("")
                 self.assertEqual(setup.find_tool("cmake"), str(mine / name))
                 with mock.patch.object(setup.shutil, "which", lambda n: None):
                     self.assertIsNone(setup.find_tool("ninja"))
+                run.assert_not_called()
+
+    def test_a_build_folder_keeps_its_cuda_compiler_spelling(self):
+        # nvcc.exe against nvcc.EXE: CMake would delete the cache and configure without the other -D options
+        with tempfile.TemporaryDirectory() as t:
+            nvcc = Path(t) / "nvcc"
+            nvcc.write_text("")
+            (Path(t) / "CMakeCache.txt").write_text(f"CMAKE_CUDA_COMPILER:FILEPATH={nvcc}\n")
+            other = os.path.join(t, ".", "nvcc")   # the same file, written another way
+            defs = ["-DSTRATA_ENABLE_CUDA=ON", f"-DCMAKE_CUDA_COMPILER={other}"]
+            self.assertEqual(setup.cached_compiler(t, defs), ["-DSTRATA_ENABLE_CUDA=ON", f"-DCMAKE_CUDA_COMPILER={nvcc}"])
+            (Path(t) / "nvcc2").write_text("")
+            another = [f"-DCMAKE_CUDA_COMPILER={Path(t) / 'nvcc2'}"]
+            self.assertEqual(setup.cached_compiler(t, another), another)   # another compiler: as given
+            self.assertEqual(setup.cached_compiler(Path(t) / "none", defs), defs)   # no cache: as given
+
+    def test_a_tool_whose_launcher_names_a_moved_folder_is_installed_again(self):
+        # issue 78: .venv\Scripts\cmake.exe named the Python of the folder before it was moved and did not start
+        with tempfile.TemporaryDirectory() as t:
+            mine, name = Path(t) / "bin", "cmake" + (".exe" if setup.WIN else "")
+            mine.mkdir()
+            (mine / name).write_text("")
+            with mock.patch.object(sys, "executable", str(mine / "python")), \
+                    mock.patch.object(setup, "out", lambda c: ""), \
+                    mock.patch("importlib.metadata.version", lambda n: "3.31.6"), \
+                    mock.patch.object(setup, "run") as run, \
+                    mock.patch.object(setup, "say"):
+                self.assertEqual(setup.find_tool("cmake"), str(mine / name))
+            cmd = run.call_args.args[0]
+            self.assertEqual(cmd[:4], [str(mine / "python"), "-m", "pip", "install"])
+            self.assertEqual(cmd[-3:], ["--force-reinstall", "--no-deps", "cmake==3.31.6"])
 
     def test_saved_conversation_cache(self):
         with tempfile.TemporaryDirectory() as t:
@@ -184,6 +219,8 @@ class Config(unittest.TestCase):
             self.assertEqual(setup.poly_saved_conv([None, p]), 0)
             p.write_text(json.dumps({"args": ["--conversation-cache-mib", "4096", "--model", "m.gguf"]}))
             self.assertEqual(setup.poly_saved_conv([p]), 4096)
+            p.write_text(json.dumps({"args": ["--conversation-cache-mib", "auto", "--model", "m.gguf"]}))
+            self.assertEqual(setup.poly_saved_conv([p]), "auto")
 
 
 class Main(unittest.TestCase):
@@ -201,7 +238,7 @@ class Main(unittest.TestCase):
         self.tmp.cleanup()
 
     def main(self, argv=(), ram=128.0, vram=31.84, model=False, answers=None, win=False, n_gpus=1, family="glm",
-             cores=None):
+             cores=None, amd_cards=None):
         """answers: None = --yes; else {words of a question: its answer} (Enter for the others); the questions asked
         are kept in self.asked.  model: False, True (this file's M) or a size's name.  cores: (performance,
         efficiency) of a hybrid CPU."""
@@ -230,6 +267,12 @@ class Main(unittest.TestCase):
             (eng / "BUILD.json").write_text(json.dumps({"source": "local", "cuda_dirs": ["/cuda/lib64"]}))
             return eng
 
+        def fake_hip_build(gpu, llama):
+            eng = fake_build(gpu, True, llama)
+            (eng / "BUILD.json").write_text(json.dumps({"source": "local-hip", "backend": "hip",
+                                                       "lib_dirs": ["C:/ROCm/bin"]}))
+            return eng
+
         patches = [
             mock.patch.object(setup, "ROOT", self.t),
             mock.patch.object(setup, "WIN", win),
@@ -237,7 +280,8 @@ class Main(unittest.TestCase):
             mock.patch.object(setup, "data_folder", lambda d: (self.t / "data", [])),
             mock.patch.object(setup, "installed_configs", lambda: []),
             mock.patch.object(setup, "gpus", lambda: found),
-            mock.patch.object(setup, "amd_gpus", lambda *a: []),
+            mock.patch.object(setup, "amd_gpus", lambda *a: amd_cards or []),
+            mock.patch.object(setup, "amd_gpus_win", lambda: amd_cards or []),
             mock.patch.object(setup, "ram_gb", lambda: ram),
             mock.patch.object(setup, "cpu_info", lambda: ("Test CPU", True, True)),
             mock.patch.object(setup, "cpu_cores", lambda: cores),
@@ -247,10 +291,12 @@ class Main(unittest.TestCase):
             mock.patch.object(setup, "get_llama_cpp", lambda: self.t / "llama.cpp"),
             mock.patch.object(setup, "get_prebuilt", mock.Mock(side_effect=AssertionError("the Qwen engine"))),
             mock.patch.object(setup, "build_engine_poly", fake_build),
+            mock.patch.object(setup, "build_engine_poly_hip", fake_hip_build),
             mock.patch.object(setup, "download", fake_download),
             mock.patch.object(setup, "whole_shard", lambda s: False),
             mock.patch.object(setup, "check_shards", lambda shards: None),
-            mock.patch.object(setup, "verify_sha256", lambda s, size, sha: self.verified.append((s.name, size, sha))),
+            mock.patch.object(setup, "verify_sha256", lambda s, size, sha, own=False: self.verified.append((s.name, size, sha))),
+            mock.patch.object(setup, "verify_poly_own", lambda s, size, sha, fam: self.verified.append((s.name, size, sha))),
             mock.patch.object(setup, "run", lambda cmd, *a, **k: self.runs.append([str(x) for x in cmd])),
             mock.patch.object(setup, "write_run_script", lambda tag, cfg, port, *_: self.t / f"start-{tag}.sh"),
             mock.patch.object(setup, "start", mock.Mock(side_effect=AssertionError("started"))),
@@ -288,7 +334,7 @@ class Main(unittest.TestCase):
         self.assertEqual(args[args.index("--max-context") + 1], "32768")
         self.assertEqual(Path(args[args.index("--expert-profile") + 1]), pack / "expert-profile.txt")
         self.assertEqual(Path(args[args.index("--draft-model") + 1]), block)
-        self.assertEqual(args[args.index("--conversation-cache-mib") + 1], "8192")
+        self.assertEqual(args[args.index("--conversation-cache-mib") + 1], "auto")
         for flag in ("--pack", "--native", "--mtp", "--kv", "--vision", "--pool-workers", "--prefill"):
             self.assertNotIn(flag, args)
         self.assertEqual(cfg["model_name"], "glm-5.3-flash-3.0bit")

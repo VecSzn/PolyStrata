@@ -1,0 +1,71 @@
+{
+  "configured_context": 65536,
+  "target_input": 59500,
+  "output_allowance": 128,
+  "response": {
+    "first": 170.74086330004502,
+    "total": 172.54945360007696,
+    "text": "{\"alpha\": \"CEDAR-5187\", \"beta\": \"HARBOR-2649\", \"gamma\": \"QUARTZ-9036\"}",
+    "usage": {
+      "prompt_tokens": 58122,
+      "completion_tokens": 39,
+      "total_tokens": 58161,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 58122,
+      "prompt_ms": 170646.9,
+      "prompt_per_token_ms": 2.936,
+      "prompt_per_second": 340.6,
+      "predicted_n": 39,
+      "predicted_ms": 1810.3,
+      "predicted_per_token_ms": 46.418,
+      "predicted_per_second": 21.5,
+      "draft_n": 31,
+      "draft_n_accepted": 26
+    },
+    "err": null,
+    "pieces": 38
+  },
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 170.741,
+    "total_s": 172.549,
+    "prompt_tokens": 58122,
+    "reused_tokens": 0,
+    "read_tokens": 58122,
+    "generated_tokens": 39,
+    "prompt_tps": 340.6,
+    "prompt_tps_source": "engine",
+    "decode_tps": 21.5,
+    "decode_tps_source": "engine",
+    "prompt_ms": 170646.9,
+    "decode_ms": 1810.3,
+    "drafts_offered": 31,
+    "drafts_accepted": 26
+  },
+  "expected": {
+    "alpha": "CEDAR-5187",
+    "beta": "HARBOR-2649",
+    "gamma": "QUARTZ-9036"
+  },
+  "passed": true,
+  "filler_words": 55056,
+  "seed": 117,
+  "prompt_utf8_lf_sha256": "a85bd1a9d6227c709e3455c14ad268b9527eeb2c752606736a8a0b037fcdfb74",
+  "fixture": {
+    "generator": "reproduce-additional.py",
+    "seed": 117,
+    "filler_words": 55056,
+    "utf8_lf_sha256": "a85bd1a9d6227c709e3455c14ad268b9527eeb2c752606736a8a0b037fcdfb74",
+    "expected": {
+      "alpha": "CEDAR-5187",
+      "beta": "HARBOR-2649",
+      "gamma": "QUARTZ-9036"
+    }
+  }
+}

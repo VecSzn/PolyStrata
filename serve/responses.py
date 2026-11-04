@@ -669,7 +669,10 @@ class Assembler:
             return out + [self.event("response.incomplete", response=self.snapshot())]
         self.response["status"] = "completed"
         self.response["completed_at"] = int(time.time())
-        return out + [self.event("response.completed", response=self.snapshot())]
+        e = self.event("response.completed", response=self.snapshot())
+        if done.get("timings"):
+            e["timings"] = done["timings"]                # top-level llama.cpp's names: the speed its clients show
+        return out + [e]
 
     def failed(self, message: str, code: str = "server_error") -> dict:
         """response.failed: an error after the stream started (the HTTP status is already sent)."""

@@ -1,0 +1,28 @@
+{
+  "profile": "minicpmv-mix_q3gud_im-reserve1024",
+  "release": "v0.1.45-poly.4",
+  "source_commit": "145493e66580c80bba09b0130f667a2b1789da69",
+  "engine_sha256": "372c6ed707d302c470b864a8fc24ff2a3e462f94cb33c0956c20205a95ef9785",
+  "engine_version": "0.1.45",
+  "memory_limit_gib": 52,
+  "docker_memory_bytes": 55834574848,
+  "docker_memory_swap_combined_bytes": 55834574848,
+  "additional_swap_allowed": false,
+  "docker_cpu_quota": 9.0,
+  "initial_expert_profile": {
+    "sha256": "89c6bdd9153efa8c0b2937aab9669cf07de0ff88fa0ffaee5a8d28ec9032ddab",
+    "file": "../../initial-expert-profiles/89c6bdd9153efa8c0b2937aab9669cf07de0ff88fa0ffaee5a8d28ec9032ddab.txt"
+  },
+  "source_config_sha256": "02e744bd08b25cdc5fb28aa659c3ba2f7c7f0a42bcd1fb5cf49008d589226136",
+  "original_results_sha256": "ae7599fbe29d3c9e76bfc25d556b984eb4839ef00b11e40016fce58286f69173",
+  "published_results_sha256": "914cb02756d02f56dc61f4374802c8fa47bd246147988401c1fb8560d4902745",
+  "privacy_changes": "Only installation paths in strings were replaced; all keys, non-string values and the entire results subtree are unchanged.",
+  "weights": [
+    {
+      "filename": "MiniCPM-V-4_7-35B-A3B-mix_q3gud_im.gguf",
+      "bytes": 15503944928,
+      "sha256": "6bfeefbfc723ab6fe557fcea28b31253e14128efe8d8d5774e3256a547b3a946",
+      "role": "model"
+    }
+  ]
+}

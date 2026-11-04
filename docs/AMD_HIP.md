@@ -461,13 +461,24 @@ an RX 9070 XT 16 GB and a Radeon AI PRO R9700 32 GB (both gfx1201), a Ryzen 9 39
 The four smaller models of PolyStrata's own engine (Qwen3.6, Ornith 1.5, Gemma 4, Tiel Coder) and GLM 5.3 Flash
 run through `strata-poly`, which is CUDA-shaped code; since 0.1.42-poly.4 it compiles for an AMD card through the
 same `hip_compat` headers as the main engine, with the CUDA driver's virtual memory calls mapped onto HIP's
-(`hip_compat/cuda.h`). Linux only: there is no ready-made AMD engine, and setup refuses these models on an AMD
-card under Windows.
+(`hip_compat/cuda.h`). There is no ready-made AMD engine: setup compiles one for the card. On Linux with ROCm from
+a system install or AMD's wheels in `.venv`, as for the main engine; on Windows with AMD's TheRock
+Windows wheels in `.rocm-win` (the private venv `tools\hip\build_windows.bat` uses) and Visual Studio 2022's C++
+build tools. The Windows path has run on two cards: Tiel Coder 35B-A3B on an RX 9070 XT (below), and Qwen3.6, Ornith
+1.5, Tiel Coder and Gemma 4 on an RX 5700 XT (gfx1010, PR 102); every other one there is unreported, so setup warns
+before it installs a model.
 
-- Install as for NVIDIA: `./setup.sh --family qwen36` (or `lfm25`, `ornith`, `gemma4`, `tiel`, `glm`, `deepseek`).
-  Setup compiles the engine for the card into `engine-poly/` (`build_engine_poly_hip`), with ROCm from a system
-  install or AMD's wheels in `.venv`, as for the main engine, and compiles again after a `git pull` that changed the
-  engine.
+- Install as for NVIDIA: `./setup.sh --family qwen36` (or `lfm25`, `flint`, `ornith`, `gemma4`, `tiel`, `glm`,
+  `deepseek`, `kolibri`).
+  Setup compiles the engine for the card into `engine-poly/` (`build_engine_poly_hip`; on Windows
+  `build_engine_poly_hip_win`), with ROCm from a system install or AMD's wheels in `.venv` on Linux and from
+  `.rocm-win` on Windows, as for the main engine, and compiles again after a `git pull` that changed the
+  engine. `STRATA_ROCM_WIN_VERSION` picks which version of AMD's TheRock Windows wheels setup installs; the name
+  `tools\hip\build_windows.bat` reads for the same venv, `STRATA_ROCM_VERSION`, works too (the index stays
+  `https://nightly.repo.amd.com/rocm/whl-next/`; `STRATA_ROCM_INDEX` is not read there). A version other than
+  the one `.rocm-win` already holds is installed in its place (7 GB again, and the engine is kept until its
+  source changes); a `.rocm-win` that does not say which version it holds - one made by hand - is kept, with a
+  warning naming this setting.
 - Images stay off: the image encoder is a CUDA program.
 - The attention caches take their VRAM at load on an AMD card (`--kv-whole`; setup writes it into the config and
   adds it to an older one on update). On NVIDIA they grow with the conversation, and the expert cache gives VRAM
@@ -484,8 +495,17 @@ card under Windows.
   | Ornith 1.5 APEX-I-Mini | 40 tokens/s | 444 / 43 tokens/s |
 
   The first tokens after a load come slower while the expert cache fills (the port's own steady-state figures
-  were 64 and 35 tokens/s, with 5,125 and 4,517 experts in VRAM). Gemma 4, Tiel Coder and GLM have not been tried
-  on an AMD card, and setup warns so.
+  were 64 and 35 tokens/s, with 5,125 and 4,517 experts in VRAM). GLM 5.3 Flash, DeepSeek V4, Flint and
+  Kolibri 1 have not been tried on an AMD card, and setup warns so.
+- Measured under Windows 11 on an RX 9070 XT (gfx1201, 16 GB; Ryzen 7 7800X3D, 64 GB of RAM), engine 0.1.45
+  compiled by setup from AMD's TheRock wheels (ROCm 10.2.0a20260930), Tiel Coder 35B-A3B UD-Q3_K_XL, 32K of
+  context, `--kv-whole`, one request at a time: the engine loaded in 8.5 s (15.5 s the first time) with 8,031 of
+  10,496 experts in VRAM (10.5 GiB); a 7,376-token prompt was read at 2,750 tokens/s, and the next request on
+  that same prompt came from the conversation cache (`--conversation-cache-mib 8192`: 7,375 of its tokens
+  reused, 25 ms); answers were written at 55 to 75 tokens/s (13 to 18 ms/token), with 72 to 93% of the guessed
+  tokens right. An answer right after a load wrote at 30 to 34 tokens/s while the experts the cache did not hold
+  were read in. This is one model on one card: the other models on an AMD card under Windows are unreported, and
+  setup warns so.
 - The same greedy tokens as on CUDA are not promised across backends, as above, and the card's experts and the
   CPU's do not give the same ones on either: with every expert on the CPU (`--no-gpu-experts`) a greedy answer
   parts from the card's after 15 to 50 tokens on the RX 7600, and after 11 to 70 on an RTX 5090 (Qwen3.6
@@ -655,6 +675,18 @@ run it; the report below is from a community machine: an RX 6900 XT 16 GB (gfx10
   needles), and an RX 6800M 12 GB on Windows with a self-built engine (#915, #1078: Q2_0, decode 9-27 tok/s, prompt 50-114 tok/s; the
   experts stream from disk with 31 GB of RAM). The ready-made Windows zip has no gfx1031 code unless it is built with it: `STRATA_HIP_ARCHS=gfx1031`
   in `tools\hip\build_windows.bat` (the default list has it from 0.1.40.2 on).
+- **gfx1032** (RX 6600 / 6600 XT / 6650 XT): setup knows it (the `gfx103X-all` wheels, unvalidated). One owner ran it
+  on Fedora with an RX 6600 XT 8 GB and 32 GB DDR5: setup built the engine for gfx1032 from the `gfx103X-all`
+  7.13.0a20260515 wheels, and Qwen3.6 UD-Q4_K_M on strata-poly wrote at 69 tok/s over a 2,331-token answer with
+  71.1% of the experts from VRAM ([discussion 49](https://github.com/VecSzn/PolyStrata/discussions/49)). The card
+  needs no `HSA_OVERRIDE_GFX_VERSION`. One left in the shell from an older guide (10.3.0 makes the card a gfx1030)
+  stops this engine at the first request with `rms_norm: device kernel image is invalid`; unset it.
+- **gfx1010** (RX 5600 XT / 5700 / 5700 XT, RDNA1): setup knows it (unvalidated). One owner ran an RX 5700 XT 8 GB
+  under Windows 11, the engine compiled for gfx1010 from AMD's TheRock 10.2.0a20260930 Windows packages with no
+  patch: the official suite at 32K for Qwen3.6, Ornith, Tiel Coder and Gemma 4, 132 requests with no errors, short
+  chats written at 28.6 to 31.4 tok/s ([PR 102](https://github.com/VecSzn/PolyStrata/pull/102),
+  `bench/results/2026-10-27-community-rx5700xt-windows-qwen36-q3`). On Linux it takes the `gfx101X-dgpu` wheels and
+  has not been tried.
 - **gfx1150** (Radeon 890M, Ryzen AI 9 HX PRO 370, Strix Point, #1217): builds and runs from 0.1.40.2 as an unvalidated target (CMake warns; the
   device code already covers it: the WMMA guards and `gfx_arch_is_gfx11_wmma()` include it). One community machine: MINISFORUM N5 PRO, 96 GB DDR5-5600, GTT
   raised to 64 GiB (`ttm.pages_limit=16777216 ttm.page_pool_size=16777216`), TheRock ROCm 7.14.1 for gfx1150, an unprivileged LXC container, IQ3_XXS: chat and
@@ -875,6 +907,47 @@ at run time (status 11 once while it sets up its workspace is normal) falls back
 after three refusals for good. `hip_prefill_rocblas_gemm` (with `STRATA_ROCBLAS_TUNING` set; skips otherwise) is the
 smoke test: it refuses a table for another architecture or build and checks Gemm's FP16 route against hipBLASEx on the
 table's first two shapes.
+
+## Opt-in split value reduction in strata-poly
+
+`STRATA_HIP_VALUE_SPLIT=1` splits the weighted-value reduction into 1,024-key
+parts, then sums those parts. It applies only to `attend()` with head dimension
+256, eight query heads per KV head, at least 12,288 keys, and no sliding window,
+ring buffer or whole-context attention. Both FP16 and Q8_0 value caches are
+supported. The existing score and softmax kernels still run.
+
+The option reuses the score scratch space after softmax; it allocates no extra
+VRAM. It falls back to the existing reduction if transposed weights or scratch
+space are unavailable. Only the literal value `1` enables it; unset, `0`, and
+other values retain the default path. Set it before starting the engine: a
+captured HIP graph retains the path selected at capture time.
+
+This targets the D256/GQA8 full-attention path used by Qwen3.6-35B-A3B:
+its published configuration has 16 query heads, two KV heads and 10
+full-attention layers among 40. Variants with the same geometry are eligible
+under the runtime gates above; linear-attention layers are unaffected.
+The engine logs availability once the model geometry is known.
+
+On the tested RX 9070 XT configuration, three restarted runs per flag measured
+58.5 -> 59.8 tokens/s at 12K, 48.5 -> 52.3 at 32K and 36.5 -> 44.6 at 98K.
+The 12K ranges overlap; the repeatable gains are +7.8% at 32K and +22.2% at 98K.
+Prompt processing stayed within 3.8%, and peak sampled VRAM was unchanged.
+
+Benchmark representative: Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL, a community
+`qwen35moe` derivative with this geometry, using Q8_0 KV. These numbers are
+measured on that artifact. End-to-end gains on other compatible variants
+depend on quantization and CPU/GPU expert placement. The separate results
+submission records exact artifacts, hashes, raw runs and reproduction commands.
+
+The enabled reduction changes FP32 addition order, so its output need not be
+bitwise identical to the default. The option targets long-context decode;
+it leaves prefill unchanged.
+
+The project's existing `STRATA_FDEC` path (PR #51) also splits decode
+attention into 1,024-key parts and merges them, but uses CUDA tensor cores and
+keeps the old path on HIP. This new option is a HIP value-reduction kernel; it
+does not replace `STRATA_FDEC` and makes no claim to the general split-key
+algorithm itself.
 
 ## Original backend validation (PR #94)
 

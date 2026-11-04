@@ -1,0 +1,642 @@
+[
+  {
+    "file": ".gitattributes",
+    "bytes": 62,
+    "sha256": "0cc41a37d57140d42d5f4f0c0f88509832291709db1fd9bb0530802584041a75"
+  },
+  {
+    "file": "BUILD.txt",
+    "bytes": 1585,
+    "sha256": "0cab2e64acb9b1e7c107a964d51edb5f212392b1bb810e329dae2ad7691f4d83"
+  },
+  {
+    "file": "data-integrity.json",
+    "bytes": 10030,
+    "sha256": "5655bf5a39afd2138deebde55ee1557dbfd0911a5724d928cf3c463b85150b26"
+  },
+  {
+    "file": "initial-expert-profiles/3e4decf5774a6006cb983886a7dc6e5ef3c85fbfd996f8d2000a0885b53e3cfc.txt",
+    "bytes": 128072,
+    "sha256": "3e4decf5774a6006cb983886a7dc6e5ef3c85fbfd996f8d2000a0885b53e3cfc"
+  },
+  {
+    "file": "initial-expert-profiles/594ea439eebd74265f0679bba99c0a94b8a4cf3a8ae9852c4ef895fa0ff32e82.txt",
+    "bytes": 28604,
+    "sha256": "594ea439eebd74265f0679bba99c0a94b8a4cf3a8ae9852c4ef895fa0ff32e82"
+  },
+  {
+    "file": "initial-expert-profiles/8589b0b6ea5d5897483474e8806ecc334d24b6be345c1ffa062029d65a6fa30a.txt",
+    "bytes": 115024,
+    "sha256": "8589b0b6ea5d5897483474e8806ecc334d24b6be345c1ffa062029d65a6fa30a"
+  },
+  {
+    "file": "initial-expert-profiles/85bbbf6fd0b3ce46bb43cddb804733f90aa662cd3e174e624779a3511ddbad4b.txt",
+    "bytes": 45554,
+    "sha256": "85bbbf6fd0b3ce46bb43cddb804733f90aa662cd3e174e624779a3511ddbad4b"
+  },
+  {
+    "file": "initial-expert-profiles/89c6bdd9153efa8c0b2937aab9669cf07de0ff88fa0ffaee5a8d28ec9032ddab.txt",
+    "bytes": 123168,
+    "sha256": "89c6bdd9153efa8c0b2937aab9669cf07de0ff88fa0ffaee5a8d28ec9032ddab"
+  },
+  {
+    "file": "initial-expert-profiles/b28390c7f0eb6ed55b7bcaec5644640135de0becaa9a093580f9c80ffb00605c.txt",
+    "bytes": 127085,
+    "sha256": "b28390c7f0eb6ed55b7bcaec5644640135de0becaa9a093580f9c80ffb00605c"
+  },
+  {
+    "file": "initial-expert-profiles/beef3742fb8a6ec44486c362a5a19442f89ab3cb7e33c48003cfe67e75b952a7.txt",
+    "bytes": 128036,
+    "sha256": "beef3742fb8a6ec44486c362a5a19442f89ab3cb7e33c48003cfe67e75b952a7"
+  },
+  {
+    "file": "matrix.json",
+    "bytes": 573,
+    "sha256": "0faaf7163714d8c3057445afa150a0679f6e66dd854eb4087bb487ae5c773c9f"
+  },
+  {
+    "file": "models.json",
+    "bytes": 5435,
+    "sha256": "47b05bc480c48235dd957e13e7809a4452cbc0c7db3f8738a7fd1196812935eb"
+  },
+  {
+    "file": "official-client-freeze.json",
+    "bytes": 29542,
+    "sha256": "735cd14c216e53eba012be975c822b245bbfa0ad7d719285ae073541a82a6c37"
+  },
+  {
+    "file": "README.md",
+    "bytes": 13855,
+    "sha256": "68099b6b357d601e0fb0e6f2ea44b182f18af27074e24585921c0d5da876f29b"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram28-ctx65536/config.json",
+    "bytes": 1280,
+    "sha256": "49433d0b9126c07fddddcffb74f334afa76b11dd3aaeb65d0f92fc959c16b3b8"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4254,
+    "sha256": "4bffddb72525f4ff96fd7979cb7c0f9d51ede6c735b0e6de36ca674149f0404b"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1543,
+    "sha256": "643255ec5d7f79f9070ffb54611ac3ecc4adc861ef8ffc315be83db00a5d4d81"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram28-ctx65536/results.json",
+    "bytes": 26810,
+    "sha256": "4982cde55c54fe6e55727eacbfe57bf811e8eaa928a856eb6fcce3169faaefeb"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram52-ctx65536/config.json",
+    "bytes": 1280,
+    "sha256": "3b7ac7bafac805e15330fe81f30138a12a7ab6c5bda34e36cfa5a46ae58c5f86"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4255,
+    "sha256": "2845f5572ccd7fa07d129c4d9c112d1faebba1b845b762e76dfc3daa2d1ee7bc"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1543,
+    "sha256": "0586921d81be3dff3c085f96b55187e22106c535619112c0b4c2791573a04469"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly2-ram52-ctx65536/results.json",
+    "bytes": 26807,
+    "sha256": "9b37afad94ca7faf5eca3f9cdaa97bb359d546fc049b7ab38df3bea794366993"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram28-ctx65536/config.json",
+    "bytes": 1278,
+    "sha256": "7ab509e1e57238f9b0cea849d7c15e0e35dbbca27cf55ab9fdfb2d01c151436e"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4255,
+    "sha256": "68e3739082c1cdc44b35f4ed494ee6b01c7c178d07c5e782c1bca7d080b10101"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1543,
+    "sha256": "6f35996d3ca83cc600778478edbbde0aff0a147152200dd9927d07ada2260366"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram28-ctx65536/results.json",
+    "bytes": 26805,
+    "sha256": "648d07f7579326be99e83d79dc236ac8fe8790c973bf4e1187faa01acdf31667"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram52-ctx65536/config.json",
+    "bytes": 1278,
+    "sha256": "405c51789a10be879e6862fcd6a0ec10c63a26513be0748906d89938b21adfa9"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4254,
+    "sha256": "e45100db2b7e8cd77f04185025dae4a2e3142592a33c2e56621a12059254964f"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1543,
+    "sha256": "5504ce5b30359f8db872a9b98495504795a01461f4aaa15cb7b8804c6e2f6178"
+  },
+  {
+    "file": "runs/gemma4-ud-q4_k_m-reserve1024-thinkingoff-poly4-ram52-ctx65536/results.json",
+    "bytes": 26797,
+    "sha256": "8fa0762cb9c7ecf32be9055f8448d3fcab7154e7b90aa4ebd5a3e311ef4d8bad"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1145,
+    "sha256": "a812bc045a72bd7c297c956f9ae5f2d574eeec33bcc007409982e17f979252d5"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4236,
+    "sha256": "8653d95f49d8844d82a630b1104e2f476152a49d74e4224f727f48a4f8752029"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "260d8aa37712e104d36c7b7873462d7ac1deae87c50fb7fac60518125dead156"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26680,
+    "sha256": "b7be4dbee6d7407b78c4d25cbf3445f84d1d7b5c1fc3f0d3fbe979e8e654071e"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1145,
+    "sha256": "8d1938ecc57d2ac4f981d48a41262fd54237382e0491746241aa36ee7327e493"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4235,
+    "sha256": "75ccde28867a29efae5e4e442c99b808d948191159d87aecb5733c21ee6915f7"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "9d83fa8d3758a4281774a8b6183ea9b8f3970164bc7dfe08dbf19598b8704b1f"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26677,
+    "sha256": "68aaff198616ca51c091c164e0c756e5306a0d2ab772fa04196cef5b03f8f867"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1143,
+    "sha256": "e457eced9af8e2fe0c8be098a9df0344e5479522f50f8c19e8b3dfb398d2d5c8"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4319,
+    "sha256": "0cde3af75eaf7af384882a545b8de5d5a4b858da16ec241112f433a7168cf7e1"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "fa5b9915677d58412d5e496c07db44f937cb6ba592a00d12af42d652fbf9583f"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 20820,
+    "sha256": "1fa3f207ce36b16c48e557984707adcc210ddef4f75be06b9c0a52c796a1438d"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1143,
+    "sha256": "22cc93206bedd9cdee45f9a934d522b7ac51964f7e3c471280683b521cea59fa"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4021,
+    "sha256": "00b76178491667eaf272b2affb3c540b3c5b233899bb30dc95ea10c96df98d4a"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "3736b6ef10c1f000a8e0780a6090e4f0953d5406a0470651602ad0ef8b92dc78"
+  },
+  {
+    "file": "runs/lfm25-ud-q4_k_xl-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 20818,
+    "sha256": "09eb6bcb7d4758c2a9a013d22231da473485dd7f02a566d0f4b795be7bc57fb7"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1158,
+    "sha256": "d11dc38aa3a88a4b284e78f8f55d6c235a294b97aa4a9972a68c402987b13459"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4219,
+    "sha256": "4f5d862caecdf59e3532891ed707c85e8d02a52ceaaf71bd28ac897bb55f2b0a"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1337,
+    "sha256": "10e61fdf3a089c890dde588b5e27adbdb9773efb840cadd31a372056c96bafc1"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26637,
+    "sha256": "3cd9acd71e1ca71c03e2dd0388fd3a6fbe50d17e4c9a7e247ee0a680daea457a"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1158,
+    "sha256": "70035aba56329ccb8079f78294eb1fde7971717eec44a441dc3d76fda0d86834"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4223,
+    "sha256": "b0112532266332e79d4e70e2595fd263ce87a26d71de4056b25fb7142fcebd80"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1337,
+    "sha256": "9511322100e71c7cbfc7c88704056344852fbbb84dc2382e9c2c2f03b97b4e9a"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26634,
+    "sha256": "17873e4112d8780c4d17f3473b901c581f1d3d30b548252a256cd2040d5ce445"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1156,
+    "sha256": "cafe404c96fbd454548e0109aa86640c1ee93b29fffefb3f62db3c144337a635"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4224,
+    "sha256": "ba90cef6fb535ea86489d8d7883cdbb45c2ded28b3e6fbdecbb31b0262cdadd0"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1337,
+    "sha256": "961eaebdbbd71eb402d08f886b338e1f4b4e4cb2e27846bdfd90c24b7b218650"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 26643,
+    "sha256": "eab54ac37d0faf2f82434693732e99ab6300c642b3c6e6544b8b6b1dadc4682a"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1156,
+    "sha256": "bfea9bb1197dc112e7a52e559674709a6fcbde5371952e47979cba7649c7db86"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4224,
+    "sha256": "f4ff253d109a61f1cc3f3f138f48d355f710cd78a6b1ac166eeada81cbddf47c"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1337,
+    "sha256": "347c8da0585972d554638906cf2fd68deda59f973146b6a326f5b0633786d9ca"
+  },
+  {
+    "file": "runs/minicpmv-mix_q3gud_im-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 26630,
+    "sha256": "914cb02756d02f56dc61f4374802c8fa47bd246147988401c1fb8560d4902745"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1159,
+    "sha256": "2e6731566b6af4d77d9a4a4f0321effbe2535d9f756b2b0f37e803cbe5c7046d"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4228,
+    "sha256": "91ecf0e906de98c80d62257cd335bd95b743311774e8f54bd298da1508291b43"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1340,
+    "sha256": "d630aded2225cdad449f2e1da6d259158f579327646936784660d67a7bb7c8ff"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26645,
+    "sha256": "dfca5ed89031420929e09e0e0a97cb3eed6f7cedb00e0863efaf4990ef98b827"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1159,
+    "sha256": "39f6c899a34e572fd3fa93012e132ede0d12a4e71872f2773f1427054b7cdb93"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4226,
+    "sha256": "2ae7f861074d4278d1986263da79ccab11985248b2cec48ce08906c24411df1d"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1340,
+    "sha256": "dd97bed8f403696c1655b5019c98b91697e28ea9d9e29fedb2918b529feaa46f"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26680,
+    "sha256": "fe9f58b225816f2e54473cf50444db3d067684163afec28c0ff8f5659cb1e3e0"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1157,
+    "sha256": "77265c563dbdbfc656e8430130b970470a8355d4c3c8473360a7e7e2959d07f7"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4227,
+    "sha256": "4ef0b8992af05bd3ae1cb5b794fa7a202b22b9be1fe81402d26f2a4417a6111b"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1340,
+    "sha256": "dcce37d8c9c03125930b60829f4916dbfa6fbc1284459227cca47dc567b16b92"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 26691,
+    "sha256": "a1d93b960203df5310dc14def147157ffc9607de2039a65fdd700c8030982f0e"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1157,
+    "sha256": "19ad1715bc16c833aed43f88e244da1c95902943b5ad7264351c017001c937e2"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4227,
+    "sha256": "0586dad7f86d70b18a27202414ad5c942a973cd7a54e872dd0086eae6f9e739d"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1340,
+    "sha256": "4b0f8d0950294d7d4b1d1679f4005ff9faa1b043c383b491d100baf0b6c4a4bc"
+  },
+  {
+    "file": "runs/ornith-apex-i-compact-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 26679,
+    "sha256": "fcadf6693adb35f5939fb13f68932909298f35a884543907a50f9d68c00431f7"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1139,
+    "sha256": "e285411bcb4d6a48f523fe30a08aa6a83175c96719e8b0534d46b85f894f4f8e"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4226,
+    "sha256": "4b3e0c93a6f81d65be4d505dfd7e555e57cc354b3b7e177fccfbf93aa7d9ef92"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "210947bde4f4b3528302bc900c73841abeaffe1e9e3167302fd16520937677a9"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26709,
+    "sha256": "60160863a167d61c82dfd1c77d71e6bce59de72e38bec3ba72f8dd454d192a60"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1139,
+    "sha256": "8f9003d4dfdde7cf1ab652b2ff582d63361f1ad6f6c10a906ceb8e06ca5b9785"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4226,
+    "sha256": "99e67a998bed1e7fa15ab397083632ad90812cda7608eef879c928bb6afee493"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "e7cfadcfeb925ae7001d4a040d599bc8faec6c11ed973deb58faaa6dfc265c18"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26709,
+    "sha256": "7c70dbe1c5791050f92c1308c0ccbe2e5fd7e35b61f183aae48837d517a43a8d"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1137,
+    "sha256": "9133da8e312b5f381f219fca0c999755226e868db841416a963b2c5c6d3f0b9b"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4226,
+    "sha256": "152db284b8ea43d08079d69db8ef6fff4810142919e53001bbdba6735a43cacc"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "430db3584408eaae4b8992578ded8d9b2a455bd982fad8808f875af7da7684ed"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 26716,
+    "sha256": "57842d3db7bbbb4d75a03156d368cb8f9bbe6cdf123826b9901116c2baf4b763"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1137,
+    "sha256": "734f1eb1f90db490b02d6ab4b12c8d9bee8cc9e44d648984c6e7b3b013c00b40"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4225,
+    "sha256": "959d4fc64324b1f501e33b3f4d3346d9e45c625bc10fd0921306104816618c33"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1323,
+    "sha256": "d16aa4982b1f8f8ff9e3d260795ed2f6a947a24f13739d9a23c1268bdd791812"
+  },
+  {
+    "file": "runs/qwen36-ud-q3_k_m-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 26698,
+    "sha256": "fddf9ca8ab8854f9697a0d0731ff689e2e2ea063d1a80822c61f9e658924b95b"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1155,
+    "sha256": "60b4a24e391d6aec2cf56689376e83a263b98c358a7b00b74bdc4d4450cdffa1"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4222,
+    "sha256": "c50d2dd5a231bf9a4ed763ef14fa52b1d522d130eb2e9380de921f4e9e78468e"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1331,
+    "sha256": "6e5635ad53cd7094ca62796fd05eed0995e738a33a26ab7231e98ab1c4ef4fae"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26698,
+    "sha256": "7519ff86fcec30355595b3cb4b8ca0488774eccb6fc9b9ca714c27366e601a8f"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1155,
+    "sha256": "195e8db4ec91ad5277ca1c1ce5b4020d9583e3b6b6834a814461a410a36fef46"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4223,
+    "sha256": "15fbeed20bbd763bb3508987729c52a0ede8b609a53ea2bf91fb329906c7b434"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1331,
+    "sha256": "788bce8c7d343aec1e235c359049f7a04428866c72a1187efd0a63afec812bb3"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26701,
+    "sha256": "9269c45a231c3c4dfecc558a0342682ecbc7f753fef06b7369b412e353caf3b0"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1153,
+    "sha256": "36175f1434aed894a0d27ac61c1274057c516af5ccddd9ec47a6e70f995ad984"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4223,
+    "sha256": "ceadd41e4b678f7e477d70e5fd0f87e480d2b9854609065cb6ecf357f0a9f5b7"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1331,
+    "sha256": "b87fcedad75a46cbdec4e12ee73e15c75e8cedaeb023302c303dbcf5b55465b2"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 26696,
+    "sha256": "6f9e003b35dbade69d35c51f6c75b361a208c3da1cdee73fd33f409eb817cbe9"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1153,
+    "sha256": "c0518437617802127e11c18c943d2cf309823f3ea68d8b36d82fa38c3c4f14fc"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4223,
+    "sha256": "07df6ab2904768cef85a9c8d33d8c63a252026163a3ac24db97ecde775b507b5"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1331,
+    "sha256": "63179a564273929eb110fd3c62f7f3557c9129a746696730c16b442c659157c5"
+  },
+  {
+    "file": "runs/qwen36-ud-q4_k_m-control-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 26690,
+    "sha256": "774e5a00fa25b8e084dbc6aaabd5f3e9707f5c4cbfa62b0c223f370490e93bb9"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram28-ctx65536/config.json",
+    "bytes": 1123,
+    "sha256": "4715bd0006183c8ca5ee20e8a1e85da2479acd79ec4fa1e9699705662962c152"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram28-ctx65536/official-report.md",
+    "bytes": 4220,
+    "sha256": "b64f523fc64e67da664f731743765b0da4c201585f99b3c595b838a005bad0c4"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram28-ctx65536/provenance.json",
+    "bytes": 1330,
+    "sha256": "8a5bf4f9c3df92de4cc71e0bc77107ebe346d16c47050722dea65ece3cb269b4"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram28-ctx65536/results.json",
+    "bytes": 26706,
+    "sha256": "d5cc9571bd0cbb4781ef6742c5ab3dd62cae35bfafd06f1db46b7c149965b75f"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram52-ctx65536/config.json",
+    "bytes": 1123,
+    "sha256": "2a25252b4e80a7d13e301ddb50fdbf214577587f58b45e0076624a3671bfc96d"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram52-ctx65536/official-report.md",
+    "bytes": 4220,
+    "sha256": "e77d1229cc3d6a75d2cba984f2bc38d1d1b54b7f2c36fd50c641aad76b05cc3f"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram52-ctx65536/provenance.json",
+    "bytes": 1330,
+    "sha256": "e662a1d605512e97cf44185de5545f03c70fe07d7025c46ffef4b7bd6c20fa2c"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly2-ram52-ctx65536/results.json",
+    "bytes": 26698,
+    "sha256": "c7c62a9fd7839a2b1a04f529383a401caf2fce45c8764e2f5f1cf53f1b34bbab"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram28-ctx65536/config.json",
+    "bytes": 1121,
+    "sha256": "9adac15743f8e7a14b560e7294e8384c5b6ae136c0dd528cac738abb1424cfcb"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram28-ctx65536/official-report.md",
+    "bytes": 4221,
+    "sha256": "308f881099addc866fb6503fa2ac40a0a9951e2b137a3547b5b4a67d22936e01"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram28-ctx65536/provenance.json",
+    "bytes": 1330,
+    "sha256": "3ca068ac4414e7653d81aac1798866d45864d1a1dfaae75b6c3d866095a2042c"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram28-ctx65536/results.json",
+    "bytes": 26709,
+    "sha256": "a0766feba4b4e5465250858eb0685dc182b37576733b8f88c4fbbfbf616450a5"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram52-ctx65536/config.json",
+    "bytes": 1121,
+    "sha256": "e9a85292182677eac3f6cfc78523ec968bfaac660e8cf13d2dc257c9a194709b"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram52-ctx65536/official-report.md",
+    "bytes": 4220,
+    "sha256": "3c836569b9d9fdb7e2da83ed22c09b80f512f87cca7f8ea9bd6932a6aa25ca46"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram52-ctx65536/provenance.json",
+    "bytes": 1330,
+    "sha256": "33654c34c50b8bfd1364a1c39737f6081ab88f651a535c1004d6a40e473eaf41"
+  },
+  {
+    "file": "runs/tiel-ud-q3_k_xl-reserve1024-poly4-ram52-ctx65536/results.json",
+    "bytes": 26695,
+    "sha256": "5e152c3c513925b7a213ceabfeaa62f0ca495a7801c34338f31ae9fa956cd917"
+  },
+  {
+    "file": "software.json",
+    "bytes": 2001,
+    "sha256": "6ba193f88a7982e59623a40e9085eee5e03f7523aeb44507a3f7bfb1df161854"
+  },
+  {
+    "file": "summary.csv",
+    "bytes": 8756,
+    "sha256": "8eafc1011167b40628072cad927a36c7f4b01d1137e4ba50ec9bb0e2ff47e4c8"
+  }
+]

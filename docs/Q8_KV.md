@@ -4,6 +4,13 @@
 opt-in: `--kv q8_0`. The default, `--kv fp16`, is unchanged and byte-identical to the build before this
 option existed. The format halves the KV cache's VRAM and, on the models tested, leaves the answers alone.
 
+Gemma 4 has its own two, in the same Q8_0 rule but its own layout: `--kv int8` and `--kv int8k`
+([the int8 pair, below](#the-int8-pair-for-gemma-4-strata-poly---kv-int8-and---kv-int8k)).
+
+On `kolibri1`, `STRATA_KV_INT8=1` makes both the decode and the prompt read the q8_0 cache with the int8
+reader below (`attend_int8`) instead of the float q8 readers. It is experimental: the queries are quantized
+too, so the answers change slightly, and it is opt-in.
+
 ## What the format is
 
 A cache row holds one value a token for each KV head and each head dimension (`n_kv * head_dim` values).
@@ -113,10 +120,10 @@ The three run configs (`strata-tiel.json`, `strata-ornith.json` and `strata-occa
 
 ## What was left alone
 
-- The `strata` engine, and its own `--kv int8`. Nothing in it changed.
-- `glm5next` / GLM 5.3 Flash (`dsa_attend`): its attention is not the one this cache quantizes, so `--kv q8_0`
-  is not offered for it.
-- **Gemma 4 is out of v1.** `--kv q8_0` with a `gemma4` file is rejected cleanly at load
+- The `strata` engine. Nothing in it changed.
+- `glm5next` / GLM 5.3 Flash (`dsa_attend`): its attention is not the one this cache quantizes, so neither
+  `--kv q8_0` nor `--kv int8` is offered for it.
+- `--kv q8_0` and a `gemma4` file: still rejected cleanly at load
   (`--kv q8_0 is only supported for qwen35moe models in v1; this is a 'gemma4' model`), not run.
 - ROCm/HIP: the same kernels, measured below on an AMD card (it was rejected on HIP until that was done).
 - The default path stays byte-identical to the last release.
@@ -150,8 +157,11 @@ Full transcript in the T8.5 report.
 
 - **CUDA:** builds clean; the test-suite run is **116/117**. The one failure, `ple_parity`, is a missing model
   file (`.../Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf: cannot open`), unrelated to this change.
-  `poly_kv_q8_test` passes (0.23 s).
-- **HIP:** builds clean for gfx1201; `poly_kv_q8_test` passes (91,530 values checked) on an RX 9070 XT.
+  `poly_kv_q8_test` passes (0.23 s), `poly_kv_int8_test` 35/35 (0.4 s).
+- **HIP:** builds clean for gfx1201; `poly_kv_q8_test` passes (91,530 values checked) on an RX 9070 XT. The
+  int8 family builds there too: the MMA tier's PTX has an empty body and `attend_int8` never selects it
+  (`tensor_cores()` is false under `__HIPCC__`), so the dp4a tier and the fp16 twin carry the prompt path;
+  `poly_kv_int8_test` skips the mma probes with `STRATA_USE_HIP` set.
 
 ## On an AMD card
 
@@ -168,3 +178,85 @@ Greedy with `--no-draft`, seven prompts: the four short ones gave the same answe
 summary of a 24K-character prompt and a list of names from a 60K-character one took other words from the 249th,
 14th and first character on, each answer as right as the fp16 one.
 - **SYCL:** not applicable; that is a separate engine.
+
+## The int8 pair for Gemma 4 (`strata-poly --kv int8` and `--kv int8k`)
+
+Same rule, different layout. The block's largest magnitude over 127 is the **delta**, `roundf(x / delta)` is the
+**code** — llama.cpp's Q8_0 rule, which is what the engine already uses for its expert weights
+(`ggml_quantize_chunk`, `GGML_TYPE_Q8_0`). What changes is where the bytes go: instead of ggml's 34-byte
+`block_q8_0` (a delta then 32 codes), a row is `n_kv * head_dim` **codes back to back** and, beside them,
+`n_kv * head_dim / 32` **halves** — one delta a 32-value block.
+
+Two arrays because a lane's four codes are then one aligned load (`char4`, 4-aligned). In ggml's layout half
+the blocks put the codes at an address 2 mod 4, so a `__dp4a` has to `memcpy` four bytes into an int first.
+
+The two formats:
+
+| | what is quantized | what `store_int8` writes |
+| --- | --- | --- |
+| `--kv int8` | both sides | codes and deltas, K and V |
+| `--kv int8k` | the keys' side only | codes and deltas for K; V stays fp16 |
+
+A decode step is a `__dp4a` of a lane's own run of codes — the query's against the key's, both 4-aligned — and
+the block's two deltas scale the integer sum once: llama.cpp's `vec_dot_q8_0_q8_1`, whose point is that
+neither side is ever turned into floats. Above 16K keys the scores run on an int8 tensor-core MMA
+(`mma.sync.m16n8k32.s8`, the readers' shapes need no shuffle); below, and on any card without it, dp4a.
+A prompt batch is the other way round: the codes are converted to halves once per batch — O(rows) against an
+attention's O(rows²) — and cuBLAS takes the products from there, as llama.cpp does on CUDA
+("other kernels convert these to f16"). `attend_int8_mixed` reads the K side's codes for the scores and the
+fp16 V cache for the weighted sums.
+
+`--kv int8` needs `n_kv * head_dim` to be a multiple of 32 and each head to be 64 values or 128 and up: the
+score readers give a lane a whole number of dp4a steps that lies inside one block. A head of another shape
+gets a clear error at load (`unsupported model: --kv int8 needs a head of 64 values or of 128 and up ...`).
+Both formats are Gemma 4's: any other architecture is rejected at load
+(`--kv int8 and --kv int8k are Gemma 4's; for a qwen35moe model use --kv q8_0`), because the two readers'
+arithmetic is not the same and a model takes one family or the other.
+
+### What was measured
+
+Kernels, without a model (`poly_kv_int8_test`, 35 checks, RTX 4070 Laptop): the codes and deltas agree with
+ggml's own `quantize_row_q8_0_ref` **to the bit** (0 of 1,536,000 halves differ for the whole-cache
+dequantizer); two layers' shapes give `cos(attend, attend_int8)` 0.99995-0.99996 at 64 to 3000 keys, the
+window layers' rings included; the MMA probe runs one product and checks it (0 of 128 wrong), and the MMA is
+3.4× the dp4a where it runs.
+
+End-to-end on Gemma 4 (26B, `Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf`, Q4_K_M), on an
+RTX 4070 Laptop (8 GiB), 13 threads, `--no-draft --window 1 --tail-skip 0 --expert-swaps 0 --cpu-share 0
+--vram-reserve-mib 512`, the expert split held still (`STRATA_FREEZE_EXPERTS=1`), greedy, five prompts
+(the four short factual ones and one open-ended sentence about the colour blue), each arm a fresh process:
+
+| | prompt, ms (median of 15) | decode, tok/s (median of 15) |
+| --- | ---: | ---: |
+| fp16 | 984.0 | 37.68 |
+| int8 | 941.8 (−4.3%) | 38.22 (+1.4%) |
+| int8k | 968.1 (−1.6%) | 38.01 (+0.9%) |
+
+The three arms are within run-to-run scatter of each other, the int8 ones a little ahead: the file is
+Q4_K_M, so most of the model's work is elsewhere, and this card cannot hold the experts either way
+(900 of 3840 routed experts in VRAM; the rest on the CPU). The KV cache is a small part of what this
+configuration reads, which is why the saving does not show up as a speed-up here. The point of the format is
+the VRAM it gives back, not the clock.
+
+The answers: the four factual prompts keep their answer under both formats (`KV OK`, `42`, `Paris`,
+`2, 3, 5, 7, 11`), the difference confined to the chain-of-thought phrasing; the open-ended one is a
+creative prompt, and each format words it differently.
+
+The same code on another machine (the `pr3` branch, before this change renamed the symbols) writes the
+**same 64 tokens** for all five prompts under both `int8` and `int8k` (10 of 10 runs identical, and
+2704 of 2704 `--dump-layers` lines identical), so the rename and the split of the two families changed
+no arithmetic.
+
+### Files touched
+
+- `src/poly/kernels.cu`, `include/strata/poly/kernels.hpp` — `KvInt8`, `kQ8_0Values`, `store_int8` /
+  `store_int8_at` / `dequant_int8_to_f16`, and `attend_int8` / `attend_int8_mixed` with their score readers
+  (dp4a, register, and MMA tiers). Nothing of the Q8_0 family beside them.
+- `src/poly/gemma4.hpp` / `gemma4.cpp` — the codes/delta arrays beside the fp16 ones, the fp16 twin for a
+  prompt batch and its per-sequence rows, the ring stores, and the save/load and parking paths
+  (`card_row_bytes`, `save_card_rows` / `load_card_rows`, `extra_bytes`, `save_layer` / `load_extra`).
+- `src/poly/engine.hpp` — `KvFmt` grows `kInt8` and `kInt8K`, with the `int8()` / `int8k()` readers.
+- `src/poly/engine.cpp` — the clean rejection of int8/int8k for anything but `gemma4`.
+- `src/poly/main.cpp` — `--kv int8` / `--kv int8k` parsing and the help text.
+- `src/poly/kv_int8_test.cpp` (new) — the kernel unit test.
+- `CMakeLists.txt` — the `poly_kv_int8_test` target and its `add_test`.

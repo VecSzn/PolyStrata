@@ -1,0 +1,82 @@
+{
+  "source_commit_note": "original suites (Oct-20/21) at c54f0eaf6200a9207f13f900a5fc772d437d6f7a; Qwen re-runs (Oct-22) at e97c8aa47ca2c01025accdd32d07a01536d794ce; the engine binary (0.1.45, gfx1031, built from c54f0eaf) is identical across both \u2014 the delta commits are CUDA-only",
+  "build": {
+    "source": "local-hip",
+    "backend": "hip",
+    "version": "0.1.45",
+    "archs": [
+      "gfx1031"
+    ],
+    "vision": "none",
+    "rocm": "AMD Python wheels in the project venv (rocm SDK gfx103X libs)"
+  },
+  "models": [
+    {
+      "file": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+      "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "bytes": 22853663008,
+      "sha256": "55983c5a75a1ab969824077b3bb3de4146e82a9234072b48ad4e8f92ad3fe9f1"
+    },
+    {
+      "file": "LFM2.5-24B-A2B-UD-Q4_K_XL.gguf",
+      "repo": "unsloth/LFM2.5-24B-A2B-GGUF",
+      "sha256": "a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8",
+      "bytes": "not recorded (file deleted in post-campaign cleanup; sha256 verified same day)",
+      "sha_note": "sha256 recorded same day (2026-10-20) by the campaign harness before the file was deleted in a post-campaign disk cleanup"
+    },
+    {
+      "file": "Tiel-Coder-35B-A3B-MTP-UD-Q3_K_XL.gguf",
+      "repo": "peculiar-ragdoll/Tiel-Coder-35B-A3B-GGUF-MTP",
+      "bytes": 17234935648,
+      "sha256": "46b8fbeba6e888c9a101e49cc717baa9bb8dfa0d203ec7b3185288159543ec14"
+    },
+    {
+      "file": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+      "repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "sha256": "a7c5bc715f5ff8e99a3e8901ce7d2b42b402c669bf24f7c5250747633d0f5891",
+      "bytes": 14249047104
+    },
+    {
+      "file": "mtp-gemma-4-26B-A4B-it.gguf (QAT-paired draft, 252 MB)",
+      "repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "sha256": "7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a",
+      "bytes": 251939328
+    },
+    {
+      "file": "MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf (repo draft, 461 MB)",
+      "repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "sha256": "6326fb9f5e487aa8dcdd313a091e3c67724cb2a666ec3b7d2895b5b26d93ed1b",
+      "bytes": 461766816
+    }
+  ],
+  "settings_common": [
+    "--kv-whole",
+    "--conversation-cache-mib 0",
+    "--vram-reserve-mib 1024",
+    "backend hip"
+  ],
+  "settings_extra": {
+    "qwen36": [
+      "--tail-skip 0"
+    ],
+    "lfm25": [
+      "--prompt-batch 2048",
+      "setup-written expert-profile.txt"
+    ],
+    "tiel": [
+      "--threads 8",
+      "setup-written expert-profile.txt"
+    ],
+    "gemma": [
+      "--threads 8",
+      "--draft-model <see models>"
+    ]
+  },
+  "gpu_identity": {
+    "reported_by_tool": "AMD Radeon (generic; no amdgpu product_name sysfs in this kernel)",
+    "verified_externally": "AMD Radeon RX 6700 XT, PCI 1002:73DF, 12272 MiB VRAM, gfx1031",
+    "folder_rename_note": "report folders renamed *-unknown-* -> rx6700xt-5600x; the inner generated names and READMEs are unmodified"
+  },
+  "reproduce": "python tools/strata_bench.py --url http://127.0.0.1:8091 --config <config> --runs 3 [--long --clients 2 for the 64K stages]",
+  "campaign_reference": "Full campaign record (matched probes, llama.cpp controls, quality screens, incidents) kept in the contributor's local campaign notes; the distilled version is in this folder's README.md and PRACTICAL-EVALUATION.md"
+}

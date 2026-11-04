@@ -1,0 +1,50 @@
+{
+  "source_commit": "26e4cb5df7996edfb5ff549a63b82d8581e1e658",
+  "config": {
+    "exe": "<experiment>/upstream/engine-poly/strata-poly",
+    "args": [
+      "--model",
+      "<experiment>/data/models/qwen36-UD-Q3_K_M/Qwen3.6-35B-A3B-UD-Q3_K_M.gguf",
+      "--max-context",
+      "32768",
+      "--expert-profile",
+      "<experiment>/results/qwen36-ud-q3_k_m-reserve1024-ctx32768/out/expert-profile.txt",
+      "--conversation-cache-mib",
+      "0",
+      "--tail-skip",
+      "6",
+      "--kv-whole",
+      "--threads",
+      "8",
+      "--vram-reserve-mib",
+      "1024"
+    ],
+    "cwd": "<experiment>/upstream",
+    "tokenizer": "<experiment>/data/packs/qwen36-ud-q3_k_m/tokenizer",
+    "model_name": "qwen3.6-35b-a3b-ud-q3_k_m",
+    "display_name": "Qwen3.6-35B-A3B UD-Q3_K_M",
+    "reasoning_budget_tokens": 512,
+    "benchmark_mtp": 0,
+    "host": "127.0.0.1",
+    "port": 8080,
+    "lib_dirs": [
+      "<experiment>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_devel/lib",
+      "<experiment>/upstream/.venv/lib/python3.13/site-packages/_rocm_sdk_libraries_gfx103X_all/lib"
+    ]
+  },
+  "engine_sha256": "36bd496dbeb88b9715a4d88480929981d421eb23ce23d8172a8cd358688c9a37",
+  "weights": [
+    {
+      "bytes": 17104402720,
+      "sha256": "8966dd0cd8c543c4228490a2a8b0e0814fc4f1e6a8e199ceed4de6754ae7b8e1",
+      "filename": "Qwen3.6-35B-A3B-UD-Q3_K_M.gguf"
+    }
+  ],
+  "weight_sha256": null,
+  "weight_filename": null,
+  "weight_bytes": null,
+  "historical_weight_sha256": null,
+  "byte_identical_to_historical_weights": null,
+  "draft_note": "benchmark_mtp=0 is an adapter sentinel, not evidence that engine speculation is disabled.",
+  "scope": "Official tools/strata_bench.py only; no custom quality or retrieval results."
+}

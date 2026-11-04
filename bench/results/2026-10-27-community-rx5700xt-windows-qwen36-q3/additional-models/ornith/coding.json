@@ -1,0 +1,320 @@
+{
+  "prompt": "Return only JSON with exactly the key \"code\", a string containing one Python function named merge_intervals(intervals). Input is a list of [start,end] integer pairs with start<=end. Return sorted merged intervals as a list of lists. Merge overlaps AND touching endpoints. Handle empty input, nested/duplicate intervals, negative integers and point intervals. Do not mutate input. Use sorted(intervals), no imports, no decorators, no type annotations, no lambda; calls may use only sorted, list, len, min, max, range, enumerate, tuple and list append/copy. No explanatory text.",
+  "response": {
+    "first": 1.1415832000784576,
+    "total": 5.251456100028008,
+    "text": "{\"code\": \"def merge_intervals(intervals):\\n    if not intervals:\\n        return []\\n    sorted_intervals = sorted(intervals)\\n    merged = [list(sorted_intervals[0])]\\n    for i in range(1, len(sorted_intervals)):\\n        current = sorted_intervals[i]\\n        last = merged[-1]\\n        if current[0] <= last[1]:\\n            last[1] = max(last[1], current[1])\\n        else:\\n            merged.append(list(current))\\n    return merged\"}",
+    "usage": {
+      "prompt_tokens": 133,
+      "completion_tokens": 120,
+      "total_tokens": 253,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 133,
+      "prompt_ms": 1131.4,
+      "prompt_per_token_ms": 8.507,
+      "prompt_per_second": 117.6,
+      "predicted_n": 120,
+      "predicted_ms": 4110.3,
+      "predicted_per_token_ms": 34.253,
+      "predicted_per_second": 29.2,
+      "draft_n": 58,
+      "draft_n_accepted": 56
+    },
+    "err": null,
+    "pieces": 119
+  },
+  "metrics": {
+    "ok": true,
+    "err": null,
+    "ttft_s": 1.142,
+    "total_s": 5.251,
+    "prompt_tokens": 133,
+    "reused_tokens": 0,
+    "read_tokens": 133,
+    "generated_tokens": 120,
+    "prompt_tps": 117.6,
+    "prompt_tps_source": "engine",
+    "decode_tps": 29.2,
+    "decode_tps_source": "engine",
+    "prompt_ms": 1131.4,
+    "decode_ms": 4110.3,
+    "drafts_offered": 58,
+    "drafts_accepted": 56
+  },
+  "primary_grade": {
+    "status": "tested",
+    "passed": true,
+    "cases": [
+      {
+        "input": [],
+        "expected": [],
+        "actual": [],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            1,
+            3
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            6
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            15,
+            18
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            5,
+            7
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            4
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            4
+          ],
+          [
+            5,
+            7
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            4
+          ],
+          [
+            5,
+            7
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            1,
+            10
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            4,
+            8
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            10
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            10
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            -5,
+            -1
+          ],
+          [
+            -3,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "expected": [
+          [
+            -5,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "actual": [
+          [
+            -5,
+            0
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            2,
+            2
+          ],
+          [
+            2,
+            2
+          ]
+        ],
+        "expected": [
+          [
+            2,
+            2
+          ]
+        ],
+        "actual": [
+          [
+            2,
+            2
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            9,
+            10
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            9,
+            10
+          ]
+        ],
+        "actual": [
+          [
+            1,
+            1
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            9,
+            10
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      },
+      {
+        "input": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        "expected": [
+          [
+            0,
+            3
+          ]
+        ],
+        "actual": [
+          [
+            0,
+            3
+          ]
+        ],
+        "input_preserved": true,
+        "passed": true
+      }
+    ]
+  }
+}

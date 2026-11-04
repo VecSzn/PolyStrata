@@ -1,0 +1,8 @@
+[strata] 2026-10-28 20:50:06 engine started: <STRATA>\engine-poly\strata-poly.exe --serve --model <DATA>\models\qwen36-UD-Q3_K_M\Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --max-context 131072 --expert-profile <DATA>\packs\qwen36-ud-q3_k_m\expert-profile.txt --conversation-cache-mib auto --tail-skip 6 --threads 8 --kv q8_0 --vram-reserve-mib 512 --prompt-cache 16 --prompt-cache-every 1024
+strata-poly: q8_0 KV cache: 544 bytes a row
+strata-poly: STRATA_FATTN: prompt attention through llama.cpp's flash-attention kernel
+strata-poly: STRATA_FDEC: decode attention through the tensor-core decode kernel
+strata-poly: loaded in 2.0 s; 2473 of 10496 routed experts in VRAM (3.2 GiB), 8 CPU threads
+strata-poly: tail skip 6: an expert outside VRAM that every token of a window ranks at place 7 or later among its experts is left out; STRATA_ROUTE_TAIL_SKIP=0 turns it off
+strata-poly: conversation cache sized from the free RAM: 3072 MiB for up to 4 parked conversations (--conversation-cache-mib N sets it, 0 turns it off)
+strata-poly: conversation cache: parked 111367 tokens in 247.5 ms; parked=1 bytes=2386790208 evictions=0

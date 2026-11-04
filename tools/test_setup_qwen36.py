@@ -103,7 +103,7 @@ class InstallOwnPath(unittest.TestCase):
             self.calls.append(("config", path.name))
 
         patches = [mock.patch.object(setup, "download", lambda url, dst, what=None: self.calls.append(("get", url, dst))),
-                   mock.patch.object(setup, "verify_sha256", lambda s, size, sha: self.calls.append(("sha", s.name))),
+                   mock.patch.object(setup, "verify_sha256", lambda s, size, sha, own=False: self.calls.append(("sha", s.name))),
                    mock.patch.object(setup, "free_gb", lambda p: 500.0),
                    mock.patch.object(setup, "pip_install", lambda *a, **k: None),
                    mock.patch.object(setup, "engine_step", engine_step),

@@ -30,7 +30,7 @@ class StartGpusAmd(unittest.TestCase):
 
     def test_a_card_that_cannot_be_used_is_named(self):
         with self.assertRaises(SystemExit):
-            self.run_start_gpus("1,0", [amd(0), amd(1, "gfx1010")])
+            self.run_start_gpus("1,0", [amd(0), amd(1, "gfx1012")])   # RX 5500 series: not supported
 
     def test_nothing_named_is_none(self):
         self.assertIsNone(self.run_start_gpus("", [amd(0)]))

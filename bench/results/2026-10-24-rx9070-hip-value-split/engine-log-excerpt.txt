@@ -1,0 +1,4 @@
+server arguments: see provenance.json (credentials omitted)
+strata-poly: q8_0 KV cache: 544 bytes a row
+strata-poly: loaded in 1.2 s; 4597 of 10240 routed experts in VRAM (8.2 GiB), 6 CPU threads
+strata-poly: STRATA_HIP_VALUE_SPLIT: split value reduction on supported decode calls from 12,288 keys
