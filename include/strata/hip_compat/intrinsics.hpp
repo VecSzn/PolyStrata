@@ -27,8 +27,9 @@ __device__ __forceinline__ int dp4a(int a, int b, int c) {
     // RDNA2 has no sudot4 (that is gfx11+), but it has the plain signed v_dot4_i32_i8 (dot1-insts): the same
     // signed x signed byte products accumulated modulo 2^32, no clamp.
     return __builtin_amdgcn_sdot4(a, b, c, false);
-#elif defined(__gfx1012__) && !defined(STRATA_GFX1012_PORTABLE_DOT)
-    // RDNA1 has no native signed dot4. SDWA selects and sign-extends byte
+#elif (defined(__gfx1010__) || defined(__gfx1012__)) && !defined(STRATA_GFX1012_PORTABLE_DOT)
+    // RDNA1 has no native signed dot4 (gfx1010's target lacks dot1-insts: __builtin_amdgcn_sdot4 does not compile
+    // for it). SDWA selects and sign-extends byte
     // operands directly, avoiding separate shift/mask/sign-extension work.
     // Adapted from pinned llama.cpp ggml-cuda/common.cuh (MIT; see
     // third_party/ggml/LICENSE), same modulo-2^32 accumulation contract.

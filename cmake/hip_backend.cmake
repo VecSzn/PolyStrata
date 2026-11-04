@@ -96,7 +96,7 @@ add_library(strata_hip_runtime INTERFACE)
 target_include_directories(strata_hip_runtime BEFORE INTERFACE
   "${STRATA_HIP_COMPAT_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(strata_hip_runtime INTERFACE STRATA_USE_HIP=1 "STRATA_HIP_ARCHS=\"${STRATA_HIP_ARCHS}\"")
-option(STRATA_GFX1012_PORTABLE_DOT "Use the portable signed-byte dot control on gfx1012" OFF)
+option(STRATA_GFX1012_PORTABLE_DOT "Use the portable signed-byte dot control on gfx1010 and gfx1012" OFF)
 if(STRATA_GFX1012_PORTABLE_DOT)
   target_compile_definitions(strata_hip_runtime INTERFACE STRATA_GFX1012_PORTABLE_DOT=1)
 endif()
