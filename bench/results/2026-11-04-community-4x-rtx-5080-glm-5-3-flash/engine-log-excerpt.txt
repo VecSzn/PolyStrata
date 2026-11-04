@@ -1,0 +1,6 @@
+[strata] 2026-11-04 15:31:13 engine started: /home/otterai/src/PolyStrata-main/build/strata-poly --serve --model /home/otterai/models-incoming/neuralll/GLM-5.3-Flash-GSQ-RCO-3.0bit-Q4Kattn-GGUF/GLM-5.3-Flash-GSQ-RCO-3.0bit-q4kattn.gguf --max-context 32768 --draft-model /home/otterai/poly-glm/mtp/draft-block.gguf --expert-profile /home/otterai/poly-glm/main-arms/m1.profile --skip-weight 0.095 --layer-split auto
+strata-poly: layers 0 to 11 on card 0: 938 of 2592 routed experts in VRAM (9.4 GiB)
+strata-poly: layers 12 to 22 on card 1: 1263 of 3168 routed experts in VRAM (9.7 GiB)
+strata-poly: layers 23 to 33 on card 2: 1260 of 3168 routed experts in VRAM (9.7 GiB)
+strata-poly: layers 34 to 44 on card 3: 1191 of 3456 routed experts in VRAM (9.2 GiB)
+strata-poly: loaded in 4.5 s; 4652 of 12384 routed experts in VRAM (38.0 GiB), 24 CPU threads
