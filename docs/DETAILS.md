@@ -1153,6 +1153,7 @@ it decodes when the conversation never left (`tools/parking_test.py`). FP16,
 INT8, Q4_0 and identity-layout K8V4 snapshots are supported; the K8V4 draft ring
 remains INT8, as in upstream. Windows/HIP and multi-GPU runtime coverage must be
 reported separately from Linux/CUDA evidence.
+Each parked conversation's blob is written to a temporary file between requests and its heap freed; a later restore maps that file instead of reading from RAM. Set `STRATA_NO_SPILL=1` on the engine command line or in the config's `"env"` (any nonzero value) to keep every blob on the heap (parking still works, but RAM use grows accordingly).
 
 The web page's Monitor tab has a **Conversation cache** card (0.1.39, #596): the parked conversations against the
 slots and the RAM budget, how many were parked, restored and evicted, and the last switch (read from the engine's
