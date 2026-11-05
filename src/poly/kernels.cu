@@ -2994,7 +2994,8 @@ void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int6
                 c = std::min(rows - first, hip_split_attend::kMaxRows);
                 const int keys = int(at ? room : pos + first + c);
                 hip_split_attend::run(q, kq8.codes, kq8.scales, vq8.codes, vq8.scales, score, out, n_head, kv_heads, (long long) pos, first, c,
-                                      scale, (keys + hip_split_attend::kKeys - 1) / hip_split_attend::kKeys, at, (hipStream_t) cs(stream));
+                                      scale, (keys + hip_split_attend::kKeys - 1) / hip_split_attend::kKeys, at, (hipStream_t) cs(stream),
+                                      hip_split_attend::mode(std::getenv("STRATA_HIP_SPLIT_ATTEND")));
             }
             return;
         }
