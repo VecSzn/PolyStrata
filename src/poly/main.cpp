@@ -1054,6 +1054,10 @@ void usage() {
                  "                         thirty-second of the card, 256 to 768, or a sixteenth, 512 to 1024,\n"
                  "                         when the PC's free RAM is within 4 GiB of the model's files, and then\n"
                  "                         kept whole; else half of it after the first request)\n"
+                 "  --vram-pool            claim the card's VRAM once at load (what is free but for the reserve above,\n"
+                 "                         which is then the margin left outside), keep it for the whole run and move\n"
+                 "                         it between the expert cache and the attention caches as the context grows\n"
+                 "                         and shrinks, in 2 MiB pieces; nothing is given back to the card (needs VMM)\n"
                  "  --layer-split S        the model's layers across the CUDA devices this process sees, in their\n"
                  "                         order: S is auto (by each card's free VRAM) or the first layer of each\n"
                  "                         later card, as 20 or 20,30 (default: the first card alone)\n"
@@ -1179,6 +1183,7 @@ int main(int argc, char** argv) {
         else if (a == "--max-context") o.max_context = std::atoi(val());
         else if (a == "--threads") o.threads = std::atoi(val());
         else if (a == "--vram-reserve-mib") o.vram_reserve_mib = std::atoi(val());
+        else if (a == "--vram-pool") o.vram_pool = true;
         else if (a == "--expert-profile") o.profile = val();
         else if (a == "--no-gpu-experts") o.gpu_experts = false;
         else if (a == "--any-node") o.stay_near = false;

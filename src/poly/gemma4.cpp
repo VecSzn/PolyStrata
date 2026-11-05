@@ -395,8 +395,13 @@ void Gemma4::twin_cover(size_t halves) {
     const size_t more = (halves - twin_mapped_) * sizeof(uint16_t);
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
-    const size_t quarter = (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
-    size_t cut = free_b < more + quarter ? more + quarter - free_b : 0;
+    size_t quarter = (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
+    if (pool_on_) {   // --vram-pool: the pool is the VRAM there is to give, and both twins' maps come out of it
+        free_b = vpool_bytes();
+        quarter = 0;
+    }
+    const size_t need = pool_on_ ? (twin_v_.base ? 2 * more : more) + 2 * pg_ : more;   // (a handle of rounding a side)
+    size_t cut = free_b < need + quarter ? need + quarter - free_b : 0;
     if (cut) shrink_cache(cut);
     vmm_map(twin_k_, halves * sizeof(uint16_t), SIZE_MAX, "the fp16 twin of the attention caches");
     if (twin_v_.base)   // --kv int8k leaves the values in the fp16 cache: no twin of their own

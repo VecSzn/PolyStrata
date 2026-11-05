@@ -109,7 +109,8 @@ void unlock_resident(void* p, uint64_t bytes) {
         VirtualUnlock((uint8_t*) p + off, (SIZE_T) (bytes - off < chunk ? bytes - off : chunk));
 }
 
-bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why) {
+static bool gpu_memory_budget(const void* luid, DXGI_MEMORY_SEGMENT_GROUP segment, uint64_t& budget, uint64_t& usage,
+                              std::string& why) {
     budget = usage = 0;
     // dxgi.dll is loaded when asked, not linked: a start that never needs this keeps the imports it had
     HMODULE dxgi = LoadLibraryA("dxgi.dll");
@@ -132,7 +133,7 @@ bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usag
             IDXGIAdapter3* a3 = nullptr;
             DXGI_QUERY_VIDEO_MEMORY_INFO info{};
             if (SUCCEEDED(a->QueryInterface(__uuidof(IDXGIAdapter3), (void**) &a3)) && a3 != nullptr &&
-                SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &info))) {
+                SUCCEEDED(a3->QueryVideoMemoryInfo(0, segment, &info))) {
                 budget = info.Budget;
                 usage = info.CurrentUsage;
                 ok = budget > 0;
@@ -149,6 +150,14 @@ bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usag
     factory->Release();
     FreeLibrary(dxgi);
     return ok;
+}
+
+bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why) {
+    return gpu_memory_budget(luid, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, budget, usage, why);
+}
+
+bool gpu_local_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why) {
+    return gpu_memory_budget(luid, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, budget, usage, why);
 }
 
 uint64_t total_physical_memory() {
@@ -188,6 +197,12 @@ void unlock_resident(void* p, uint64_t bytes) {
 }
 
 bool gpu_shared_memory_budget(const void*, uint64_t& budget, uint64_t& usage, std::string& why) {
+    budget = usage = 0;
+    why = "DXGI is Windows-only";
+    return false;
+}
+
+bool gpu_local_memory_budget(const void*, uint64_t& budget, uint64_t& usage, std::string& why) {
     budget = usage = 0;
     why = "DXGI is Windows-only";
     return false;

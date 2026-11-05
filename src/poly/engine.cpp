@@ -14,6 +14,7 @@
 #include "runtime.hpp"
 #include "strata/poly/kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
+#include "strata/platform/memory.hpp"
 
 #include "ggml.h"
 
@@ -542,6 +543,8 @@ Engine::~Engine() {
     }
     vmm_free(arena_);
     vmm_free(stage_map_);
+    for (unsigned long long h : vpool_) cuMemRelease(h);   // the pool goes back to the card with the engine
+    vpool_.clear();
     for (void* p : host_allocs_) cudaFreeHost(p);
     for (void* e : {ev_stage_[0], ev_stage_[1], ev_ahead_, ev_free_, ev_in_[0], ev_in_[1], ev_out_[0], ev_out_[1], ev_hr_})
         if (e) cudaEventDestroy((cudaEvent_t) e);
@@ -643,14 +646,75 @@ void Engine::mind_memory() {
 
 void Engine::vmm_reserve(Mapped& m, size_t bytes) {
     CUdeviceptr p = 0;
-    m.reserved = up_to(std::max<size_t>(bytes, 1), grain_);
+    m.reserved = up_to(std::max<size_t>(bytes, 1), pool_on_ ? pg_ : grain_);   // a whole number of pool handles
     cu_ck(cuMemAddressReserve(&p, m.reserved, 0, 0, 0), "reserving addresses for VRAM");
     m.base = p;
 }
 
+// The pool: `bytes` of VRAM as handles of pg_ bytes, kept until the engine ends.  Creating a handle takes its VRAM
+// (measured on Windows HIP: the card's free figure drops at the create, before anything is mapped), so what is
+// claimed here is the engine's from now on.  The card may have less: the pool is what it could give.
+void Engine::vpool_claim(size_t bytes) {
+    CUmemAllocationProp prop = {};
+    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    prop.location.id = device_;
+    vpool_.reserve(vpool_.size() + bytes / pg_ + 1);
+    for (size_t got = 0; got + pg_ <= bytes; got += pg_) {
+        CUmemGenericAllocationHandle h = 0;
+        if (cuMemCreate(&h, pg_, &prop, 0) != CUDA_SUCCESS) {
+            (void) cudaGetLastError();
+            break;
+        }
+        vpool_.push_back(h);
+    }
+}
+
+// The pool sized by what the OS lets this process have, where the OS says (Windows: the video memory budget).  The
+// budget is not a constant: it fell from 7,383 to 6,975 MiB on an 8 GB card while this engine claimed 3.6 GiB, and a
+// process that is over it has memory moved out to system RAM (150 MiB over: 2.4 GB moved, decode at 6 tokens/s).  So
+// handles are created a step at a time and the budget and the usage are read again before each step, until what is
+// left under the budget is `margin`: the room for what the engine allocates after the pool (recorded launches, library
+// work space) and the desktop's growth.  False when there is no budget to read (elsewhere than Windows): the caller
+// sizes the pool from the card's free VRAM.
+bool Engine::vpool_claim_to_budget(size_t margin, size_t limit, size_t& claimed) {
+    claimed = 0;
+    cudaDeviceProp p{};
+    uint64_t budget = 0, usage = 0;
+    std::string why;
+    if (cudaGetDeviceProperties(&p, device_) != cudaSuccess) {
+        (void) cudaGetLastError();
+        return false;
+    }
+    if (!strata::platform::gpu_local_memory_budget(p.luid, budget, usage, why)) return false;
+    const size_t step = size_t(256) << 20;
+    for (;;) {
+        if (!strata::platform::gpu_local_memory_budget(p.luid, budget, usage, why)) break;
+        const uint64_t keep = (uint64_t) margin + pg_;
+        if (budget <= usage + keep || vpool_bytes() + pg_ > limit) break;   // at the budget, or all the model can use
+        const size_t room = std::min<uint64_t>({budget - usage - margin, step, limit - vpool_bytes()});
+        const size_t before = vpool_.size();
+        vpool_claim(room);
+        claimed += (vpool_.size() - before) * pg_;
+        if (vpool_.size() - before < room / pg_) break;   // the card had no more
+    }
+    return true;
+}
+
+// What the attention caches take for one step of their growth (cover() maps kKvGrow rows at a time, in handles of the
+// pool's size): the room the pool keeps for the next one.
+size_t Engine::kv_step_bytes() const {
+    size_t b = 0;
+    for (const Kv& k : kv_) b += up_to((size_t) ((kKvGrow + k.per - 1) / k.per) * k.bytes, pg_);
+    return b;
+}
+
 // VRAM for the first `bytes` of m, in pieces of at most `piece` bytes.  Throws std::runtime_error.
 void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
-    bytes = std::min(up_to(bytes, grain_), m.reserved);
+    // With the pool a piece is one of its handles and comes from it, never from the card; a map it cannot serve
+    // throws as a card that has no more VRAM does
+    if (pool_on_) piece = pg_;
+    bytes = std::min(up_to(bytes, pool_on_ ? pg_ : grain_), m.reserved);
     CUmemAllocationProp prop = {};
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -662,25 +726,44 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
     while (m.mapped < bytes) {
         const size_t n = std::min(bytes - m.mapped, piece);
         CUmemGenericAllocationHandle h = 0;
-        if (cuMemCreate(&h, n, &prop, 0) != CUDA_SUCCESS)
+        // A handle of the pool when it has one.  Before fill_expert_cache() claims the pool, or in a model that has no
+        // expert cache to claim it, a map with the pool empty still creates its handle, of the pool's size, and the
+        // handle joins the pool when it is unmapped; once the pool is claimed an empty one means the card has no more.
+        if (pool_on_ && !vpool_.empty()) {
+            h = vpool_.back();
+            vpool_.pop_back();
+        } else if (pool_on_ && pool_claimed_) {
             throw std::runtime_error("no VRAM for " + std::string(what) + " (" + std::to_string(n >> 20) +
                                      " MiB more)");
+        } else if (cuMemCreate(&h, n, &prop, 0) != CUDA_SUCCESS) {
+            throw std::runtime_error("no VRAM for " + std::string(what) + " (" + std::to_string(n >> 20) +
+                                     " MiB more)");
+        }
         const CUdeviceptr at = m.base + m.mapped;
         const CUresult mapped = cuMemMap(at, n, 0, h, 0);
-        if (mapped != CUDA_SUCCESS) cuMemRelease(h);
+        if (mapped != CUDA_SUCCESS) {
+            if (pool_on_) vpool_.push_back(h);
+            else cuMemRelease(h);
+        }
         cu_ck(mapped, "mapping VRAM");
         m.pieces.emplace_back(h, n);
         m.mapped += n;
         const CUresult acc = cuMemSetAccess(at, n, &access, 1);
         if (acc != CUDA_SUCCESS) {   // HIP hands out the physical pages here, not at create: the card may not have
             cuMemUnmap(at, n);       // them even though the addresses do.  Leave m as it was and say no.
-            cuMemRelease(h);
+            if (pool_on_) vpool_.push_back(h);
+            else cuMemRelease(h);
             m.pieces.pop_back();
             m.mapped -= n;
             (void) cudaGetLastError();   // HIP's failed SetAccess leaves a sticky error: do not let it escape with the throw
             throw std::runtime_error("no VRAM for " + std::string(what) + " (" + std::to_string(n >> 20) +
                                      " MiB more)");
         }
+        // A handle the pool kept holds what its last map left in it, expert bytes or old rows, where a created one
+        // comes zeroed from the system.  Rows nothing has written yet are read by the kernels' tiles (the causal mask
+        // does not stop a NaN from them), so a piece is zeroed as it is mapped.  Not the staging buffer: its uploads
+        // run on another stream, and everything it holds is written before it is read.
+        if (pool_on_ && &m != &stage_map_) zero_vram((void*) at, n);
     }
 }
 
@@ -692,8 +775,10 @@ void Engine::vmm_unmap(Mapped& m, size_t bytes) {
         m.mapped -= n;
         m.pieces.pop_back();
         cu_ck(cuMemUnmap(m.base + m.mapped, n), "unmapping VRAM");
-        cu_ck(cuMemRelease(h), "unmapping VRAM");
+        if (pool_on_) vpool_.push_back(h);   // kept: the next map of any region takes it
+        else cu_ck(cuMemRelease(h), "unmapping VRAM");
     }
+    if (pool_on_) return;   // nothing went back to the card, so there are no addresses to free for it either
 #ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
     // On ROCm the released pieces stay the process's while their addresses are reserved (an RX 9070 XT: 320 MiB
     // unmapped and released, 32 MiB more free; the addresses freed, all of it).  The kept pieces leave their
@@ -887,11 +972,16 @@ void Engine::cover(int64_t end) {
     const auto size = [rows](const Kv& k) { return (size_t) ((rows + k.per - 1) / k.per) * k.bytes; };
     size_t more = 0, held = arena_.mapped + other_rows();
     for (const Kv& k : kv_) {
-        const size_t want = std::min(up_to(size(k), grain_), k.reserved);
+        const size_t want = std::min(up_to(size(k), pool_on_ ? pg_ : grain_), k.reserved);
         if (want > k.mapped) more += want - k.mapped;   // trim_card_kv() leaves a piece it cuts through
         held += k.mapped;
     }
-    if (exp_) {
+    if (exp_ && pool_on_) {
+        // What the rows need beyond what the pool holds comes out of the expert cache, which gives its pieces to the
+        // pool (shrink_cache()); nothing is asked of the card.  With the cache gone and the pool still short, the
+        // maps below throw: the context does not fit the VRAM this engine has.
+        if (more > vpool_bytes()) shrink_cache(more - vpool_bytes());
+    } else if (exp_) {
         size_t free_b = 0, total_b = 0;
         ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
         const size_t quarter = (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
@@ -1363,8 +1453,18 @@ void Engine::fill_expert_cache() {
     // 256 MiB at least, whatever was asked: the launches recorded later take theirs out of the reserve (mind_vram())
     reserve_mib_ = opt_.vram_reserve_mib >= 0 ? std::max(opt_.vram_reserve_mib, 256)
                                              : default_reserve_mib(total_b, ram_tight_);
-    const size_t reserve = size_t(reserve_mib_) << 20;
-    if (free_b <= reserve) return;
+    size_t reserve = size_t(reserve_mib_) << 20;
+    // The first time the pool claims what the card has but the margin (the reserve), for the whole run, and no more
+    // than the model can use (below, where the experts' bytes are known): from then on the cache and the rows share it.
+    // A later call (resize_cache()) divides what the pool holds again.
+    const bool claim_later = pool_on_ && !pool_claimed_;
+    // the staging buffer is mapped later in load(), from the pool: its narrow size stays out of the cache
+    const size_t stage_slack = (size_t(opt_.stage_mib > 0 ? opt_.stage_mib : 128) + 8) << 20;
+    if (pool_on_ && !claim_later) {
+        free_b = vpool_bytes();
+        reserve = stage_map_.base ? 0 : stage_slack;
+    }
+    if (!claim_later && free_b <= reserve) return;
 
     struct Cand {
         int il, e;
@@ -1402,6 +1502,26 @@ void Engine::fill_expert_cache() {
                      [](const Cand& a, const Cand& b) { return a.value != b.value ? a.value > b.value : a.e < b.e; });
 
     n_trade_ = (int) sizes.size();
+    if (claim_later) {
+        // What the engine can use is every expert's slot, the attention caches' whole address range and 512 MiB for the
+        // staging buffer and the rounding: a card that holds more than that keeps the rest for its other programs.
+        size_t kv_total = 0;
+        for (const Kv& k : kv_) kv_total += k.reserved;
+        for (const Seq& q : seqs_)
+            for (const Kv& k : q.kv) kv_total += k.reserved;
+        const size_t limit = all + 256 + kv_total + (size_t(512) << 20);
+        size_t by_budget = 0;
+        const bool budgeted = vpool_claim_to_budget(reserve, limit, by_budget);
+        if (!budgeted) vpool_claim(std::min(free_b > reserve ? free_b - reserve : (size_t) 0, limit));
+        pool_claimed_ = vpool_bytes() > 0;   // a card with nothing to spare keeps the maps that create their handles
+        std::fprintf(stderr, "strata-poly: VRAM pool: %zu MiB claimed for the run (the card had %zu MiB free; margin left "
+                             "outside it %d MiB, %s; the most the model can use: %zu MiB)\n",
+                     vpool_bytes() >> 20, free_b >> 20, reserve_mib_,
+                     budgeted ? "under the OS's budget for this process" : "of the card's free VRAM", limit >> 20);
+        free_b = vpool_bytes();
+        reserve = stage_map_.base ? 0 : stage_slack;
+        if (free_b <= reserve) return;
+    }
     // sized again (resize_cache()), it is no larger than load() made it, or than its addresses with VMM
     const size_t most = vmm_ ? std::min(all, total_b) : full_bytes_ > 0 ? full_bytes_ : all;
     size_t arena = std::min({all, free_b - reserve, arena_.base ? arena_.reserved - 256 : most});
@@ -1527,6 +1647,15 @@ bool Engine::mind_card_vram() {
     // As shrink_cache(): a frozen answer's cache is the one its first token saw.
     if (freeze_experts_) return false;
     OnCard here(device_, split_);
+    if (pool_on_) {
+        // The pool is the cache's and the rows': what the rows gave back (trim_kv()) goes to the experts the cache
+        // lacks that are used most.  Nothing outside the pool is looked at: the margin stays where it was left.
+        if (minds_++ == 0) return false;   // nothing is recorded before the first request
+        // Two steps of the rows' growth stay in it (kv_step_bytes()), so that an answer that goes on does not take
+        // experts out again
+        const size_t have = vpool_bytes(), slack = 2 * kv_step_bytes();
+        return have >= slack + (16u << 20) && grow_cache(have - slack) > 0;
+    }
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
     const int64_t free = (int64_t) (free_b >> 20);   // this card's
@@ -1554,10 +1683,11 @@ void Engine::widen_stage() {
     if (stage_lent_ || stage_wide_ <= stage_narrow_) return;
     if (up_) ck(cudaStreamSynchronize(cs(up_)), "the expert staging buffer");
     ck(cudaStreamSynchronize(cs(st_)), "the expert staging buffer");
-    const size_t want = up_to(stage_wide_ + 256 + kTail, grain_) - stage_map_.mapped;
+    const size_t want = up_to(stage_wide_ + 256 + kTail, pool_on_ ? pg_ : grain_) - stage_map_.mapped;
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
-    const size_t quarter = (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
+    if (pool_on_) free_b = vpool_bytes();   // what the card has is the pool's
+    const size_t quarter = pool_on_ ? 0 : (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
     stage_cut_ = 0;
     if (exp_ && free_b < want + quarter) {
         const size_t had = arena_.mapped;
@@ -2040,6 +2170,10 @@ void Engine::load(const Options& o) {
         vmm_ = cuMemGetAllocationGranularity(&grain_, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM) == CUDA_SUCCESS &&
                grain_ > 0;
     }
+    pool_on_ = opt_.vram_pool && vmm_ && opt_.kv_grow && !split_;
+    if (opt_.vram_pool && !pool_on_)
+        std::fprintf(stderr, "strata-poly: --vram-pool needs VMM, growing attention caches and one card: off\n");
+    if (pool_on_) pg_ = up_to(size_t(2) << 20, grain_);
 
     // the token table stays in the file, a row a token, and embed() reads a row in whatever type it has
     const TensorInfo* te = gg_->find("token_embd.weight");
@@ -2402,6 +2536,11 @@ void Engine::alloc() {
             stage_wide_ = std::max(stage_bytes_, std::min((size_t) read_mib << 20, (size_t) n_expert_ * one_expert));
         if (stage_wide_ > stage_narrow_) {
             vmm_reserve(stage_map_, stage_wide_ + 256 + kTail);
+            // with the pool the buffer comes out of it, and out of the expert cache when the pool lacks the room
+            if (pool_on_ && pool_claimed_ && exp_) {
+                const size_t need = up_to(stage_narrow_ + 256 + kTail, pg_);
+                if (need > vpool_bytes()) shrink_cache(need - vpool_bytes());
+            }
             vmm_map(stage_map_, stage_narrow_ + 256 + kTail, SIZE_MAX, "the expert staging buffer");
             stage_ = (uint8_t*) stage_map_.base;
         } else {

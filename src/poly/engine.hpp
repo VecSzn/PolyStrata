@@ -51,6 +51,9 @@ struct Options {
     int max_context = 8192;
     int threads = 0;              ///< 0: the CPUs this process may use
     int vram_reserve_mib = -1;    ///< left free after the expert cache is filled; below 0: by the card's size
+    bool vram_pool = false;       ///< one pool of VRAM claimed at load, kept for the whole run: the expert cache and the
+                                  ///< attention caches trade pieces of it and nothing is given back to the card; the
+                                  ///< reserve above is then the margin left outside it (needs VMM)
     std::string profile;          ///< expert use counts; orders the expert cache, and save_profile() adds to it
     bool gpu_experts = true;
     bool dump = false;            ///< print a checksum of every stage, for comparing against llama.cpp
@@ -563,6 +566,11 @@ protected:
     void vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what);
     void vmm_unmap(Mapped& m, size_t bytes);
     void vmm_free(Mapped& m);
+    /// The pool (Options::vram_pool): handles of pg_ bytes, claimed once, that the maps take from and the unmaps give to.
+    void vpool_claim(size_t bytes);
+    bool vpool_claim_to_budget(size_t margin, size_t limit, size_t& claimed);
+    size_t vpool_bytes() const { return vpool_.size() * pg_; }
+    size_t kv_step_bytes() const;
     void shrink_cache(size_t bytes);
     int grow_cache(size_t bytes, bool later = false);
     void fill_now();
@@ -660,6 +668,10 @@ protected:
     size_t exp_at_ = 0;
     Mapped arena_;               ///< its VRAM, when the card maps VRAM a piece at a time
     bool vmm_ = false;           ///< it does; without that every cache is as large as it can get from the start
+    bool pool_on_ = false;       ///< Options::vram_pool, with VMM
+    bool pool_claimed_ = false;  ///< fill_expert_cache() has claimed the pool
+    size_t pg_ = 0;              ///< the pool's handle size
+    std::vector<unsigned long long> vpool_;   ///< the pool's handles that are not mapped
     int device_ = 0;
     size_t grain_ = 0;           ///< what the card maps VRAM in
     std::vector<Kv> kv_;         ///< the attention caches that grow with the sequence
