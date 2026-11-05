@@ -949,6 +949,60 @@ keeps the old path on HIP. This new option is a HIP value-reduction kernel; it
 does not replace `STRATA_FDEC` and makes no claim to the general split-key
 algorithm itself.
 
+## Opt-in split-key decode attention in strata-poly (wave32 HIP)
+
+`STRATA_HIP_SPLIT_ATTEND=1` (or `=2`) replaces the three decode attention
+kernels (scores, softmax, values), which walk the whole context in 16 to 32
+blocks, with one kernel that splits the keys into blocks of 512, keeps a running
+softmax per block and joins the blocks afterwards. It is the fuller version of
+the idea behind `STRATA_HIP_VALUE_SPLIT`: the keys are split in the score phase
+too, so the card has enough blocks to read the cache at its memory speed.
+
+It applies only to `attend()` with head dimension 256, eight query heads per KV
+head, a Q8_0 key and value cache, at least 4,096 keys, no sliding window, ring
+buffer, sinks or whole-context attention, and a card with 32-lane waves. Up to
+four tokens go in one launch (a decode step with MTP drafts). It needs room for
+its partial sums in the existing score scratch (the engine passes its size as
+`part_floats`); where that is short, or any condition
+fails, the old kernels run unchanged. Only the values `1` and `2` enable it;
+unset, `0` and other values keep the default path, byte-identical to before.
+Set it before starting the engine: a captured HIP graph keeps the path chosen
+at capture time. It allocates no VRAM.
+
+* `=1` reads the queries as FP32, as the old kernels do. Against an FP64
+  reference its error is about 1e-8 on outputs of 0.005 to 0.03, the same size
+  as the old kernels' (8e-9).
+* `=2` also quantizes each query to int8 in blocks of 32 values and computes
+  the scores with integer dot products (`dp4a`; on gfx1010 and gfx1012 the
+  same SDWA sequence the other kernels use). Its error against FP64 is
+  1.2e-5 to 5.7e-5 on the same outputs, about 0.2% of the largest value. That
+  is a different rounding of the query, not a reordering: judge it as you
+  would a lower-precision attention. `=1` is the choice when exactness matters.
+
+Measured on an RX 5700 XT (gfx1010, 8 GB), Windows, `strata-poly` with
+Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL, Q8_0 KV, MTP on. A microbenchmark of
+`attend()` alone at 110K keys: one token 2.34 ms with the old kernels, 1.62 with
+`STRATA_HIP_VALUE_SPLIT=1`, 1.05 with `=1` and 0.91 with `=2`; four tokens 8.54,
+8.56, 3.42 and 2.06 ms (2.5x and 4.1x faster than the old kernels). At 8K keys
+the gain is 1.3x to 1.9x, below 4,096 keys the old kernels run. On a replay of a
+recorded agentic session (eight requests at 90K to 112K tokens of context, the
+same each time), decode went from 24.5 tokens/s with the old kernels to 27.5
+with the value split, 32.2 with `=1` (graphs off) and 37.4 with `=2` (graphs
+on), with 76% to 88% of drafts accepted in each run. At 100K tokens of context
+attention was about 57% of a decode step before. Prompt processing is unchanged (`attend_batch` is another path).
+
+A needle test (a code word hidden in 54K tokens, asked for twice) found the
+word both times with `=1`.
+
+What was not tested: any card but gfx1010, CUDA and SYCL builds (the kernel
+is HIP only and compiled out elsewhere), other head geometries (they use the
+old kernels), and the text of long generations beyond the checks below.
+`poly_hip_split_attend_test` (79 checks, about 12 s, needs a card; exits 77
+without one) compares both modes with an FP64 reference and the old kernels
+at sizes around the 4,096-key start and the 512-key blocks, with the position
+read on the card, the short-scratch fallback and a graph replay at three
+positions.
+
 ## Original backend validation (PR #94)
 
 The following is historical validation of the original backend, not a fresh
