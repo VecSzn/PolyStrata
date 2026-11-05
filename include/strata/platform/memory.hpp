@@ -36,6 +36,11 @@ void unlock_resident(void* p, uint64_t bytes);
 /// `why` says so) when the query is not possible - always elsewhere than Windows.
 bool gpu_shared_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why);
 
+/// Windows: the same for the GPU's local (video) memory: the budget Windows gives this process in it, which falls as
+/// the process grows and as other programs take their share, and what the process uses of it.  Memory past the budget
+/// is moved out to system RAM (WDDM), and a card that does that runs at a fraction of its speed.  False elsewhere.
+bool gpu_local_memory_budget(const void* luid, uint64_t& budget, uint64_t& usage, std::string& why);
+
 /// The machine's physical RAM in bytes (0 when unknown).
 uint64_t total_physical_memory();
 
