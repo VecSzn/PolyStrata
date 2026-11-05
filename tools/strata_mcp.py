@@ -177,6 +177,43 @@ FALLBACK_FAMILIES = {
                                           "download_gb": 14.4, "ram_gb": 18, "arena_gb": 12.9},
                           "APEX-I-QUALITY": {"about": "4- to 6-bit experts (APEX)",
                                              "download_gb": 23.7, "ram_gb": 28, "arena_gb": 21.6}}},
+    "ornith397": {'title': 'Ornith 1.5 397B',
+     'about': '397B on strata-poly; six IQ1/IQ2 sizes, 81.8-133.1 GB; memory estimates; IQ1_S text tested '
+              'on Windows AMD',
+     'tag': 'ornith397-',
+     'engine': 'poly',
+     'vision': True,
+     'experimental': True,
+     'models': {'IQ2_XXS': {'about': 'IQ2_XXS mixed i-quants; no MTP draft block',
+                            'download_gb': 106.31,
+                            'ram_gb': 111,
+                            'arena_gb': 100.596,
+                            'vram_beside_gb': 11.4},
+                'IQ1_M': {'about': 'IQ1_M mixed i-quants; no MTP draft block',
+                          'download_gb': 91.36,
+                          'ram_gb': 96,
+                          'arena_gb': 85.732,
+                          'vram_beside_gb': 11.3},
+                'IQ1_S': {'about': 'IQ1_S mixed i-quants; no MTP draft block',
+                          'download_gb': 81.78,
+                          'ram_gb': 86,
+                          'arena_gb': 76.202,
+                          'vram_beside_gb': 11.2},
+                'IQ2_XS': {'about': 'IQ2_XS mixed i-quants; no MTP draft block',
+                           'download_gb': 118.47,
+                           'ram_gb': 123,
+                           'arena_gb': 112.676,
+                           'vram_beside_gb': 11.4},
+                'IQ2_S': {'about': 'IQ2_S mixed i-quants; no MTP draft block',
+                          'download_gb': 120.51,
+                          'ram_gb': 125,
+                          'arena_gb': 114.555,
+                          'vram_beside_gb': 11.6},
+                'IQ2_M': {'about': 'IQ2_M mixed i-quants; no MTP draft block',
+                          'download_gb': 133.13,
+                          'ram_gb': 137,
+                          'arena_gb': 127.104,
+                          'vram_beside_gb': 11.7}}},
     "gemma4": {"title": "Gemma 4 26B-A4B", "about": "on the strata-poly engine too; a 13 GB file, ~18 GB of RAM beside an 8 GB "
                                                      "card; a smaller and a larger size too", "tag": "gemma4-",
                "engine": "poly", "vision": True, "experimental": True,
@@ -775,9 +812,9 @@ class Strata:
                 g["problem"] = None
             g["usable"] = g["problem"] is None
         amd = []
-        if not WIN:
+        if S or not WIN:
             try:
-                amd = S.amd_gpus() if S else []
+                amd = (S.amd_gpus_win() if WIN else S.amd_gpus()) if S else []
                 for g in amd:
                     g["vendor"] = "amd"
                     g["vram_gb"] = round(g["vram_gb"], 1)
@@ -785,7 +822,7 @@ class Strata:
                     g["usable"] = g["problem"] is None
             except Exception:                           # noqa: BLE001
                 amd = []
-            if not amd and shutil.which("rocm-smi"):
+            if not WIN and not amd and shutil.which("rocm-smi"):
                 amd = rocm_smi_gpus()
         hw["gpus"] = nv + amd
         if WIN:
@@ -802,10 +839,7 @@ class Strata:
         usable = [g for g in hw.get("gpus", []) if g.get("usable")]
         ram = hw.get("ram_gb") or 0
         if not usable:
-            why = ("no NVIDIA RTX 20-series-or-newer GPU found (nvidia-smi did not list one)"
-                   + ("; AMD cards run on Linux only" if WIN and any(
-                       "amd" in str(a.get("name", "")).lower() or "radeon" in str(a.get("name", "")).lower()
-                       for a in hw.get("display_adapters", [])) else ""))
+            why = "no supported NVIDIA or AMD GPU found"
             return {"family": None, "model": None, "why": why}
         best = max(usable, key=lambda g: (round(g["vram_gb"]), -g.get("index", 0)))
         vram = best["vram_gb"]
@@ -1104,9 +1138,11 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
          "description": "The models and sizes PolyStrata's setup offers (families: qwen = Qwen3.8-Flash-Next, swift = "
                         "Swift 1.5, coder = the Coder, unsloth = Unsloth's ~4-bit, glm = GLM 5.3 Flash, another "
                         "model with its own engine, deepseek = DeepSeek V4 Flash on that engine, lfm25 = LFM2.5-24B-A2B, "
-                        "flint = Flint 40B-A2.5B, kolibri = Kolibri 1, qwen36 = Qwen3.6-35B-A3B, ornith = Ornith 1.5, "
+                        "flint = Flint 40B-A2.5B, kolibri = Kolibri 1, qwen36 = Qwen3.6-35B-A3B, "
+                        "clover = Clover-35B-A3B-Preview, ornith = Ornith 1.5 35B, ornith397 = Ornith 1.5 397B, "
+                        "ornith122 = Ornith 1.5 122B, "
                         "gemma4 = Gemma 4 26B-A4B and tiel = Tiel "
-                        "Coder 35B-A3B, 11-25 GB models on that engine), with "
+                        "Coder 35B-A3B on that engine), with "
                         "download size, RAM needed, "
                         "whether each fits this PC, which are installed, the context lengths, and the recommendation. "
                         "Read-only.",
@@ -1114,7 +1150,7 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
          "annotations": ro},
         {"name": "strata_install", "title": "Install PolyStrata",
          "description": "Install a PolyStrata model on this PC by running PolyStrata's setup non-interactively in the "
-                        "background (Python packages, the engine, a 13-114 GB model download, preparation, start "
+                        "background (Python packages, the engine, a model download, preparation, start "
                         "script). Without confirm=true it only returns the plan (what would be downloaded, disk "
                         "space): show it to the user and call again with confirm=true once they agree. Returns at "
                         "once; call it again (no arguments needed) to see the progress, or with cancel=true to stop "
@@ -1133,9 +1169,11 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                                        "GB download, no images), lfm25 = LFM2.5-24B-A2B, flint = Flint 40B-A2.5B, "
                                        "kolibri = Kolibri 1 (Linux or Windows, one NVIDIA card, ~52 GB of RAM "
                                        "beside an 8 GB card, a 48 GB download, no images), qwen36 = "
-                                       "Qwen3.6-35B-A3B, ornith = Ornith 1.5, gemma4 = Gemma 4 26B-A4B, tiel = "
-                                       "Tiel Coder 35B-A3B (GLM's engine: one NVIDIA card, an 11-25 GB download, "
-                                       "15-31 GB of RAM beside an 8 GB card by setup's estimate; images with "
+                                       "Qwen3.6-35B-A3B, clover = Clover-35B-A3B-Preview, ornith = Ornith 1.5 35B, "
+                                       "ornith397 = Ornith 1.5 397B, ornith122 = Ornith 1.5 122B, "
+                                       "gemma4 = Gemma 4 26B-A4B, tiel = "
+                                       "Tiel Coder 35B-A3B (strata-poly; see strata_models for each size and RAM estimate; "
+                                       "images with "
                                        "vision except LFM2.5 and Flint)"},
              "model": {"type": "string", "enum": list(dict.fromkeys(
                            [*models, *(m for f in families.values() for m in f.get("models", ()))])),
@@ -1380,9 +1418,6 @@ class Tools:
         models, families, contexts, _src = s.tables()
         if gpu is not None and gpus is not None:
             raise ToolError("give gpu (one card) or gpus (several), not both")
-        if backend == "hip" and WIN:
-            raise ToolError("the AMD (hip) backend runs on Linux only; on Windows PolyStrata needs an NVIDIA RTX 20 "
-                            "series or newer card")
         if sys.version_info < (3, 10) or (WIN and sys.maxsize <= 2**32):
             raise ToolError("this Python is too old or 32-bit: PolyStrata's setup needs 64-bit Python 3.10+; run "
                             + ("START-HERE.bat" if WIN else "./setup.sh") + " once instead (it installs Python)")

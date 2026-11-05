@@ -61,7 +61,7 @@ bool Window::pc_setup(int C) {
     b.C = C;
     const size_t MT = (size_t) C;
     const int MB = (int) max_cells_ / 4 + 2;
-    b.maxrows = (int) MT * TOPK + NEXP * PC_TM;
+    b.maxrows = (int) MT * TOPK + n_expert_ * PC_TM;
     const int nblk_max = ((int) MT * TOPK + 1023) / 1024;
     auto F32 = [&](size_t n) { return cx_->alloc(4 * n); };
     auto F16 = [&](size_t n) { return cx_->alloc(2 * n); };
@@ -74,16 +74,16 @@ bool Window::pc_setup(int C) {
     b.qcur = F32(MT * 24 * 256); b.qcurh = F16(MT * 24 * 256); b.qidx = F32(MT * 4 * 128); b.scores = F32(MT * MB);
     b.qids = cx_->alloc(4 * MT * PC_QB); b.part = F32(MT * PC_QCHUNKS * 24 * 258); b.XQ = F32(4 * MT * 6144 + MT * 384);
     b.xqh = F16(MT * 6144);
-    b.logits = F32(MT * NEXP); b.ids = cx_->alloc(4 * MT * TOPK); b.wts = F32(MT * TOPK);
-    b.bcnt = cx_->alloc(4 * (size_t) nblk_max * NEXP); b.boff = cx_->alloc(4 * (size_t) nblk_max * NEXP);
-    b.eoff = cx_->alloc(4 * NEXP); b.tiles = cx_->alloc(8 * (size_t) (b.maxrows / PC_TM + 1)); b.meta = cx_->alloc(64);
+    b.logits = F32(MT * n_expert_); b.ids = cx_->alloc(4 * MT * TOPK); b.wts = F32(MT * TOPK);
+    b.bcnt = cx_->alloc(4 * (size_t) nblk_max * n_expert_); b.boff = cx_->alloc(4 * (size_t) nblk_max * n_expert_);
+    b.eoff = cx_->alloc(4 * n_expert_); b.tiles = cx_->alloc(8 * (size_t) (b.maxrows / PC_TM + 1)); b.meta = cx_->alloc(64);
     b.stok = cx_->alloc(4 * (size_t) b.maxrows); b.sw = F32(b.maxrows); b.pos = cx_->alloc(4 * MT * TOPK);
     b.XS = F16((size_t) b.maxrows * N); b.HS = F16((size_t) b.maxrows * NFF); b.YE = F32((size_t) b.maxrows * N);
     b.yr = F32(MT * N); b.gsh = F32(MT * NFF); b.ush = F32(MT * NFF); b.hh = F16(MT * NFF); b.ys = F32(MT * N); b.sgv = F32(MT);
     b.WD = F16((size_t) (LR + HC) * HC * N); b.WU = F16((size_t) HC * N * LR); b.Wqkv = F16((size_t) 10240 * N);
     b.Wz = F16((size_t) 6144 * N); b.Wal = F16((size_t) 48 * N); b.Wbe = F16((size_t) 48 * N); b.Wout = F16((size_t) N * 6144);
     b.Wq = F16((size_t) 12288 * N); b.Wk = F16((size_t) 512 * N); b.Wv = F16((size_t) 512 * N); b.Wiq = F16((size_t) 512 * N);
-    b.Wik = F16((size_t) 128 * N); b.Wr = F16((size_t) NEXP * N); b.Wsg = F16((size_t) N); b.Wshg = F16((size_t) NFF * N);
+    b.Wik = F16((size_t) 128 * N); b.Wr = F16((size_t) n_expert_ * N); b.Wsg = F16((size_t) N); b.Wshg = F16((size_t) NFF * N);
     b.Wshu = F16((size_t) NFF * N); b.Wshd = F16((size_t) N * NFF);
     // the PLE block's rows and projections
     b.pemb = F32(MT * N); b.pembh = F16(MT * N); b.pkey = F32(MT * 10240); b.pval = F32(MT * N); b.keyn = F32(MT * 10240);
@@ -272,16 +272,16 @@ bool Window::pc_chunk(const int64_t* tokens, int nT, int64_t pos0, std::string& 
         dq(T(bl + "ffn_gate_shexp.weight"), b.Wshg);
         dq(T(bl + "ffn_up_shexp.weight"), b.Wshu);
         dq(T(bl + "ffn_down_shexp.weight"), b.Wshd);
-        gemm(b.mixh, b.Wr, b.logits, nT, NEXP, N);
+        gemm(b.mixh, b.Wr, b.logits, nT, n_expert_, N);
         const uint32_t nt = (uint32_t) nT;
-        D(P_(b.lib, "route_topk"), {mtl::Arg::B(b.logits), mtl::Arg::B(b.ids), mtl::Arg::B(b.wts), mtl::Arg::V(nt)}, (nT + 7) / 8, 1, 256);
+        D(P_(b.lib, n_expert_ == 512 ? "route_topk" : "route_topk_256"), {mtl::Arg::B(b.logits), mtl::Arg::B(b.ids), mtl::Arg::B(b.wts), mtl::Arg::V(nt)}, (nT + 7) / 8, 1, 256);
         const int nent = nT * TOPK, nblk = (nent + 1023) / 1024;
-        PcMmPlanArgs pa{(uint32_t) nent, TOPK, NEXP, (uint32_t) PC_TM, (uint32_t) nblk};
+        PcMmPlanArgs pa{(uint32_t) nent, TOPK, (uint32_t) n_expert_, (uint32_t) PC_TM, (uint32_t) nblk};
         const uint32_t nclr = (uint32_t) b.maxrows;
         D(P_(b.lib, "mm_clear"), {mtl::Arg::B(b.stok), mtl::Arg::V(nclr)}, (b.maxrows + 255) / 256, 1, 256);
         D(P_(b.lib, "mm_hist"), {mtl::Arg::B(b.ids), mtl::Arg::B(b.bcnt), mtl::Arg::V(pa)}, nblk, 1, 1024);
         D(P_(b.lib, "mm_scan"), {mtl::Arg::B(b.bcnt), mtl::Arg::B(b.boff), mtl::Arg::B(b.eoff), mtl::Arg::B(b.tiles), mtl::Arg::B(b.meta),
-                                mtl::Arg::V(pa)}, 1, 1, NEXP);
+                                mtl::Arg::V(pa)}, 1, 1, n_expert_);
         D(P_(b.lib, "mm_place"), {mtl::Arg::B(b.ids), mtl::Arg::B(b.wts), mtl::Arg::B(b.boff), mtl::Arg::B(b.eoff), mtl::Arg::B(b.stok),
                                  mtl::Arg::B(b.sw), mtl::Arg::B(b.pos), mtl::Arg::V(pa)}, nblk, 1, 1024);
         PcMmArgs ma{eg.offset, eu.offset, ed.offset, 0, 0, (uint32_t) ref::row_bytes(eg.type, N), (uint32_t) ref::row_bytes(ed.type, NFF),

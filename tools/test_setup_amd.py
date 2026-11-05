@@ -683,8 +683,9 @@ class PolyHipWindows(unittest.TestCase):
             eng = root / setup.ENGINE_POLY_DIR
             eng.mkdir()
             (eng / setup.POLY_EXE).write_text("x")
+            (eng / "strata-device.exe").write_text("x")
             (eng / "BUILD.json").write_text(json.dumps({"source": "local-hip", "backend": "hip",
-                                                        "archs": ["gfx1201"], "src": "abc"}), encoding="utf-8")
+                                                        "archs": ["gfx1201"], "src": "abc", "windows_hip_build": 1}), encoding="utf-8")
             compiled = mock.Mock(side_effect=AssertionError("compiled"))
             with mock.patch.object(setup, "ROOT", root), mock.patch.object(setup, "source_hash", lambda parts: "abc"), \
                     mock.patch.object(setup, "cmake_build", compiled):
@@ -695,6 +696,7 @@ class PolyHipWindows(unittest.TestCase):
     def test_the_windows_engine_is_dispatched_from_the_amd_build(self):
         seen = {}
         with mock.patch.object(setup, "WIN", True), \
+                mock.patch.object(setup, "rocm_windows", return_value=None), \
                 mock.patch.object(setup, "build_engine_poly_hip_win", lambda gpu, llama: seen.update(gpu=gpu)):
             setup.build_engine_poly_hip({"arch": "gfx1201"}, Path("llama.cpp"))
         self.assertEqual(seen["gpu"], {"arch": "gfx1201"})
@@ -703,7 +705,7 @@ class PolyHipWindows(unittest.TestCase):
         d = setup.FAMILIES["tiel"]["models"]["UD-Q3_K_XL"]
         with mock.patch.object(setup, "WIN", True):
             line = setup.poly_verdict(d, 63, 15.9, True)
-        self.assertIn("measured on one AMD card on Windows", line)
+        self.assertIn("AMD engine compiled locally", line)
         self.assertIn("fits by setup's estimate", line)
 
     def build(self, root, bundled):
@@ -714,6 +716,7 @@ class PolyHipWindows(unittest.TestCase):
             built.append((target, defs))
             bdir.mkdir(parents=True, exist_ok=True)
             (bdir / setup.POLY_EXE).write_text("x")
+            (bdir / "strata-device.exe").write_text("x")
 
         with mock.patch.object(setup, "ROOT", root), \
                 mock.patch.object(setup, "source_hash", lambda parts: "new"), \

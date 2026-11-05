@@ -17,6 +17,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/sysctl.h>
 #endif
 
 namespace strata::core {
@@ -284,6 +287,22 @@ std::optional<HostMemoryReading> sample_host_memory() {
     // #1607: the commit limit (RAM + page file) refuses an allocation while physical RAM is still free
     if (!GlobalMemoryStatusEx(&status)) return {};
     return combine(std::min<uint64_t>(status.ullAvailPhys, status.ullAvailPageFile), status.ullTotalPhys, CgroupScan{}, memory_limit_bytes());
+#elif defined(__APPLE__)
+    uint64_t physical = 0;
+    size_t size = sizeof physical;
+    if (sysctlbyname("hw.memsize", &physical, &size, nullptr, 0) != 0 || physical == 0) return {};
+    vm_statistics64_data_t vm{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    const mach_port_t host = mach_host_self();
+    const auto rc = host_statistics64(host, HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vm), &count);
+    mach_port_deallocate(mach_task_self(), host);
+    if (rc != KERN_SUCCESS) return {};
+    // Credit reclaimable file pages, bounded by the inactive/speculative list.
+    // Do not count inactive anonymous memory that needs compression or swap.
+    const uint64_t files = std::min<uint64_t>(uint64_t(vm.inactive_count) + vm.speculative_count, vm.external_page_count);
+    const uint64_t available = std::min(physical,
+        (uint64_t(vm.free_count) + vm.purgeable_count + files) * uint64_t(vm_page_size));
+    return combine(available, physical, CgroupScan{}, memory_limit_bytes());
 #elif defined(__linux__)
     return sample_host_memory(MemoryProbePaths{}, memory_limit_bytes());
 #else

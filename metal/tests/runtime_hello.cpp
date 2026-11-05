@@ -8,6 +8,7 @@
 #include "strata/core/graph.hpp"
 #include "strata/gpu/metal.hpp"
 #include "strata/gpu/runtime.hpp"
+#include <cuda_runtime.h>
 
 #include <chrono>
 #include <cstdio>
@@ -40,6 +41,21 @@ static double now_ms() {
 }
 
 int main() {
+    // Shared host code probes CUDA-only tuning before falling back to ordinary
+    // queues on Metal. Keep those probes buildable and their fallback explicit.
+    int capability = -1, least = -1, greatest = -1;
+    CHECK(cudaDeviceGetAttribute(&capability, cudaDevAttrComputeCapabilityMajor, 0) == gpu::kErrorUnsupported,
+          "Metal must not advertise a CUDA compute capability");
+    CHECK(cudaDeviceGetAttribute(&capability, cudaDevAttrComputeCapabilityMinor, 0) == gpu::kErrorUnsupported,
+          "Metal must not advertise a CUDA compute capability minor");
+    CHECK(cudaDeviceGetStreamPriorityRange(&least, &greatest) == cudaSuccess && least == 0 && greatest == 0,
+          "Metal exposes only default stream priority");
+    cudaStream_t priority_stream = nullptr;
+    CHECK(cudaStreamCreateWithPriority(&priority_stream, cudaStreamNonBlocking, greatest) == cudaSuccess,
+          "default-priority stream creation");
+    if (priority_stream) CHECK(cudaStreamDestroy(priority_stream) == cudaSuccess, "priority stream cleanup");
+    CHECK(cudaDeviceDisablePeerAccess(1) == gpu::kErrorUnsupported, "Metal has no peer access");
+    CHECK(cudaMemcpyPeer(nullptr, 0, nullptr, 1, 0) == gpu::kErrorUnsupported, "Metal has no peer copies");
     std::string err;
     MTL::ComputePipelineState* p_axpy = gpu::metal::pipeline("hello", kSrc, "axpy", err);
     MTL::ComputePipelineState* p_scale = gpu::metal::pipeline("hello", kSrc, "scale", err);

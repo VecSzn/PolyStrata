@@ -15,6 +15,7 @@
 #pragma once
 
 #include "cpu_experts.hpp"
+#include "expert_io.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -24,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -42,11 +44,16 @@ struct Likeliest;
 /// The attention caches' storing format, opt-in via --kv.  q8_0 is ggml's blocks (one fp16 scale a 32-value
 /// block of int8 codes) and reads them back element by element; int8 is the same rule with the codes and the
 /// deltas in two arrays, which a reader can take four codes to a load, and int8k keeps only the keys' side
-/// quantized.  q8_0 is qwen35moe's; int8 and int8k are Gemma 4's - the two readers are not the same arithmetic,
-/// so a model has one or the other rather than a choice between them.
-enum class KvFmt { kFp16 = 0, kQ8_0 = 1, kInt8 = 2, kInt8K = 3 };
+/// quantized.  q8_0 is qwen35moe's and kolibri1's; int8 and int8k are Gemma 4's - the two readers are not the
+/// same arithmetic, so a model has one or the other rather than a choice between them.  Auto is resolved from
+/// model geometry before allocation on Metal; other backends default to fp16.
+enum class KvFmt { kAuto = -1, kFp16 = 0, kQ8_0 = 1, kInt8 = 2, kInt8K = 3 };
 
 struct Options {
+#if defined(STRATA_GPU_METAL)
+    bool metal_optimize = true;
+    bool metal_balanced = true;
+#endif
     std::string model;
     int max_context = 8192;
     int threads = 0;              ///< 0: the CPUs this process may use
@@ -78,12 +85,17 @@ struct Options {
     int64_t ram_experts_mib = -1; ///< the memory this process holds for the experts outside VRAM, answer or not:
                                   ///< the ones used most lately are read into it from the files; the others are left
                                   ///< to the file cache, which gives them to whatever needs the memory, and come back
-                                  ///< from it or the disk when a token routes to them.  Below 0: all of them
+                                  ///< from it or the disk when a token routes to them.  Below 0: all of them;
+                                  ///< kAutoRamExpertsMib (-2): settled at load from the machine's RAM
     bool stay_near = true;        ///< with several NUMA nodes, keep the CPU threads on the one that holds the experts
     bool graphs = true;           ///< a token's fixed launches are recorded once, a CUDA graph a layer, and replayed
     bool kv_grow = true;          ///< the attention caches get VRAM as the sequence grows, where the card can map it
                                   ///< so; false: for the whole context at load, as the expert cache gets the rest
-    KvFmt kv_format = KvFmt::kFp16;   ///< the K and V caches' format; fp16 by default (byte-identical path)
+#if defined(STRATA_GPU_METAL)
+    KvFmt kv_format = KvFmt::kAuto;   ///< Q8 for compatible Qwen35MoE geometry, otherwise fp16
+#else
+    KvFmt kv_format = KvFmt::kFp16;
+#endif
     int window = 0;               ///< the most tokens window() takes: the known one and guesses after it; 1: none;
                                   ///< 0: 8, or 4 where every guess keeps a copy of the recurrent state
     bool draft = true;            ///< run the block that guesses ahead, when there is one and window is above 1
@@ -183,6 +195,7 @@ struct Image {
 };
 
 class Engine {
+    friend struct ExpertIoProbe;   // exercises the real slot/queue integration with a temporary file
 public:
     Engine();
     virtual ~Engine();
@@ -318,7 +331,7 @@ public:
     void trim();
     int cached_experts() const { return cached_ + (next_ ? next_->cached_experts() : 0); }
     /// The RAM held for the experts outside VRAM, in MiB, as load() settled Options::ram_experts_mib (-1: all of
-    /// them), and those experts' GiB.
+    /// them; auto settles it from the machine's RAM), and those experts' GiB.
     int64_t ram_experts_mib() const { return opt_.ram_experts_mib; }
     double outside_gib() const { return double(outside_bytes_) / double(1ull << 30); }
     int total_experts() const { return n_moe_ * n_expert_ + (next_ ? next_->total_experts() : 0); }
@@ -500,6 +513,7 @@ protected:
     bool input(int32_t token, int64_t row, float* dst) const;
     void lin(const Dev& w, const float* x, float* y, int n, const void* xq = nullptr, int rows_per_x = 0);
     void fill_expert_cache();
+    void ensure_stage();
     void start_swaps();
     void plan_ahead(Layer& L, int il);
     void run(const int32_t* tokens, int n);
@@ -574,6 +588,20 @@ protected:
     int64_t kv_rows_for(int64_t end) const;   ///< the rows cover() maps for `end`
     void held_is_budget();
     void settle_swaps();
+#if defined(STRATA_GPU_METAL)
+    virtual std::optional<uint64_t> metal_host_available() const;
+    size_t metal_host_headroom();
+    void metal_invalidate_graphs();
+    void metal_sync_memory();
+    void metal_cover(int64_t end);
+    virtual void metal_resize_cache(size_t limit);
+    bool metal_mind_memory();
+    size_t metal_cache_limit_ = SIZE_MAX;
+    size_t metal_cache_bytes_ = 0;
+    size_t metal_warm_bytes_ = 0;
+    unsigned metal_growth_samples_ = 0;
+    bool metal_host_warning_ = false;
+#endif
 
     Options opt_;
     std::unique_ptr<Shards> gg_;
@@ -671,6 +699,9 @@ protected:
         void* p = nullptr;
         size_t bytes = 0;   ///< a kv_alloc() buffer's for every `per` rows; a seq_alloc() one's, all of it
         int per = 0;        ///< 0: seq_alloc()'s
+#if defined(STRATA_GPU_METAL)
+        size_t capacity = 0; ///< allocated bytes, distinct from the logical context's address range
+#endif
     };
     struct Seq {
         int64_t pos = 0, kv_rows = 0, kv_reach = 0, ahead_pos = -1;
@@ -887,34 +918,23 @@ protected:
     void pool_reseed();
     // Read ahead: moe_router() also scores the next MoE layer's router on this layer's input (on the card, copied to
     // h_ahead_ before ev_, a part of a window apiece, as ev_row_; a head recorded as a graph copies it too), and
-    // moe() hands that layer's likeliest experts that the CPU would read from the files to pool_threads_ before
+    // moe() hands that layer's likeliest experts that the CPU would read from the files to the read queue before
     // this layer's are computed.
     // A slot being read is pool_state_ 1 (2: the read failed); its layer's call waits for it.
     int prefetch_k_ = 0;   ///< the next MoE layer's guessed top k
     float* ahead_dev_ = nullptr;
     float* h_ahead_ = nullptr;
     std::unique_ptr<std::atomic<uint8_t>[]> pool_state_;
-    struct PoolJob {   ///< a piece of an expert's read into its slot, or with s = kTouch / kDrop pages of the mapping
-        uint8_t* dst;
-        const uint8_t* src;
-        size_t n;
-        int32_t s;
-    };
+    using PoolJob = ExpertReadJob;
     static constexpr int32_t kTouch = -1, kDrop = -2;
-    std::deque<PoolJob> pool_jobs_;
-    /// kTouch / kDrop jobs, taken when pool_jobs_ is empty: in the first answer after the load the cache traded
-    /// 2,700 experts, and their page work ahead of the reads held the reads a call waited for up
-    std::deque<PoolJob> pool_pages_;
+    std::unique_ptr<ExpertReadQueue> pool_reader_;
+    bool prefetch_experts_ = false;
+    void prefetch_cpu_experts(const Layer& L, int il, const CpuExpert* host, int count, int rows,
+                             const std::function<void()>*& meanwhile);
     std::unique_ptr<std::atomic<int>[]> pool_pending_;      ///< per slot: its pieces not read yet
     std::unique_ptr<std::atomic<uint8_t>[]> pool_failed_;   ///< per slot: a piece of it failed
     void pool_queue(const Layer& L, size_t e, int32_t s, bool first);
-    std::mutex pool_m_;
-    std::atomic<int> pool_n_{0};   ///< the jobs in pool_jobs_ and pool_pages_, which pool_loop() spins on
-    std::condition_variable pool_cv_;
-    bool pool_quit_ = false;
-    std::vector<std::thread> pool_threads_;
     void pool_ahead(int j, int n, size_t part, int k);
-    void pool_loop();
     void pool_run(const PoolJob& job);
     bool pool_help();
     std::mutex swap_m_;

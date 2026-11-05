@@ -1046,6 +1046,10 @@ int check_batch(Engine& engine, const std::vector<int32_t>& ids, int k, long lon
 }
 
 void usage() {
+#if defined(STRATA_GPU_METAL)
+    std::fprintf(stderr, "Metal defaults: optimized expert overlap and compact MMQ (disable: --no-metal-optimize), "
+                         "--metal-memory legacy|balanced (default balanced)\n");
+#endif
     std::fprintf(stderr,
                  "usage: strata-poly --model FILE.gguf (--serve | --tokens ID,ID,... [--max-new N])\n"
                  "  --max-context N        tokens the attention caches hold (default 8192)\n"
@@ -1083,12 +1087,16 @@ void usage() {
                  "                         the same Q8_0 rule with the codes and their deltas in two arrays, so a\n"
                  "                         reader takes four codes to a load; int8k keeps the keys' side\n"
                  "                         quantized and the values' in fp16)\n"
+#if defined(STRATA_GPU_METAL)
+                 "                         Metal default: q8_0 for a compatible Qwen35MoE geometry, else fp16\n"
+#endif
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
                  "                         into VRAM, in place of cached ones it uses less (default 64, 0 = the cache\n"
                  "                         stays as it was loaded)\n"
                  "  --ram-experts-mib N    hold N MiB of RAM for the experts outside VRAM, during answers too: the ones\n"
                  "                         used most lately; the rest stay in the file cache for other programs to take,\n"
-                 "                         and are read back when a token needs them (default: all of them)\n"
+                 "                         and are read back when a token needs them (default: all of them; auto: as\n"
+                 "                         many as fit in the RAM free, the rest read from the SSD)\n"
                  "  --prompt-batch N       prompt tokens read at a time (default 1024); about 1.4 MiB of VRAM each\n"
                  "  --stage-mib N          VRAM the experts outside the cache pass through in a prompt batch (default\n"
                  "                         128 on an NVIDIA card where a longer read widens it, else 2048; never more\n"
@@ -1176,6 +1184,18 @@ int main(int argc, char** argv) {
         };
         if (a == "--model") o.model = val();
         else if (a == "--serve") want_serve = true;
+#if defined(STRATA_GPU_METAL)
+        else if (a == "--metal-optimize") o.metal_optimize = true;
+        else if (a == "--no-metal-optimize") o.metal_optimize = false;
+        else if (a == "--metal-memory") {
+            const std::string policy = val();
+            if (policy != "legacy" && policy != "balanced") {
+                std::fprintf(stderr, "strata-poly: --metal-memory requires legacy or balanced\n");
+                return 2;
+            }
+            o.metal_balanced = policy == "balanced";
+        }
+#endif
         else if (a == "--max-context") o.max_context = std::atoi(val());
         else if (a == "--threads") o.threads = std::atoi(val());
         else if (a == "--vram-reserve-mib") o.vram_reserve_mib = std::atoi(val());
@@ -1201,7 +1221,10 @@ int main(int argc, char** argv) {
         else if (a == "--no-draft") o.draft = false;
         else if (a == "--draft-model") o.draft_model = val();
         else if (a == "--expert-swaps") o.expert_swaps = std::atoi(val());
-        else if (a == "--ram-experts-mib") o.ram_experts_mib = std::atoll(val());
+        else if (a == "--ram-experts-mib") {
+            const std::string v = val();
+            o.ram_experts_mib = v == "auto" ? strata::poly::kAutoRamExpertsMib : std::atoll(v.c_str());
+        }
         else if (a == "--tail-skip") o.tail_skip = std::atoi(val());
         else if (a == "--skip-weight") o.skip_weight = (float) std::atof(val());
         else if (a == "--cache-bias") o.cache_bias = (float) std::atof(val());
@@ -1275,7 +1298,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "strata-poly: loaded in %.1f s; %d of %d routed experts in VRAM (%.1f GiB), %d CPU threads\n",
                      ms_since(t0) / 1000.0, engine.cached_experts(), engine.total_experts(), engine.cached_gib(),
                      engine.threads());
-        if (engine.ram_experts_mib() >= 0)
+        if (o.ram_experts_mib != strata::poly::kAutoRamExpertsMib && engine.ram_experts_mib() >= 0)
             std::fprintf(stderr, "strata-poly: %lld MiB of RAM for the %.1f GiB of experts outside VRAM; the others "
                                  "come from the file cache when a token needs them (--ram-experts-mib, -1 for all)\n",
                          (long long) engine.ram_experts_mib(), engine.outside_gib());

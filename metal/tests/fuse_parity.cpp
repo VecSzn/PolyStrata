@@ -68,7 +68,7 @@ int main() {
     // ---- router_route
     {
         for (int rty : {ref::BF16, ref::F32}) {
-        const int NE = 512;
+        for (const int NE : {256, 512}) {
         const size_t rbr = ref::row_bytes(rty, N);
         mtl::Buffer Wr = cx.alloc(rbr * NE), lg1 = cx.alloc(4 * MAXT * NE), lg2 = cx.alloc(4 * MAXT * NE),
                     id1 = cx.alloc(4 * MAXT * 10), id2 = cx.alloc(4 * MAXT * 10), w1 = cx.alloc(4 * MAXT * 10),
@@ -99,23 +99,36 @@ int main() {
             cx.run({g, rt});
             bool ok = true;
             for (int rep_ = 0; rep_ < 2; ++rep_) {
+                // A warm buffer must not mask missing publication of fresh logits.
+                // Poison all outputs, including the first token's routing results.
+                std::memset(lg2.ptr, 0xff, lg2.bytes);
+                std::memset(id2.ptr, 0xff, id2.bytes);
+                std::memset(w2.ptr, 0xff, w2.bytes);
                 std::memset(pl2.ptr, 0, pl2.bytes);
                 mtl::Dispatch f;
                 f.p = &pf;
                 f.args = {mtl::Arg::B(Wr), mtl::Arg::B(xp), mtl::Arg::B(xp, s16), mtl::Arg::B(lg2), mtl::Arg::V(ga), mtl::Arg::B(id2),
                           mtl::Arg::B(w2), mtl::Arg::B(pl2), mtl::Arg::V(ma), mtl::Arg::B(cnt)};
-                f.grid[0] = NE / 16;
+                f.grid[0] = 1;
                 f.tg[0] = 512;
                 cx.run({f});
-                ok = ok && std::memcmp(lg1.ptr, lg2.ptr, 4 * nt * NE) == 0 && std::memcmp(id1.ptr, id2.ptr, 4 * nt * 10) == 0 &&
-                     std::memcmp(w1.ptr, w2.ptr, 4 * nt * 10) == 0 && std::memcmp(pl1.ptr, pl2.ptr, 4 * P_INTS) == 0 &&
-                     cnt.as<uint32_t>()[0] == 0;
+                const bool logits_ok = std::memcmp(lg1.ptr, lg2.ptr, 4 * nt * NE) == 0;
+                const bool ids_ok = std::memcmp(id1.ptr, id2.ptr, 4 * nt * 10) == 0;
+                const bool weights_ok = std::memcmp(w1.ptr, w2.ptr, 4 * nt * 10) == 0;
+                const bool plan_ok = std::memcmp(pl1.ptr, pl2.ptr, 4 * P_INTS) == 0;
+                const bool counter_ok = cnt.as<uint32_t>()[0] == 0;
+                const bool same = logits_ok && ids_ok && weights_ok && plan_ok && counter_ok;
+                if (!same)
+                    std::printf("  run %d: logits %d, ids %d, weights %d, plan %d, counter %d\n",
+                                rep_, logits_ok, ids_ok, weights_ok, plan_ok, counter_ok);
+                ok = ok && same;
             }
             fails += !ok;
-            std::printf("router_route %s ntok %d: logits, ids, w, plan bitwise (2 runs) %s\n", ref::type_name(rty), nt,
+            std::printf("router_route %s experts %d ntok %d: logits, ids, w, plan bitwise (2 runs) %s\n", ref::type_name(rty), NE, nt,
                         ok ? "PASS" : "FAIL");
         }
         }
+    }
     }
     // ---- gr_norm_comb
     {

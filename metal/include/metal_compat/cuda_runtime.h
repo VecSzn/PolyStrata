@@ -46,7 +46,10 @@ inline constexpr unsigned cudaEventDisableTiming = strata::gpu::kEventDisableTim
 inline constexpr unsigned cudaEventBlockingSync = strata::gpu::kEventBlockingSync;
 inline constexpr unsigned cudaStreamNonBlocking = strata::gpu::kStreamNonBlocking;
 enum cudaStreamCaptureMode { cudaStreamCaptureModeGlobal = 0, cudaStreamCaptureModeThreadLocal = 1, cudaStreamCaptureModeRelaxed = 2 };
-enum cudaDeviceAttr { cudaDevAttrClockRate = 13, cudaDevAttrMultiProcessorCount = 16, cudaDevAttrIntegrated = 18 };
+enum cudaDeviceAttr {
+    cudaDevAttrClockRate = 13, cudaDevAttrMultiProcessorCount = 16, cudaDevAttrIntegrated = 18,
+    cudaDevAttrComputeCapabilityMajor = 75, cudaDevAttrComputeCapabilityMinor = 76
+};
 
 // ---- errors, devices
 inline cudaError_t cudaGetLastError() { return strata::gpu::get_last_error(); }
@@ -65,11 +68,16 @@ inline cudaError_t cudaDeviceGetAttribute(int* v, cudaDeviceAttr a, int d) {
         case cudaDevAttrIntegrated: return strata::gpu::device_integrated(v, d);
         case cudaDevAttrMultiProcessorCount: return strata::gpu::device_sm_count(v, d);
         case cudaDevAttrClockRate: return strata::gpu::device_clock_khz(v, d);
+        // Apple GPUs have no CUDA compute capability. Do not enable NVIDIA's
+        // architecture-specific tuning in shared host code.
+        case cudaDevAttrComputeCapabilityMajor:
+        case cudaDevAttrComputeCapabilityMinor: return strata::gpu::compat_detail::bad();
     }
     return strata::gpu::compat_detail::bad();
 }
 inline cudaError_t cudaDeviceCanAccessPeer(int* v, int d, int p) { return strata::gpu::device_can_access_peer(v, d, p); }
 inline cudaError_t cudaDeviceEnablePeerAccess(int p, unsigned f) { return strata::gpu::device_enable_peer_access(p, f); }
+inline cudaError_t cudaDeviceDisablePeerAccess(int) { return strata::gpu::compat_detail::bad(); }
 
 // ---- memory and copies
 template <class T> inline cudaError_t cudaMalloc(T** p, size_t n) { return strata::gpu::malloc_device(p, n); }
@@ -90,13 +98,32 @@ inline cudaError_t cudaMemcpy2DAsync(void* d, size_t dp, const void* s, size_t s
                                      cudaStream_t st = nullptr) {
     return strata::gpu::memcpy_2d_async(d, dp, s, sp, w, h, k, st);
 }
+inline cudaError_t cudaMemcpy2D(void* d, size_t dp, const void* s, size_t sp, size_t w, size_t h, cudaMemcpyKind k) {
+    auto rc = strata::gpu::device_synchronize();
+    if (rc != cudaSuccess) return rc;
+    rc = strata::gpu::memcpy_2d_async(d, dp, s, sp, w, h, k, nullptr);
+    return rc == cudaSuccess ? strata::gpu::stream_synchronize(nullptr) : rc;
+}
 inline cudaError_t cudaMemcpyPeerAsync(void* d, int dd, const void* s, int sd, size_t n, cudaStream_t st = nullptr) {
     return strata::gpu::memcpy_peer_async(d, dd, s, sd, n, st);
+}
+inline cudaError_t cudaMemcpyPeer(void*, int, const void*, int, size_t) {
+    return strata::gpu::compat_detail::bad();
 }
 
 // ---- streams, events, host functions
 inline cudaError_t cudaStreamCreate(cudaStream_t* s) { return strata::gpu::stream_create(s); }
 inline cudaError_t cudaStreamCreateWithFlags(cudaStream_t* s, unsigned f) { return strata::gpu::stream_create(s, f); }
+// Metal queues do not expose CUDA stream priorities. Advertise only the default
+// priority, allowing shared callers to retain their normal stream path.
+inline cudaError_t cudaDeviceGetStreamPriorityRange(int* least, int* greatest) {
+    if (least) *least = 0;
+    if (greatest) *greatest = 0;
+    return cudaSuccess;
+}
+inline cudaError_t cudaStreamCreateWithPriority(cudaStream_t* s, unsigned f, int) {
+    return strata::gpu::stream_create(s, f);
+}
 inline cudaError_t cudaStreamDestroy(cudaStream_t s) { return strata::gpu::stream_destroy(s); }
 inline cudaError_t cudaStreamSynchronize(cudaStream_t s) { return strata::gpu::stream_synchronize(s); }
 inline cudaError_t cudaStreamQuery(cudaStream_t s) { return strata::gpu::stream_query(s); }
@@ -128,3 +155,7 @@ inline cudaError_t cudaGraphLaunch(cudaGraphExec_t x, cudaStream_t s) { return s
 inline cudaError_t cudaGraphUpload(cudaGraphExec_t x, cudaStream_t s) { return strata::gpu::graph_upload(x, s); }
 inline cudaError_t cudaGraphDestroy(cudaGraph_t g) { return strata::gpu::graph_destroy(g); }
 inline cudaError_t cudaGraphExecDestroy(cudaGraphExec_t x) { return strata::gpu::graph_exec_destroy(x); }
+
+inline cudaError_t cudaGraphInstantiateWithFlags(cudaGraphExec_t* x, cudaGraph_t g, unsigned long long f) {
+    return strata::gpu::graph_instantiate(x,g,f);
+}

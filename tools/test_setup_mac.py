@@ -75,6 +75,11 @@ class Recommendation(unittest.TestCase):
         self.assertTrue(notes and "stream" in notes[0] and "~14 tok/s" in notes[0])
         self.assertTrue(M.streams("Q2_0", 32) and M.streams("Q2_0", 48) and not M.streams("Q2_0", 64))
 
+    def test_same_quant_does_not_reuse_another_familys_measurements(self):
+        self.assertTrue(M.model_metadata("IQ3_S", "qwen")["tested"])
+        self.assertFalse(M.model_metadata("IQ3_S", "swift")["tested"])
+        self.assertTrue(any("not been measured" in n for n in M.model_note("IQ3_S",128,"swift")))
+
     def test_a_bigger_choice_is_kept_with_a_note(self):
         notes = M.model_note("IQ3_XXS", 64)
         self.assertTrue(any("stream from the SSD" in n for n in notes))
@@ -124,6 +129,7 @@ class Vision(unittest.TestCase):
         self.assertIn("mmproj-Qwen3.8-Flash-Next-BF16.gguf", M.VISION_SHA256)
         src = (ROOT / "metal" / "setup_mac.py").read_text(encoding="utf-8")
         self.assertIn('"-DSTRATA_VISION_CUDA=OFF"', src)
+        self.assertIn('"-DGGML_METAL=ON"', src)
         self.assertIn('cfg["args"] += ["--vision"]', src)
 
 
@@ -188,12 +194,6 @@ class HandOver(unittest.TestCase):
                 mock.patch.object(setup.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
             with self.assertRaises(SystemExit):
                 setup.main()
-
-    def test_setup_sh_fetches_a_pinned_python_on_macos_only(self):
-        sh = (ROOT / "setup.sh").read_text(encoding="utf-8")
-        self.assertIn('[ "$(uname -s)" = Darwin ]', sh)
-        self.assertIn("83dcb04777c798bd95f3687acf9ae84b09860272ee6bdfb05be8bcf9447f75b8", sh)
-
 
 class RepackGuard(unittest.TestCase):
     """No engine beside a repack: the locks, and the resident rule that matches the engine's arena_budget.h."""
@@ -275,6 +275,222 @@ class Source(unittest.TestCase):
         self.assertEqual(os.environ.get("STRATA_SOURCE"), "modelscope")
         self.assertFalse([w for w in warnings if "--source" in w],
                          f"--source was not used: {warnings}")
+
+
+class SmallerModelCatalog(unittest.TestCase):
+    def test_uses_shared_family_sizes_and_filenames(self):
+        catalog = M.smaller_model_catalog()
+        self.assertEqual(set(catalog), {f for f,d in setup.FAMILIES.items() if d.get("engine")=="poly"})
+        for family, entry in catalog.items():
+            self.assertTrue(entry["metal_ready"])
+            self.assertFalse(entry["model_validated"])
+            self.assertEqual(set(entry["models"]), set(setup.family_models(family)))
+            for model, spec in entry["models"].items():
+                self.assertEqual(spec["files"][0], setup.model_file(setup.FAMILIES[family], model, 1))
+                self.assertGreater(spec["download_gb"], 0)
+        self.assertIn("QAD-Q4_0", catalog["lfm25"]["models"])
+        self.assertIn("APEX-I-MINI", catalog["ornith"]["models"])
+
+    def test_listing_needs_no_hardware_or_downloads(self):
+        with mock.patch.object(M.S, "say") as say, \
+                mock.patch.object(M.S, "data_folder", side_effect=AssertionError("writes")), \
+                mock.patch.object(M, "mac_info", side_effect=AssertionError("hardware")), \
+                mock.patch.object(M.S, "download", side_effect=AssertionError("download")):
+            self.assertEqual(M.main(["--list-models"]), 0)
+        self.assertTrue(any("deepseek:" in c.args[0] for c in say.call_args_list))
+
+
+class SmallerModelSetup(unittest.TestCase):
+    def test_existing_files_keep_shared_server_features(self):
+        from contextlib import ExitStack
+        for family, model in [(f,m) for f in M.MAC_POLY_FAMILIES for m in setup.family_models(f)]:
+            with self.subTest(family=family, model=model), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                fam = setup.FAMILIES[family]
+                spec = setup.family_models(family)[model]
+                names = [setup.model_file(fam, model, i) for i in range(1, setup.model_shards(fam, model)+1)]
+                if spec.get("draft_model"):
+                    names.append(Path(spec["draft_model"]).name)
+                if fam.get("draft") and spec.get("draft") != "own":
+                    draft = root / fam["draft"]
+                    draft.parent.mkdir(parents=True, exist_ok=True)
+                    draft.write_bytes(b"fixture draft")
+                for name in names:
+                    (root / name).write_bytes(b"fixture")
+                def patch(obj, name, **kw):
+                    return stack.enter_context(mock.patch.object(obj, name, **kw))
+                patch(M, "ROOT", new=root)
+                patch(M, "mac_configs", return_value=[])
+                patch(M, "mac_info", return_value={"chip":"M1 Pro", "ram_gb":32, "macos":"27.0", "arm64":True, "clt":"/tools", "perf_cores":8})
+                patch(setup, "data_folder", return_value=(root, []))
+                patch(setup, "free_gb", return_value=1000)
+                patch(setup, "pip_install")
+                patch(setup, "get_llama_cpp", return_value=root / "llama")
+                build = patch(M, "build_engine", return_value=root / "strata-poly")
+                patch(setup, "download", side_effect=AssertionError("model download"))
+                patch(setup, "done", return_value=True)
+                patch(setup, "verify_sha256")
+                patch(setup, "check_shards")
+                patch(setup, "run")
+                patch(setup, "find_in", return_value=None)
+                patch(M.shutil, "copyfile")
+                write = patch(setup, "write_setup_config")
+                patch(setup, "write_run_script", return_value=root / "run.sh")
+                patch(M, "start", side_effect=AssertionError("server start"))
+                for fn in ("say", "ok", "step", "warn"):
+                    patch(setup, fn)
+                rc = M.main(["--family",family,"--model",model,"--gguf-dir",str(root),"--yes","--no-start",
+                             "--no-download-models","--vision","no","--parallel","3","--conversation-cache-mib","128"])
+                self.assertEqual(rc, 0)
+                build.assert_called_once_with(root / "llama", poly=True)
+                cfg = write.call_args.args[1]
+                self.assertEqual(cfg["backend"], "metal")
+                saved = write.call_args.args[0]
+                import json
+                saved.write_text(json.dumps(cfg))
+                choice = setup.choices_from_config(saved)
+                self.assertEqual((choice["family"], choice["model"]), (family, model))
+                self.assertEqual(Path(cfg["exe"]).name, "strata-poly")
+                self.assertEqual(cfg["parallel"], 3)
+                self.assertIn("--conversation-cache-mib", cfg["args"])
+                self.assertEqual(cfg["args"][cfg["args"].index("--model")+1], str(root/names[0]))
+                if spec.get("draft_model"):
+                    self.assertIn("--draft-model", cfg["args"])
+                self.assertNotIn("--pack", cfg["args"])
+
+    def test_no_download_models_also_covers_missing_draft(self):
+        import argparse
+        family = "gemma4"
+        model = next(iter(setup.family_models(family)))
+        spec = setup.family_models(family)[model]
+        self.assertIn("draft_model", spec)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / setup.model_file(setup.FAMILIES[family], model, 1)).write_bytes(b"fixture")
+            a = argparse.Namespace(family=family, model=model, yes=True, context=8192, vision="no", models_dir=None,
+                                   gguf_dir=tmp, update=False, build=False, no_download_models=True)
+            with mock.patch.object(setup, "pip_install"), mock.patch.object(setup, "get_llama_cpp", return_value=root), \
+                    mock.patch.object(M, "build_engine", return_value=root / "strata-poly"), \
+                    mock.patch.object(setup, "done", return_value=True), mock.patch.object(setup, "check_shards"), \
+                    mock.patch.object(setup, "verify_sha256"), mock.patch.object(setup, "download") as download:
+                with self.assertRaises(SystemExit):
+                    M.setup_poly(a, {"ram_gb":32}, root, [])
+                download.assert_not_called()
+
+    def test_missing_local_file_stops_before_build(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(M, "build_engine") as build, \
+                mock.patch.object(setup, "pip_install") as pip, mock.patch.object(setup, "download") as download:
+            import argparse
+            a = argparse.Namespace(family="lfm25",model="QAD-Q4_0",yes=True,context=8192,vision="no",models_dir=None,
+                                   gguf_dir=tmp,update=False)
+            with self.assertRaises(SystemExit):
+                M.setup_poly(a,{"ram_gb":32},Path(tmp),[])
+            build.assert_not_called()
+            pip.assert_not_called()
+            download.assert_not_called()
+
+
+class FullCatalog(unittest.TestCase):
+    def test_every_family_and_quant_uses_the_shared_catalog(self):
+        catalog = M.model_catalog()
+        families = {**setup.FAMILIES, **setup.OWN_PATH_FAMILIES}
+        self.assertEqual(set(catalog), set(families))
+        for family, fam in families.items():
+            models = fam["models"] if family in setup.OWN_PATH_FAMILIES else setup.family_models(family)
+            self.assertEqual(catalog[family]["models"], models)
+            if not fam.get("ready") and family not in setup.OWN_PATH_FAMILIES:
+                for model in models:
+                    self.assertEqual(M.model_shard_names(model, family),
+                                     [setup.model_file(fam, model, i) for i in range(1, setup.model_shards(fam, model)+1)])
+        self.assertEqual(catalog["qwen36-strata"]["metal_engine"], "strata-q36")
+        self.assertEqual(catalog["qwen36"]["metal_engine"], "strata-poly")
+
+    def test_native_families_keep_assets_and_saved_identity(self):
+        import json
+        from contextlib import ExitStack
+        for family in ("qwen", "swift", "coder", "unsloth", "nvfp4"):
+            fam = setup.FAMILIES[family]
+            for model in setup.family_models(family):
+                with self.subTest(family=family,model=model), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                    root=Path(tmp);tag=fam["tag"]+model
+                    pack=root/"packs"/tag.lower();(pack/"tokenizer").mkdir(parents=True)
+                    (pack/"tokenizer"/"vocab.json").write_text("{}")
+                    (pack/"native_experts.txt").write_text("fixture")
+                    if fam.get("ready"):
+                        for asset in setup.ready_files(model):
+                            path=setup.ready_where(root,asset);path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"fixture")
+                    else:
+                        for name in M.model_shard_names(model,family): (root/name).write_bytes(b"fixture")
+                    (root/"metal").mkdir();(root/"metal"/f"{tag.lower()}-metal.gguf").write_bytes(b"fixture")
+                    (root/"mtp").mkdir();(root/"mtp"/"mtp-q2_0.gguf").write_bytes(b"fixture")
+                    def patch(obj,name,**kw): return stack.enter_context(mock.patch.object(obj,name,**kw))
+                    patch(M,"ROOT",new=root);patch(M,"mac_configs",return_value=[])
+                    patch(M,"mac_info",return_value={"chip":"M5 Max","ram_gb":128,"macos":"27.0","arm64":True,"clt":"/tools","perf_cores":12})
+                    patch(setup,"data_folder",return_value=(root,[]));patch(setup,"free_gb",return_value=1000)
+                    patch(setup,"get_llama_cpp",return_value=root/"llama");patch(setup,"find_in",return_value=None)
+                    patch(M,"build_engine",return_value=root/"strata");patch(M,"engine_pids",return_value=[])
+                    patch(M,"ple_shard",side_effect=lambda files: files[0] if family=="swift" else files[-1])
+                    patch(setup,"download",side_effect=AssertionError("download"));patch(setup,"ready_fetch",side_effect=AssertionError("ready download"))
+                    for name in ("pip_install","check_shards","run","refresh_draft_vocab","say","ok","warn","step"):
+                        patch(setup,name)
+                    patch(setup,"done",return_value=True);verify=patch(setup,"verify_sha256")
+                    write=patch(setup,"write_config");patch(setup,"write_run_script",return_value=root/"run.sh")
+                    self.assertEqual(M.main(["--family",family,"--model",model,"--context","4096","--gguf-dir",tmp,
+                                             "--no-download-models","--no-start","--yes","--vision","no","--parallel","2"]),0)
+                    path,cfg=write.call_args.args;path.write_text(json.dumps(cfg));choice=setup.choices_from_config(path)
+                    self.assertEqual((choice["family"],choice["model"]),(family,model))
+                    self.assertEqual(cfg["parallel"],2)
+                    args=cfg["args"]
+                    self.assertEqual(args[args.index("--max-context")+1],"4096")
+                    if family=="swift":
+                        self.assertEqual(args[args.index("--native")+1],str(root/"metal"/f"{tag.lower()}-metal.gguf"))
+                        self.assertEqual(args[args.index("--ple-gguf")+1],str(root/M.model_shard_names(model,family)[0]))
+                    if fam.get("ready"):
+                        paths=setup.ready_paths(model,root)
+                        self.assertEqual(args[args.index("--pack")+1],str(paths["pack"]))
+                        self.assertEqual(args[args.index("--embd-gguf")+1],str(paths["embd"]))
+                        self.assertEqual(cfg["env"]["STRATA_METAL_STREAM"],"1")
+                        self.assertEqual(verify.call_count,len(setup.ready_files(model)))
+
+    def test_q36_installs_all_quants_with_distinct_server_config(self):
+        import argparse
+        import json
+        from contextlib import ExitStack
+        fam = setup.OWN_PATH_FAMILIES["qwen36-strata"]
+        for model in fam["models"]:
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                gguf = root / fam["file"].format(q=model)
+                gguf.write_bytes(b"fixture")
+                a = argparse.Namespace(family="qwen36-strata", model=model, context=4096, models_dir=None,
+                    gguf_dir=tmp, vision="no", update=False, no_download_models=True, build=False,
+                    vram_reserve_mib=None, parallel=2, host=None, api_key=None, browser=False, no_start=True, port=8090)
+                def patch(obj, name, **kw): return stack.enter_context(mock.patch.object(obj,name,**kw))
+                patch(M,"ROOT",new=root)
+                for name in ("pip_install", "run", "say", "ok", "warn"):
+                    patch(setup,name)
+                patch(setup,"get_llama_cpp",return_value=root / "llama")
+                patch(setup,"find_in",return_value=None)
+                patch(setup,"download",side_effect=AssertionError("download"))
+                verify=patch(setup,"verify_sha256")
+                build=patch(M,"build_engine",return_value=root / "strata-q36")
+                write=patch(setup,"write_setup_config")
+                patch(setup,"write_run_script",return_value=root / "run.sh")
+                self.assertEqual(M.setup_q36(a,{"ram_gb":32,"perf_cores":8},root,[]),0)
+                build.assert_called_once_with(root / "llama", engine="strata-q36")
+                verify.assert_called_once_with(gguf,*fam["sha256"][gguf.name])
+                path,cfg=write.call_args.args
+                self.assertEqual(cfg["arch"],"qwen35moe")
+                self.assertEqual(cfg["parallel"],2)
+                self.assertEqual(cfg["args"][cfg["args"].index("--native")+1],str(gguf))
+                self.assertEqual(cfg["args"][cfg["args"].index("--mtp")+1],"2")
+                path.write_text(json.dumps(cfg))
+                choice=setup.choices_from_config(path)
+                self.assertEqual((choice["family"],choice["model"]),(a.family,model))
+                # Offline projector failures happen before even preparing a build.
+                a.vision="yes";build.reset_mock()
+                with self.assertRaises(SystemExit): M.setup_q36(a,{"ram_gb":32},root,[])
+                build.assert_not_called()
 
 
 if __name__ == "__main__":

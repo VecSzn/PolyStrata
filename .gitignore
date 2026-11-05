@@ -53,6 +53,7 @@ build-vision-cuda12.bat
 /engine-cuda12/
 /engine-poly/
 /build-strata-poly.bat
+/build-poly-hip.bat
 /build-vision-poly.bat
 /engine-glm/
 /build-strata-glm.bat
@@ -60,6 +61,7 @@ build-vision-cuda12.bat
 /dist/
 *.done
 /third_party/*.zip
+/third_party/metal-cpp/
 
 # IDEs
 .vscode/
@@ -71,3 +73,5 @@ build-vision-cuda12.bat
 
 # local Windows HIP packaging output
 dist-hip/
+
+.agents/

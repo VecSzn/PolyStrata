@@ -37,13 +37,13 @@ public:
     // On when STRATA_METAL_STREAM=1, or (unset / auto) when the GGUF's experts do not fit in the GPU working set
     // with room to spare.  =0: never (the whole GGUF wrapped, as on the M5 Max).
     static bool wanted(const gguf::File& f, const mtl::Context& cx);
-    bool open(const gguf::File& f, std::string& err);
+    bool open(gguf::File& f, std::string& err, const std::string& pack = "", int n_embd = 2560, int n_ff = 640, int n_expert = 512);
     // pread `len` bytes at file offset `off` (F_NOCACHE)
     bool read(void* dst, uint64_t len, uint64_t off) const;
     // The dense tensors into one buffer; every tensor's offset in `f` is rewritten to its offset in `out`.
     // Tensors named in `skip` are left out (their offset is set to 0: they must not be read any more).
     bool load_dense(gguf::File& f, mtl::Context& cx, const std::vector<std::string>& skip, mtl::Buffer& out,
-                    std::string& err);
+                    std::string& err, const gguf::File* embedding = nullptr);
     // The arena: `budget` bytes of slots, filled from the profile's ranking (or layer-interleaved if none).
     // min_slots: each size class at least this many slots (576 with prompt chunks, else 64)
     // recheck (optional): just before the arena is committed, the bytes it may have now (arena_shrink); when that is
@@ -92,6 +92,7 @@ private:
     uint8_t* standalone_region(uint64_t bytes);   // the prompt's buffers as their own allocation, when no region of the arena's slots takes them
 
     int fd_ = -1;
+    int ne_ = 512;
     // <gguf>.experts (metal/tools/stream_experts.py): each expert's gate, up and down rows together, read with one
     // request (cfd_ >= 0); else the GGUF's three slices.  STRATA_METAL_CONTIG=0: the GGUF always.
     int cfd_ = -1;

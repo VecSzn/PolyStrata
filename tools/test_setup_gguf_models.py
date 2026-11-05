@@ -107,7 +107,8 @@ class Estimates(unittest.TestCase):
         with mock.patch.object(setup, "WIN", False):   # #11: AMD on Linux runs it
             self.assertNotIn("does not run", setup.poly_verdict(d, 64, 24.0, True))
         with mock.patch.object(setup, "WIN", True):     # a family that has run on Windows is not said to be untried
-            self.assertIn("AMD", setup.poly_verdict(d, 64, 24.0, True))           # only AMD on Windows is left out
+            self.assertIn("compiled locally", setup.poly_verdict(d, 64, 24.0, True))
+            self.assertTrue(setup.poly_fits(d, 64, 24.0, True))
             self.assertIn("not tried on Windows", setup.poly_verdict(d, 32, 8.0, False))
             self.assertNotIn("not tried on Windows", setup.poly_verdict(d, 32, 8.0, False, True))
 

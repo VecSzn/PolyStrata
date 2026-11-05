@@ -26,6 +26,8 @@ struct Buffer {
 };
 
 struct Pipeline {
+    // Copies share ownership; the last copy releases the native pipeline.
+    std::shared_ptr<void> owner;
     void* handle = nullptr;   // id<MTLComputePipelineState>
     int max_threads = 0;      // maxTotalThreadsPerThreadgroup
     int simd_width = 0;       // threadExecutionWidth

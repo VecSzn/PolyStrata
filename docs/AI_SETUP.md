@@ -7,6 +7,11 @@ version of everything below is [INSTALL.md](INSTALL.md).
 
 Work through the steps in order. Tell the user what you are doing in plain words; they may not be technical.
 
+For Apple Silicon, `./setup.sh --list-models` exposes the complete shared catalog and dispatches installation to
+`metal/setup_mac.py`. See [Mac model coverage](MAC.md#model-coverage) before selecting a newly ported path;
+synthetic kernel/engine checks do not establish actual-weight quality or performance. `qwen36-strata` keeps
+its separate `strata-q36` executable and server configuration.
+
 ## 0. Ground rules
 
 - **Never expose the server without an API key.** Keep the default `--host 127.0.0.1`. Only if the user asks for
@@ -155,8 +160,9 @@ Notes:
   (e.g. `sudo apt install python3-venv build-essential git`) and then rerun setup.
 - **AMD on Linux:** setup installs ROCm into `.venv` (~10 GB, no sudo) unless a system ROCm 7 exists, and compiles the
   engine for the card (10-20 minutes, once).
-- **AMD on Windows (new in 0.1.34):** setup downloads the ready-made AMD engine (~550 MB, ROCm included) - nothing
-  is compiled and only the AMD driver is needed. Before the model download it runs `engine\strata-device.exe
+- **AMD on Windows (new in 0.1.34):** for the Strata project's original engine, setup downloads the ready-made AMD engine
+  (~550 MB, ROCm included) and only the AMD driver is needed. Models using `strata-poly`, including Ornith 397B,
+  are compiled locally with an installed HIP SDK or AMD's TheRock wheels, plus Visual Studio C++ Build Tools. Before the model download it runs `strata-device.exe
   --list-devices`; if that does not list the card, the driver is the problem (tell the user to update AMD Software).
   One card per model and no images on Windows for now. It is new: ask the user to report how it runs (docs/AMD_HIP.md).
 - **NVIDIA with no ready-made engine for the card:** setup offers to install build tools and compile (20-40 minutes);
@@ -181,8 +187,10 @@ Windows (PowerShell):  Start-Process -FilePath ".\run-iq2_xs.bat"            (op
 Linux:                 nohup ./run-iq2_xs.sh > strata-server.out 2>&1 &
 ```
 
-Or `START-HERE.bat` / `./setup.sh` without flags, which starts the installed model (it asks which one when several are
-installed; add `--yes` to take the first). The server opens the user's browser on `http://127.0.0.1:8080` when it is
+Or `START-HERE.bat` / `./setup.sh --yes`, which starts the installed model (the first when several are installed).
+In a terminal, `./setup.sh` without `--yes` shows model, quantization and context menus with installed choices as
+defaults. Use the generated run script to start a specific saved configuration directly.
+The server opens the user's browser on `http://127.0.0.1:8080` when it is
 ready. Closing its window (or stopping the process) stops the model.
 
 ## 7. Verify
@@ -241,3 +249,17 @@ collect `strata-<model>.log` and the setup output, and suggest an issue at https
 PolyStrata also has an MCP server, so an AI tool can check, install, start and stop PolyStrata through tool calls
 (`strata_status`, `strata_models`, `strata_install`, `strata_start`, `strata_stop`, `strata_logs`) instead of the
 shell commands above. See [MCP_SERVER.md](MCP_SERVER.md).
+
+### Ornith 1.5 397B
+
+For an explicit request for the large Ornith model, use `--family ornith397`, not `ornith` (35B).
+Available sizes are IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S and IQ2_M. Downloads range from 81.78 to 133.13 GB;
+these are experimental entries with conservative memory estimates, not measured hardware requirements.
+Use `--model` to choose a size and `--vision cpu` or `--vision gpu` for optional image input. See
+[the backend notes](BACKENDS.md#ornith-15-397b-experimental) for shard counts, estimates and validation status.
+
+On Windows AMD, use `--backend hip --vision no`. Setup builds `strata-poly` locally using the installed
+AMD HIP SDK and Visual Studio C++ Build Tools; `HIP_PATH` can name the SDK root. Without an SDK, setup
+uses AMD's TheRock Windows wheels. It checks the selected card
+with the built HIP runtime before downloading the model. A 16 GB RX 9070 XT with 63 GB of RAM needs SSD paging
+even for IQ1_S (about 81 GB of RAM estimated); an explicit `--model IQ1_S --yes` accepts that warning.

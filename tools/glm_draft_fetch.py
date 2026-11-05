@@ -19,8 +19,10 @@ import os
 import struct
 import sys
 import urllib.request
+
 from concurrent.futures import ThreadPoolExecutor
 
+import hf_auth
 from mtp_fetch import BAD, get, sha256_of
 
 # A fixed commit of the repository, so every install reads the same bytes; STRATA_GLM_DRAFT_REVISION overrides it.
@@ -150,7 +152,7 @@ def header(block, kv, source):
 
 def size_of(url):
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "strata-mtp-fetch"})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with hf_auth.urlopen(req, timeout=120) as r:
         return int(r.headers["Content-Length"])
 
 
@@ -240,4 +242,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except hf_auth.HFAuthError as error:
+        sys.exit(str(error))

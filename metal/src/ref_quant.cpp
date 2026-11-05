@@ -22,7 +22,7 @@ const char* type_name(int t) {
         case Q3_K: return "Q3_K"; case Q4_K: return "Q4_K"; case Q5_K: return "Q5_K"; case Q6_K: return "Q6_K";
         case IQ2_XXS: return "IQ2_XXS"; case IQ2_XS: return "IQ2_XS"; case IQ2_S: return "IQ2_S";
         case IQ3_XXS: return "IQ3_XXS"; case IQ3_S: return "IQ3_S"; case IQ4_NL: return "IQ4_NL";
-        case IQ4_XS: return "IQ4_XS"; case Q2_0: return "Q2_0";
+        case IQ4_XS: return "IQ4_XS"; case Q2_0: return "Q2_0"; case NVFP4: return "NVFP4";
     }
     return "?";
 }
@@ -31,7 +31,7 @@ int block_elems(int t) {
     switch (t) {
         case F32: case F16: case BF16: return 1;
         case Q4_0: case Q5_0: case Q5_1: case Q8_0: case IQ4_NL: return 32;
-        case Q2_0: return 64;
+        case Q2_0: case NVFP4: return 64;
         default: return 256;
     }
 }
@@ -40,6 +40,7 @@ int block_bytes(int t) {
     switch (t) {
         case F32: return 4; case F16: case BF16: return 2;
         case Q4_0: return 18; case Q5_0: return 22; case Q5_1: return 24; case Q8_0: return 34; case IQ4_NL: return 18; case Q2_0: return 18;
+        case NVFP4: return 36;
         case Q3_K: return 110; case Q4_K: return 144; case Q5_K: return 176; case Q6_K: return 210;
         case IQ2_XXS: return 66; case IQ2_XS: return 74; case IQ2_S: return 82; case IQ3_XXS: return 98;
         case IQ3_S: return 110; case IQ4_XS: return 136;
@@ -104,6 +105,15 @@ static void get_scale_min_k4(int j, const uint8_t* q, uint8_t& d, uint8_t& m) {
 
 static void deq_block(int t, const uint8_t* b, float* y) {
     switch (t) {
+        case NVFP4: {
+            static constexpr float v[] = {0,.5f,1,1.5f,2,3,4,6,0,-.5f,-1,-1.5f,-2,-3,-4,-6};
+            for (int g=0;g<4;++g) {
+                int e=(b[g]>>3)&15,m=b[g]&7;
+                float d=(b[g]==0 || b[g]==127)?0:std::ldexp(e?1.f+m/8.f:float(m),e?e-7:-9);
+                for (int j=0;j<8;++j) {auto q=b[4+8*g+j];y[16*g+j]=d*v[q&15];y[16*g+j+8]=d*v[q>>4];}
+            }
+            return;
+        }
         case Q2_0: {
             const float d = f16_to_f32(rd16(b));
             for (int j = 0; j < 64; ++j) y[j] = (float)(((b[2 + j / 4] >> ((j % 4) * 2)) & 3) - 1) * d;
@@ -425,6 +435,7 @@ void random_blocks(int t, uint8_t* dst, int rows, int cols, uint64_t seed, float
         // the scale fields: magnitude so that |w| ~ scale.  Typical code magnitudes differ per type.
         const float u = 0.5f + r.uni();
         switch (t) {
+            case NVFP4: for(int j=0;j<4;++j)b[j]=uint8_t(8+r.next()%24); break;
             case Q2_0: put16(b, f32_to_f16(scale * u)); break;
             case Q8_0: put16(b, f32_to_f16(scale * u / 64)); break;
             case Q4_0: case IQ4_NL: put16(b, f32_to_f16(scale * u / (t == Q4_0 ? 4 : 64))); break;

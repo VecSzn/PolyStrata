@@ -59,7 +59,8 @@ uint64_t memory_limit_bytes();
 /// Linux: reads `paths`.  `explicit_limit` 0 = no operator cap.  nullopt when the RAM cannot be determined.
 std::optional<HostMemoryReading> sample_host_memory(const MemoryProbePaths& paths, uint64_t explicit_limit);
 
-/// The real files (Windows: GlobalMemoryStatusEx) and the cap set by set_memory_limit_bytes().
+/// The real files (Windows: GlobalMemoryStatusEx; macOS: free, purgeable and reclaimable file pages)
+/// and the cap set by set_memory_limit_bytes().
 std::optional<HostMemoryReading> sample_host_memory();
 
 std::optional<uint64_t> available_host_bytes();

@@ -11,6 +11,7 @@
 #include <mutex>
 #include <numeric>
 
+
 namespace strata::poly {
 namespace {
 
@@ -190,6 +191,7 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
     std::iota(order.begin(), order.end(), 0);
     if (late)
         std::stable_partition(order.begin(), order.end(), [&](int u) { return !late[by[(size_t) run[(size_t) u]]]; });
+
 
     float* hp = h.data();
     const int* byp = by.data();

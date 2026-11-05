@@ -210,13 +210,17 @@ void Qwen35::assign_scratch() {
     k_ = fbuf(kv);
     v_ = fbuf(kv);
     att_ = fbuf(heads);
-    score_ = fbuf((size_t) chunk_ * n_head_ * opt_.max_context);
-    sg_ = fbuf(n);
-    if (rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
-    if (rows_ >= kStageRows && opt_.kv_format == KvFmt::kQ8_0) {
-        // the K and V blocks a q8 prompt batch dequantizes, side by side; work_halves_ halves each
-        work_halves_ = kQ8WorkRows * (size_t) n_kv_ * head_dim_;
-        q8w_ = fbuf((2 * work_halves_ + 1) / 2);
+#if defined(STRATA_GPU_METAL)
+    if (!opt_.metal_balanced)
+#endif
+    {
+        score_ = fbuf((size_t) chunk_ * n_head_ * opt_.max_context);
+        if (rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
+        if (rows_ >= kStageRows && opt_.kv_format == KvFmt::kQ8_0) {
+            // the K and V blocks a q8 prompt batch dequantizes, side by side; work_halves_ halves each
+            work_halves_ = kQ8WorkRows * (size_t) n_kv_ * head_dim_;
+            q8w_ = fbuf((2 * work_halves_ + 1) / 2);
+        }
     }
     if (gdn_mma_.initialize([&] {
 #ifdef STRATA_POLY_GDN_MMA
@@ -272,6 +276,7 @@ void Qwen35::assign_scratch() {
         hip_value_split_logged_ = true;
     }
 #endif
+    sg_ = fbuf(n);
 }
 
 // A recurrent layer's convolution and delta-rule state lie one behind the other in state_ (alloc_caches()).

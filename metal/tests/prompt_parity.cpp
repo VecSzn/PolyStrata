@@ -27,16 +27,16 @@ int main() {
     std::printf("device %s\n", cx.device_name().c_str());
     int fails = 0;
     // ---- route_topk
-    {
+    for (const int NE : {256, 512}) {
         const int T = 300;
-        mtl::Pipeline p = cx.pipeline(lib, "route_topk");
-        mtl::Buffer lg = cx.alloc(4 * T * 512), ids = cx.alloc(4 * T * 10), w = cx.alloc(4 * T * 10);
+        mtl::Pipeline p = cx.pipeline(lib, NE == 512 ? "route_topk" : "route_topk_256");
+        mtl::Buffer lg = cx.alloc(4 * T * NE), ids = cx.alloc(4 * T * 10), w = cx.alloc(4 * T * 10);
         ref::Rng r(9);
         for (int t = 0; t < T; ++t)
-            for (int e = 0; e < 512; ++e) {
+            for (int e = 0; e < NE; ++e) {
                 float v = r.sym() * 4.0f;
                 if (t % 3 == 0) v = std::round(v * 4.0f) / 4.0f;
-                lg.as<float>()[t * 512 + e] = v;
+                lg.as<float>()[t * NE + e] = v;
             }
         const uint32_t nt = T;
         mtl::Dispatch d;
@@ -48,14 +48,14 @@ int main() {
         int bad = 0;
         double worst = 0;
         for (int t = 0; t < T; ++t) {
-            const float* l = lg.as<float>() + t * 512;
+            const float* l = lg.as<float>() + t * NE;
             float mx = -INFINITY;
-            for (int e = 0; e < 512; ++e) mx = std::max(mx, l[e]);
-            std::vector<double> pr(512);
+            for (int e = 0; e < NE; ++e) mx = std::max(mx, l[e]);
+            std::vector<double> pr(NE);
             double s = 0;
-            for (int e = 0; e < 512; ++e) s += (pr[e] = std::exp((double)l[e] - mx));
-            std::vector<int> order(512);
-            for (int e = 0; e < 512; ++e) order[e] = e;
+            for (int e = 0; e < NE; ++e) s += (pr[e] = std::exp((double)l[e] - mx));
+            std::vector<int> order(NE);
+            for (int e = 0; e < NE; ++e) order[e] = e;
             std::stable_sort(order.begin(), order.end(), [&](int x, int y) { return l[x] > l[y]; });
             double ss = 0;
             for (int k = 0; k < 10; ++k) ss += pr[order[k]] / s;
