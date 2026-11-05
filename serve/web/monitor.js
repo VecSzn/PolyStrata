@@ -1,8 +1,17 @@
 "use strict";
 const $ = id => document.getElementById(id);
 let selected = null, detail = null, pane = "input", records = [], state = null, operating = false, stamp = "", actionError = "";
-let apiKey = sessionStorage.getItem("strata.monitor.key") || "";
+// #142: inside the web app's Requests tab, the app's header, theme and saved API key stand in for this page's own
+let host = null;
+try { if (window.parent !== window) host = parent.document.documentElement; } catch (e) { /* framed by another site */ }
+let apiKey = sessionStorage.getItem("strata.monitor.key") || (host && JSON.parse(localStorage.getItem("strata.apikey") || '""')) || "";
 document.documentElement.dataset.theme = localStorage.getItem("strata.theme") || "dark";
+if (host) {
+  const sync = () => { document.documentElement.dataset.theme = host.dataset.theme; };
+  document.documentElement.classList.add("embedded");
+  sync();
+  new MutationObserver(sync).observe(host, {attributes: true, attributeFilter: ["data-theme"]});
+}
 const seconds = n => typeof n === "number" ? `${n.toFixed(2)} s` : "—";
 const speed = n => typeof n === "number" ? n.toFixed(1) : "—";
 const active = r => !["completed", "error", "disconnected"].includes(r.state);

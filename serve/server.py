@@ -6074,7 +6074,7 @@ def make_handler(svc: Service):
             elif path in ("/health", "/api/health"):
                 self._json(200, {"status": "ok", "max_context": svc.reported_ctx(), "model": svc.model,
                                  "images": svc.vision is not None, "api_key": bool(svc.api_key),
-                                 "image_generation": svc.images is not None,
+                                 "image_generation": svc.images is not None, "api_monitor": svc.api_monitor,
                                  "loaded": svc.loaded(), "service": "strata"})
             elif path.startswith("/v1/images/files/"):
                 # response_format url: the name (32 random hex digits) is the access, as an OpenAI image URL is

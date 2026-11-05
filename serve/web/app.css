@@ -77,7 +77,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .chip .st-btn--icon .st-icon { width: 14px; height: 14px; }
 
 /* ---------------------------------------------------------------- monitor */
-.view--monitor, .view--about { overflow-y: auto; }
+.view--monitor, .view--about, .view--requests { overflow-y: auto; }
+.requests-frame { flex: 1; width: 100%; border: 0; }
 .monitor, .about { max-width: 1240px; width: 100%; margin: 0 auto; padding: var(--st-s-6); display: flex; flex-direction: column;
                    gap: var(--st-s-5); }
 .state-card { display: flex; flex-direction: column; gap: var(--st-s-3); }
@@ -169,6 +170,8 @@ main { flex: 1; min-height: 0; display: flex; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 
 /* ---------------------------------------------------------------- narrow screens */
+/* tabs that do not fit the header (a narrow phone, or Images on) scroll instead of widening the page */
+.st-header .st-tabs { min-width: 0; overflow-x: auto; scrollbar-width: none; }
 @media (max-width: 1000px) {
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .monitor-row { grid-template-columns: 1fr; }
@@ -176,11 +179,14 @@ main { flex: 1; min-height: 0; display: flex; }
   .cfg-form { grid-template-columns: 1fr; gap: 4px; }
   .cfg-form .st-input { margin-bottom: var(--st-s-2); }
 }
+@media (max-width: 760px) {
+  .st-tab .st-icon { display: none; }
+}
 @media (max-width: 640px) {
   .st-header { padding: 0 var(--st-s-3); gap: var(--st-s-2); }
-  .st-header .st-tabs { margin-left: 0; }
-  .st-tab { padding: 0 10px; }
-  .st-tab .st-icon { display: none; }
+  .st-header__brand { display: none; }
+  .st-header .st-tabs { margin-left: 0; gap: 2px; }
+  .st-tab { padding: 0 8px; }
   #pill-text { display: none; }
   .chat { padding: var(--st-s-5) var(--st-s-4); }
   .composer-wrap { padding: 0 var(--st-s-3) var(--st-s-3); }

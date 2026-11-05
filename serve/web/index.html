@@ -27,6 +27,8 @@
       <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-image"/></svg>Images</button>
     <button class="st-tab" role="tab" id="tab-btn-monitor" aria-controls="view-monitor" aria-selected="false" data-tab="monitor">
       <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-activity"/></svg>Monitor</button>
+    <button class="st-tab" role="tab" id="tab-btn-requests" aria-controls="view-requests" aria-selected="false" data-tab="requests">
+      <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-layers"/></svg>Requests</button>
     <button class="st-tab" role="tab" id="tab-btn-about" aria-controls="view-about" aria-selected="false" data-tab="about">
       <svg class="st-icon st-icon--sm"><use href="web/sprite.svg#i-info"/></svg>About</button>
   </nav>
@@ -168,6 +170,19 @@
         <div class="mcp-list" id="mcp-list"></div>
         <p class="muted small mcp-note">Their tools run on this PC with your rights, when the model decides to call them
           (in this page's chat only; switch it off in Sampling).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Requests ============================ -->
+  <section class="view view--requests" id="view-requests" role="tabpanel" aria-labelledby="tab-btn-requests" hidden>
+    <iframe class="requests-frame" id="requests-frame" title="API monitor" hidden></iframe>
+    <div class="about" id="requests-off" hidden>
+      <div class="st-card">
+        <span class="card-title">The API monitor is off</span>
+        <p class="muted">It keeps the last 100 requests' prompts and answers in memory, so it is off by default. To turn it
+          on, add <code>"api_monitor": true</code> to the model's config file (<code>strata-&lt;model&gt;.json</code>) or
+          start the server with <code>--api-monitor</code>, then restart it.</p>
       </div>
     </div>
   </section>

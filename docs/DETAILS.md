@@ -519,7 +519,7 @@ Windows, `build-essential` + CUDA on Ubuntu) and compiles the engine for your GP
 
 Then it downloads and prepares everything (the model is 66-76 GB, so the first start takes a while; an interrupted
 download continues where it stopped) and **starts the model**: your browser opens `http://127.0.0.1:8080`, the PolyStrata
-app. It has three tabs:
+app. It has four tabs:
 - **Chat:** streaming answers, the model's thinking (folded away once it answers), code with a copy button, pictures when
   images are on, and sampling and thinking-level settings. Chats stay in your browser.
 - **Monitor:** what the model is doing (reading the prompt, with progress, or writing, at how many tokens/s); GPU load,
@@ -529,6 +529,7 @@ On a Mac (Metal backend) the Monitor's GPU load and VRAM come from IOKit's IOAcc
 Utilization % and its in-use system memory, against the device's Metal working set - and the card says the rest: there
 is no temperature or power reading without root (`powermetrics`), and an Apple Silicon GPU sits on the die, so there is
 no PCIe link. The engine's own VRAM figures are in its log.
+- **Requests:** the [API request monitor](#api-request-monitor) when it is on, or how to turn it on.
 - **About:** the model and engine settings, and the addresses to connect other apps.
 
 `http://127.0.0.1:8080/?q=your question` opens it with a new chat already asking. The API is at
@@ -2302,7 +2303,7 @@ then usage/timings and `[DONE]`; failures emit an SSE error and `[DONE]` without
 Off by default, since it keeps prompts and answers in memory: turn it on with `"api_monitor": true` in
 `strata-<model>.json` (or `serve/server.py --api-monitor`); otherwise nothing is recorded and the two endpoints below
 answer 404.
-Open `/api-monitor` to inspect API traffic without opening a chat. It shows the model state, safe
+Open `/api-monitor`, or the web app's Requests tab, to inspect API traffic without opening a chat. It shows the model state, safe
 load/unload controls, active/queued requests, original request bodies, output, separate reasoning and
 non-stream response bodies. Total wall-clock includes FIFO waits and automatic loading; load, queue,
 first-token, prompt/output tokens and engine decode timing are shown separately.
@@ -2310,7 +2311,8 @@ first-token, prompt/output tokens and engine decode timing are shown separately.
 `GET /api/requests` returns compact summaries; `GET /api/requests?id=<id>` returns one retained request.
 Both use the existing API-key check. The monitor retains the newest **100 requests in memory** until restart,
 with **262,144 characters per input/output/reasoning/response field** and visible truncation flags. The actual API
-responses are unaffected. Headers are not recorded, and the monitor key is kept in this tab's session storage.
+responses are unaffected. Headers are not recorded, and the monitor key is kept in this tab's session storage
+(in the Requests tab, the key saved in the app's Settings is used).
 Treat request history as sensitive input/output when exposing PolyStrata on a network: set an API key as above.
 The page uses relative URLs and works through the existing host binding or a reverse proxy.
 
