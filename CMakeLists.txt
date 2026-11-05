@@ -2167,6 +2167,14 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
   target_include_directories(poly_sink_attend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                           ${_strata_gpu_include_directories})
   target_link_libraries(poly_sink_attend_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+  # STRATA_HIP_PREFILL_FP32 (attend_batch() on FP32 inputs over a q8_0 cache): against an FP64 reference and the default path, and the
+  # fallbacks; needs a card (77 = skipped)
+  add_executable(poly_hip_prefill_fp32_test src/poly/hip_prefill_fp32_test.cu src/poly/kernels.cu)
+  target_include_directories(poly_hip_prefill_fp32_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                            ${_strata_gpu_include_directories})
+  target_link_libraries(poly_hip_prefill_fp32_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+  add_test(NAME poly_hip_prefill_fp32_test COMMAND poly_hip_prefill_fp32_test)
+  set_tests_properties(poly_hip_prefill_fp32_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
   # fattn_q8() and fattn_f16() (llama.cpp's flash-attention kernel) against attend_batch(), and with `dec` fdec_q8()
   # against attend(); needs a card, run by hand
   add_executable(poly_fattn_test src/poly/fattn_test.cu src/poly/kernels.cu)
