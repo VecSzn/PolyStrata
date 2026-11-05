@@ -949,6 +949,31 @@ keeps the old path on HIP. This new option is a HIP value-reduction kernel; it
 does not replace `STRATA_FDEC` and makes no claim to the general split-key
 algorithm itself.
 
+## Opt-in FP32 prompt attention in strata-poly (HIP)
+
+`STRATA_HIP_PREFILL_FP32=1` runs the two products of the prompt's attention (`attend_batch()`: the scores,
+then the weighted values, for every block of keys) on FP32 inputs instead of FP16 ones with an FP32 sum.
+On an RX 5700 XT (gfx1010) hipBLAS's FP32 products reach 4.5 to 5 TFLOPS, its FP16-input ones 3 to 4: the
+card has no packed FP16 math with an FP32 sum, so the halves only add the work of rounding to them. The
+queries, the dequantized keys and values and the softmax's weights stay FP32. It is also closer to the
+exact attention: against an FP64 reference, on outputs of 0.009 to 0.04, the default path's largest error
+is 2e-6 to 1.5e-5 (about 3e-4 of the largest output, from rounding to halves), this one's 6e-9 to 4e-8.
+
+It applies to a q8_0 cache for both K and V, where the q8 workspace holds at least 256 FP32 rows (the
+engine's holds 1,024) and the score scratch is four times the grouped queries' room; anything else runs
+the default path unchanged. Unset, `0` and other values keep the default path, byte-identical to before.
+It needs no extra VRAM: the scores, the weights and the grouped queries share the score scratch, the
+dequantized rows the q8 workspace. A block of keys is shortened by 16 where it would be a multiple of 1,024,
+at which hipBLAS's FP32 values product runs at half its speed. Decode, `STRATA_FDEC` and the CUDA and SYCL
+builds are unaffected (the code is compiled only under HIP).
+
+Measured on an RX 5700 XT 8 GB, Windows, with the engine's buffers (512 tokens a chunk, 16 query heads,
+two KV heads of 256, q8_0 cache): `attend_batch()` for 512 tokens at 8,000 keys 22.4 -> 16.6 ms, at
+30,000 keys 83.4 -> 61.5, at 100,000 keys 277 -> 204, at 200,000 keys 554 -> 408 (1.35x to 1.36x at
+every length, one layer; the model has ten such layers). On a replay of a recorded agentic session (8 requests at 90K to 112K tokens of context, Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL, MTP on) the engine read new prompt tokens at 145 tokens/s instead of 122 and a cold 90K prompt at 247 instead of 216; decode speed was unchanged (37.5 against 37.4 tokens/s). A needle test (a code word in 54K tokens, three rounds) found it every time.
+
+What was not tested: any card but gfx1010, CUDA and SYCL builds (the new kernels are compiled only under HIP), other cache formats (an FP16 cache runs the default path) and text quality beyond the FP64 comparison above. `poly_hip_prefill_fp32_test` (16 checks, about 8 s, needs a card; exits 77 without one) compares the path with an FP64 reference and the default path at several lengths and chunk sizes, for two head geometries, and checks the fallbacks.
+
 ## Original backend validation (PR #94)
 
 The following is historical validation of the original backend, not a fresh
