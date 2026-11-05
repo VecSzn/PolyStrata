@@ -55,9 +55,13 @@ split_q8(const float* __restrict__ q, const int8_t* __restrict__ kc, const uint1
         const int qi = i / kDim, d = i % kDim, t = qi / 8, h = qi % 8;
         Qs[d * Q + qi] = t < tokens ? q[((size_t(first) + t) * n_head + g * kG + h) * kDim + d] * scale : 0.0f;
     }
-    float O[Q];
+    // The values' tile of a thread: 8 queries (a token's 8 heads) x 4 dimensions.  64 dimension groups x NQG tokens x KS key subsets are 256 threads,
+    // so each LDS read of a weight or a value byte feeds 32 multiply-adds (a thread a dimension fed 8 to 32 of them for 3 to 8 reads a key).
+    constexpr int NQG = Q / 8, KS = 4 / NQG;
+    const int dg = tid & 63, qgrp = (tid >> 6) % NQG, ksub = (tid >> 6) / NQG;
+    float O[8][4];
 #pragma unroll
-    for (int i = 0; i < Q; ++i) O[i] = 0.0f;
+    for (int i = 0; i < 8; ++i) { O[i][0] = 0.0f; O[i][1] = 0.0f; O[i][2] = 0.0f; O[i][3] = 0.0f; }
     float m_run[Q / 8], l_run[Q / 8];
 #pragma unroll
     for (int u = 0; u < Q / 8; ++u) { m_run[u] = -INFINITY; l_run[u] = 0.0f; }
@@ -160,27 +164,50 @@ split_q8(const float* __restrict__ q, const int8_t* __restrict__ kc, const uint1
         put(vr, vsr, Vscale, t0);   // the scores are done with Ks: the values take its place
         __syncthreads();
         if (t0 + TILE < nk) load(kc, ks, kr, ksr, t0 + TILE);   // the next tile's keys arrive during the values
-        // (D) the values: thread d takes dimension d of every row of the tile, for all the queries
+        // (D) the values: thread (dimension group, token, key subset) takes dimensions 4 dg .. 4 dg + 3 of every KS-th row of the tile, for the token's 8 heads
+        {
+            const float4 a0 = *reinterpret_cast<const float4*>(&alpha[qgrp * 8]), a1 = *reinterpret_cast<const float4*>(&alpha[qgrp * 8 + 4]);
+            const float al[8] = {a0.x, a0.y, a0.z, a0.w, a1.x, a1.y, a1.z, a1.w};
 #pragma unroll
-        for (int c = 0; c < Q / 4; ++c) {
-            const float4 a4 = *reinterpret_cast<const float4*>(&alpha[4 * c]);
-            O[4 * c] *= a4.x; O[4 * c + 1] *= a4.y; O[4 * c + 2] *= a4.z; O[4 * c + 3] *= a4.w;
+            for (int i = 0; i < 8; ++i) { O[i][0] *= al[i]; O[i][1] *= al[i]; O[i][2] *= al[i]; O[i][3] *= al[i]; }
         }
-        for (int j = 0; j < ntile; ++j) {
-            const float v = float(Ks[j * kPad + tid]) * Vscale[j * 8 + (tid >> 5)];
+        for (int j = ksub; j < ntile; j += KS) {
+            const int vi = *reinterpret_cast<const int*>(Ks + j * kPad + 4 * dg);   // 4 value codes
+            const float sc = Vscale[j * 8 + (dg >> 3)];
+            const float v0 = float((vi << 24) >> 24) * sc, v1 = float((vi << 16) >> 24) * sc, v2 = float((vi << 8) >> 24) * sc, v3 = float(vi >> 24) * sc;
+            const float4 pa = *reinterpret_cast<const float4*>(&P[j * Q + qgrp * 8]), pb = *reinterpret_cast<const float4*>(&P[j * Q + qgrp * 8 + 4]);
+            const float pw[8] = {pa.x, pa.y, pa.z, pa.w, pb.x, pb.y, pb.z, pb.w};
 #pragma unroll
-            for (int c = 0; c < Q / 4; ++c) {
-                const float4 pw = *reinterpret_cast<const float4*>(&P[j * Q + 4 * c]);
-                O[4 * c] += pw.x * v; O[4 * c + 1] += pw.y * v; O[4 * c + 2] += pw.z * v; O[4 * c + 3] += pw.w * v;
-            }
+            for (int i = 0; i < 8; ++i) { O[i][0] += pw[i] * v0; O[i][1] += pw[i] * v1; O[i][2] += pw[i] * v2; O[i][3] += pw[i] * v3; }
         }
         __syncthreads();
     }
-    // the block's partial sums: (kDim sums, the max, the sum of exponentials) a (token, head)
+    // the block's partial sums: (kDim sums, the max, the sum of exponentials) a (token, head).  With KS > 1 the key subsets' sums are added first, through
+    // the tile's LDS (the values are done with it).
+    if (KS > 1) {
+        float* red = reinterpret_cast<float*>(Ks);   // [KS - 1][Q][kDim]
+        if (ksub > 0) {
 #pragma unroll
-    for (int qi = 0; qi < Q; ++qi) {
-        const int t = qi / 8, h = qi % 8;
-        if (t < tokens) part[((size_t(t) * n_head + g * kG + h) * blocks + b) * (kDim + 2) + tid] = O[qi];
+            for (int i = 0; i < 8; ++i)
+                *reinterpret_cast<float4*>(&red[((ksub - 1) * Q + qgrp * 8 + i) * kDim + 4 * dg]) = make_float4(O[i][0], O[i][1], O[i][2], O[i][3]);
+        }
+        __syncthreads();
+        if (ksub == 0) {
+#pragma unroll
+            for (int k = 1; k < KS; ++k)
+#pragma unroll
+                for (int i = 0; i < 8; ++i) {
+                    const float4 r = *reinterpret_cast<const float4*>(&red[((k - 1) * Q + qgrp * 8 + i) * kDim + 4 * dg]);
+                    O[i][0] += r.x; O[i][1] += r.y; O[i][2] += r.z; O[i][3] += r.w;
+                }
+        }
+    }
+    if (ksub == 0 && qgrp < tokens) {
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+            float* out = part + ((size_t(qgrp) * n_head + g * kG + i) * blocks + b) * (kDim + 2) + 4 * dg;
+            out[0] = O[i][0]; out[1] = O[i][1]; out[2] = O[i][2]; out[3] = O[i][3];
+        }
     }
 #pragma unroll
     for (int u = 0; u < Q / 8; ++u) {
