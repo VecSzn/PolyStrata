@@ -486,6 +486,22 @@ before it installs a model.
   free pool (an RX 7600 showed 48 MiB free after releasing 1 GiB, [#13](https://github.com/VecSzn/PolyStrata/issues/13)), so a long prompt was refused
   with "no VRAM for the attention cache". With the caches whole, 32K of context fits on 8 GB beside 4,592 of
   Qwen3.6's 10,496 experts (4.4 GiB).
+- Opt-in `--vram-pool` (strata-poly, one card, VMM): the engine claims the card's VRAM once at load, as 2 MiB
+  handles, and keeps it for the whole run. The attention caches and the expert cache trade handles of that pool as the
+  context grows and shrinks, and nothing is released to the card, so the "released VRAM never returns" above does not
+  arise (not tried on Linux ROCm). `--vram-reserve-mib` is then the margin left outside the pool (256 MiB at least),
+  not VRAM kept free and idle. Under Windows the claim is sized by the budget Windows gives the process, read again
+  every 256 MiB while the pool grows, because that budget falls as the process does (on an RX 5700 XT, 8 GB: 7,383
+  to 6,956 MiB while 3.4 GiB were claimed), and memory past it is moved out to system RAM: sized from the card's free
+  VRAM, a margin of 256 MiB left the process 150 MiB over its budget and 2.4 GB were moved out (decode 6 tokens/s).
+  The pool is capped at what the model can use (every expert slot, the caches' whole address range and 512 MiB), so a
+  card that holds the model keeps the rest. Measured on that RX 5700 XT (Ryzen 5 3600X, 32 GB, Windows 11), Tiel
+  Coder 35B-A3B UD-Q4_K_XL, `--max-context 262144 --kv q8_0`, a 34K-token prompt between short chats:
+  `--vram-reserve-mib 2048` without the pool held 1,172 experts and wrote 40 to 46 tokens/s after the prompt;
+  `--vram-pool` with a margin of 256 MiB held 1,882 and wrote 50 to 53, with the same 648 MiB of shared GPU memory and
+  the prompt read at 312 against 314 tokens/s. A long read grows the pinned host buffers, which count as shared GPU
+  memory (+460 MiB after a 53K prompt); that is not a spill. `STRATA_FREEZE_EXPERTS` cannot grow the caches past the
+  pool.
 - Measured by the port's author on an RX 7600 (gfx1102, 8 GB; Ryzen 5 5600X, 30 GB of RAM) with the README's
   benchmark, `--kv-whole` on ([#13](https://github.com/VecSzn/PolyStrata/issues/13)):
 
