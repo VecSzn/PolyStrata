@@ -951,28 +951,42 @@ algorithm itself.
 
 ## Opt-in FP32 prompt attention in strata-poly (HIP)
 
-`STRATA_HIP_PREFILL_FP32=1` runs the two products of the prompt's attention (`attend_batch()`: the scores,
-then the weighted values, for every block of keys) on FP32 inputs instead of FP16 ones with an FP32 sum.
-On an RX 5700 XT (gfx1010) hipBLAS's FP32 products reach 4.5 to 5 TFLOPS, its FP16-input ones 3 to 4: the
+`STRATA_HIP_PREFILL_FP32=1` or `=2` runs the two products of the prompt's attention (`attend_batch()`: the
+scores, then the weighted values, for every block of keys) on FP32 inputs instead of FP16 ones with an FP32
+sum. On an RX 5700 XT (gfx1010) hipBLAS's FP32 products reach 4.5 to 5 TFLOPS, its FP16-input ones 3 to 4: the
 card has no packed FP16 math with an FP32 sum, so the halves only add the work of rounding to them. The
-queries, the dequantized keys and values and the softmax's weights stay FP32. It is also closer to the
-exact attention: against an FP64 reference, on outputs of 0.009 to 0.04, the default path's largest error
-is 2e-6 to 1.5e-5 (about 3e-4 of the largest output, from rounding to halves), this one's 6e-9 to 4e-8.
+queries, the keys and values and the softmax's weights stay FP32. It is also closer to the exact attention:
+against an FP64 reference, on outputs of 0.009 to 0.04, the default path's largest error is 2e-6 to 1.5e-5
+(about 3e-4 of the largest output, from rounding to halves), these paths' 6e-9 to 9e-8.
 
-It applies to a q8_0 cache for both K and V, where the q8 workspace holds at least 256 FP32 rows (the
-engine's holds 1,024) and the score scratch is four times the grouped queries' room; anything else runs
-the default path unchanged. Unset, `0` and other values keep the default path, byte-identical to before.
-It needs no extra VRAM: the scores, the weights and the grouped queries share the score scratch, the
-dequantized rows the q8 workspace. A block of keys is shortened by 16 where it would be a multiple of 1,024,
-at which hipBLAS's FP32 values product runs at half its speed. Decode, `STRATA_FDEC` and the CUDA and SYCL
-builds are unaffected (the code is compiled only under HIP).
+- `=1`: hipBLAS SGEMM on an FP32 copy of each block of the cache. Needs a q8 workspace of at least 256 FP32
+  rows (the engine's holds 1,024); a block of keys is shortened by 16 where it would be a multiple of 1,024,
+  at which hipBLAS's FP32 values product runs at half its speed.
+- `=2`: our own kernels (`src/poly/hip_prefill_gemm.cuh`) read the q8_0 codes and fp16 scales as they lie,
+  so there is no FP32 copy, no dequantizing kernel and no workspace. 128 x 128 x 16 register tiles of
+  8 x 8 outputs a thread, double-buffered in LDS, a loop without bounds checks for whole tiles. On the
+  engine's shapes (4,096 columns, 900 to 1,400 keys a block, two KV heads of 256) they reach 5.4 TFLOPS for the
+  scores and 6.3 to 6.6 for the values, against hipBLAS SGEMM's 4.5 and 5.0 (the card's peak is 9.75).
 
-Measured on an RX 5700 XT 8 GB, Windows, with the engine's buffers (512 tokens a chunk, 16 query heads,
-two KV heads of 256, q8_0 cache): `attend_batch()` for 512 tokens at 8,000 keys 22.4 -> 16.6 ms, at
-30,000 keys 83.4 -> 61.5, at 100,000 keys 277 -> 204, at 200,000 keys 554 -> 408 (1.35x to 1.36x at
-every length, one layer; the model has ten such layers). On a replay of a recorded agentic session (8 requests at 90K to 112K tokens of context, Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL, MTP on) the engine read new prompt tokens at 145 tokens/s instead of 122 and a cold 90K prompt at 247 instead of 216; decode speed was unchanged (37.5 against 37.4 tokens/s). A needle test (a code word in 54K tokens, three rounds) found it every time.
+Both apply to a q8_0 cache for K and V and a score scratch four times the grouped queries' room (`=2` also to
+heads of a multiple of 32 values); anything else runs the default path unchanged. Unset, `0` and other values
+keep the default path, byte-identical to before. No extra VRAM: the scores, the weights and the grouped
+queries share the score scratch. Decode, `STRATA_FDEC` and the CUDA and SYCL builds are unaffected (the code
+is compiled only under HIP). Set it before starting the engine.
 
-What was not tested: any card but gfx1010, CUDA and SYCL builds (the new kernels are compiled only under HIP), other cache formats (an FP16 cache runs the default path) and text quality beyond the FP64 comparison above. `poly_hip_prefill_fp32_test` (16 checks, about 8 s, needs a card; exits 77 without one) compares the path with an FP64 reference and the default path at several lengths and chunk sizes, for two head geometries, and checks the fallbacks.
+Measured on an RX 5700 XT 8 GB, Windows, with the engine's buffers (512 tokens a chunk, 16 query heads, two KV
+heads of 256, q8_0 cache): `attend_batch()` for 512 tokens, one layer (the model has ten), default / `=1` /
+`=2`: at 30,000 keys 83.4 / 61.5 / 50.9 ms, at 100,000 keys 277 / 204 / 169 ms (1.36x and 1.64x). On a replay
+of a recorded agentic session (8 requests at 90K to 112K tokens of context, Cyber-Tiel-Coder-35B-A3B
+UD-Q4_K_XL, MTP on) the engine read new prompt tokens at 122 / 145 / 159 tokens/s and a cold 90K prompt at
+216 / 247 / 266; decode speed was unchanged (37.4 / 37.5 / 38.6 tokens/s, within the noise of the runs). A
+needle test (a code word in 54K tokens, three rounds) found it every time with both.
+
+What was not tested: any card but gfx1010, CUDA and SYCL builds (the new kernels are compiled only under HIP),
+other cache formats (an FP16 cache runs the default path) and text quality beyond the FP64 comparison above.
+`poly_hip_prefill_fp32_test` (32 checks, about 10 s, needs a card; exits 77 without one) compares both levels
+with an FP64 reference and the default path at several lengths and chunk sizes, for heads of 64, 128 and 256,
+and checks the fallbacks.
 
 ## Original backend validation (PR #94)
 
