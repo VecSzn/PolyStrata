@@ -11,6 +11,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #if defined(STRATA_USE_HIP)
+#include "hip_split_attend.cuh"
 #include "hip_value_split.cuh"
 #endif
 
@@ -2969,7 +2970,7 @@ void head_norm_rope(const float* x, int x_stride, const float* w, float* y, int 
 void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows, float* score,
             int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window,
             int ring, bool whole, const long long* at, int room, size_t score_floats, Kvq8 kq8, Kvq8 vq8,
-            const float* sinks) {
+            const float* sinks, size_t part_floats) {
     if (at && (room < 1 || (whole && rows > chunk)))
         throw std::invalid_argument("attend: a position on the card needs its room, and with `whole` one launch");
     if (dim % SCORE_VALUES || uintptr_t(q) % (SCORE_VALUES * sizeof(float)) || uintptr_t(kcache) % (SCORE_VALUES * 2))
@@ -2982,6 +2983,23 @@ void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int6
     const int most = grid(size_t(at ? room : pos + rows), SPLIT_KEYS);
     const int fit = (int) std::min<size_t>(chunk, score_floats / (size_t(n_head) * most * (dim + 2)));
     const bool split64 = dim == 64 && per == 4, split128 = dim == 128 && per == 8;
+#if defined(STRATA_USE_HIP)
+    // STRATA_HIP_SPLIT_ATTEND=1 (opt-in): up to 4 tokens over a long q8_0 cache, heads of 256 values in groups of 8, in one flash-decoding pass that
+    // reads each key and value once for all the tokens (hip_split_attend.cuh).  `part_floats` of `score` hold its partial sums.
+    if (kq && vq && part_floats > 0 && hip_split_attend::requested(std::getenv("STRATA_HIP_SPLIT_ATTEND"))) {
+        const int all = int(at ? room : pos + rows);
+        if (all >= 4096 && hip_split_attend::fits(dim, n_head, kv_heads, all, std::min(rows, hip_split_attend::kMaxRows), window, ring, whole,
+                                                  sinks != nullptr, part_floats)) {
+            for (int first = 0, c = 0; first < rows; first += c) {
+                c = std::min(rows - first, hip_split_attend::kMaxRows);
+                const int keys = int(at ? room : pos + first + c);
+                hip_split_attend::run(q, kq8.codes, kq8.scales, vq8.codes, vq8.scales, score, out, n_head, kv_heads, (long long) pos, first, c,
+                                      scale, (keys + hip_split_attend::kKeys - 1) / hip_split_attend::kKeys, at, (hipStream_t) cs(stream));
+            }
+            return;
+        }
+    }
+#endif
     if ((split64 || split128) && window == 0 && ring == 0 && !whole && !kq && !vq && fit > 0) {
         for (int first = 0, c = 0; first < rows; first += c) {
             c = std::min(fit, rows - first);
