@@ -52,6 +52,7 @@ bilgisayarda, sekiz küçük olanı ayrıca 8 GB kartlı bir dizüstünde de ça
 
 Sunucu, çalışırken kurulu modeller arasında geçiş yapabilir ([nasıl](docs/BACKENDS.md#changing-the-model)).
 
+PolyStrata, [VecSzn](https://github.com/VecSzn) tarafından oluşturuldu.
 PolyStrata, Niko1221'in [Strata](https://github.com/Niko1221/Strata) projesi üzerine kurulmuştur.
 Neden ayrı bir depo olduğu, AMD ve daha küçük kartlar, ince ayarlı modeller (fine-tune) ve diğer sorular:
 [SSS](docs/FAQ.md).
@@ -156,7 +157,7 @@ Qwen3.6, Clover, Ornith 1.5, Gemma 4, Tiel Coder ve MiniCPM-V'nin her birinin ne
 Bir yapay zekâ kodlama asistanı (Claude Code, Cursor, Codex, GitHub Copilot, ...) kullanıyor musun? Şunu ona yapıştır:
 
 ```text
-Set up PolyStrata on this PC for me: https://github.com/VecSzn/PolyStrata - follow docs/AI_SETUP.md in that repository.
+Set up PolyStrata on this PC for me: https://github.com/simplexai-labs/PolyStrata - follow docs/AI_SETUP.md in that repository.
 ```
 
 Asistan ekran kartını, RAM'ini ve diskini kontrol eder ve sana uyan modeli seçer. Sonra onu kurar, başlatır ve
@@ -165,7 +166,7 @@ uygulamalarını nasıl bağlayacağını söyler. Yapay zekâ araçları PolySt
 
 ### Ya da kendin yap
 
-[PolyStrata'yı indir](https://github.com/VecSzn/PolyStrata/archive/refs/heads/main.zip) ve zip'ten çıkar (ya da `git clone` ile klonla).
+[PolyStrata'yı indir](https://github.com/simplexai-labs/PolyStrata/archive/refs/heads/main.zip) ve zip'ten çıkar (ya da `git clone` ile klonla).
 **Windows:** **`START-HERE.bat`** dosyasına çift tıkla. **Linux:** PolyStrata klasöründe **`./setup.sh`** komutunu çalıştır.
 
 **Mac (Apple Silicon, M1 ila M5, macOS 15 veya daha yenisi):** Apple'ın Command Line Tools paketini bir kez kur
@@ -287,7 +288,7 @@ Değişiklikten sonra PolyStrata'yı yeniden başlat (`START-HERE.bat` veya `./s
 - **8080 portunun zaten kullanımda olduğunu söylüyor.** PolyStrata zaten çalışıyor. Penceresini ara.
 
 Diğer sorunlar ve çözümleri: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Hâlâ takıldın mı? Bir
-[issue](https://github.com/VecSzn/PolyStrata/issues) aç ve PolyStrata klasöründeki `strata-<model>.log` dosyasını ekle.
+[issue](https://github.com/simplexai-labs/PolyStrata/issues) aç ve PolyStrata klasöründeki `strata-<model>.log` dosyasını ekle.
 Bir güvenlik sorunu mu buldun? Gizli olarak bildir: [SECURITY.md](SECURITY.md).
 
 ## Nasıl çalışıyor?
