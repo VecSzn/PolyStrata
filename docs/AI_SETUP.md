@@ -136,6 +136,7 @@ The flags (all of them: `START-HERE.bat --help`):
 | `--vision yes\|no\|gpu\|cpu` | read pictures; `--yes` leaves images off. AMD cards: `cpu` |
 | `--gpu N` / `--gpus 0,1` / `--gpus all` | one card, or several sharing the model (default: the card with the most VRAM) |
 | `--backend cuda\|hip` | NVIDIA or AMD engine; chosen by itself on a PC with only one kind of card |
+| `--max-compatibility` | with `--build` on Windows: use the release build (AVX2 baseline, static MSVC runtime), so it also runs on other PCs |
 | `--data-dir PATH` | where the 70-120 GB of model files go |
 | `--custom-gguf PATH` | install one custom GGUF; setup reads the header and picks family/size. Not for nvfp4 packs |
 | `--gguf-dir PATH` | run GGUFs you already have by name; strata-poly also accepts same-arch fine-tunes. Not for nvfp4 packs |
