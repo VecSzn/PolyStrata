@@ -69,11 +69,14 @@ On a PC with no NVIDIA card PolyStrata can use, the AMD card is chosen by itself
   install, no compiler, no admin rights.
 - **Detection:** setup reads the display adapters Windows lists (their PCI ids; the VRAM size from the display
   driver's registry entry). An integrated Radeon is listed as not supported, except the Ryzen AI Max "Strix Halo" (Radeon 8060S / 8050S / 8040S, gfx1151: [STRIX_HALO.md](STRIX_HALO.md)); a Strix Point (890M / 880M, gfx1150), Krackan (860M / 840M, gfx1152) or Phoenix / Hawk Point (780M / 760M, gfx1103) Radeon is named as what it is and not supported (on Linux the 780M / 760M has an opt-in build: [RADEON_780M.md](RADEON_780M.md)).
-- **Engine:** the ready-made `strata-windows-x64-hip.zip` from the release (built by `tools\hip\build_windows.bat`
-  for gfx1100, gfx1101, gfx1102, gfx1200, gfx1201, gfx1030 and, from 0.1.40, gfx1151 (Strix Halo, unvalidated on Windows)) goes into `engine\`. It carries the ROCm libraries the
+- **Engine:** by default the ready-made `strata-windows-x64-hip.zip` from the release (built by `tools\hip\build_windows.bat`
+  for gfx1100, gfx1101, gfx1102, gfx1200, gfx1201, gfx1030 and, from 0.1.40, gfx1151 (Strix Halo, unvalidated on Windows)) goes into `engine\`.
+  `START-HERE.bat --backend hip --build` compiles the engine on the PC instead (Visual Studio 2022 Build Tools with the
+  C++ workload and git, no admin, no AMD GPU; 10-20 minutes once), and later runs keep that build until the engine's
+  source changes. The zip carries the ROCm libraries the
   engine loads (`engine\rocm\bin`: the HIP runtime, hipBLAS / rocBLAS / hipBLASLt with their kernels for these cards,
   amd_comgr and the Microsoft C++ runtime; ROCm 10.2.0a20260930 from AMD's TheRock builds, licenses in
-  `engine\rocm\licenses`). The HIP runtime works through the AMD driver's own components, so the driver is the one
+  `engine\rocm\licenses`); a build made here loads `.rocm-win`'s ROCm instead. The HIP runtime works through the AMD driver's own components, so the driver is the one
   thing it needs from the PC.
 - **The HIP runtime next to `strata.exe` (0.1.35, #468 #461):** `amdhip64_7.dll` and `amd_comgr.dll` are also put in
   `engine\` (setup copies them there on every start). Windows looks in the program's folder before System32, where
@@ -117,9 +120,11 @@ engine\strata-device.exe --selftest
 (from the PolyStrata folder, after `set PATH=%CD%\engine\rocm\bin;%PATH%`), the end of `strata-<model>.log`, and the
 speed lines the server window prints for a first answer.
 
-**Building it yourself:** `tools\hip\build_windows.bat` (Visual Studio 2022 Build Tools with the C++ workload, Python,
-git; no admin, no AMD GPU) installs ROCm from AMD's TheRock wheels into `.rocm-win`, builds, and packages
-`dist\strata-windows-x64-hip.zip`; `START-HERE.bat --backend hip --prebuilt dist\` installs that one.
+**Building it yourself:** `START-HERE.bat --backend hip --build` compiles the engine on this PC (Visual Studio 2022
+Build Tools with the C++ workload, Python, git; no admin, no AMD GPU): AMD's TheRock wheels go into `.rocm-win`, the
+build into `build-hip-win`, and later runs keep that build (it is compiled again when the source changes).
+`tools\hip\build_windows.bat` builds and packages `dist\strata-windows-x64-hip.zip`;
+`START-HERE.bat --backend hip --prebuilt dist\` installs that one.
 `tools\hip\build_windows.bat tests` also builds the HIP tests (`ctest` in `build-hip-win`, with
 `.rocm-win\Lib\site-packages\_rocm_sdk_devel\bin` on the PATH). `STRATA_HIP_ARCHS` picks other architectures.
 

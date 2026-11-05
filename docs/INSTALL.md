@@ -169,7 +169,8 @@ What differs in that build (`STRATA_ISA_FLOOR=avx` or `none`, chosen from the CP
   token as the normal build (ggml-cpu rounds the CPU experts differently, as the AVX2 kernel does from the AVX-512
   one). Contributors ran earlier versions of the same approach on a Xeon E5-2680 (2.87 tok/s with a GTX 1080 Ti)
   and on Xeon E5-2687W / X5690 machines.
-- AMD cards: Linux only (setup compiles the AMD engine there anyway); NVIDIA on Windows and Linux.
+- AMD cards: Linux, and Windows with the ready-made engine (or one compiled there with `--build`) on an AVX2 CPU;
+  the older-CPU engine below is compiled on Linux only. NVIDIA on Windows and Linux.
 - Two-socket Xeons: memory on the other socket is slow; keep the RAM on one CPU if you can.
 
 By hand: `cmake ... -DSTRATA_ISA_FLOOR=avx` (or `none`) builds it; `STRATA_ISA_FLOOR=avx` set for setup builds it on
