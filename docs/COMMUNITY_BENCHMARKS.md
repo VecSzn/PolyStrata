@@ -42,6 +42,9 @@ leaves out.
 | [LionelColaso](https://github.com/VecSzn/PolyStrata/pull/111) | GTX 1650 4 GB | Core i5-9300H; 23.9 GiB; Windows 11 | Clover-35B-A3B-Preview APEX-I-NanoPlus, 0.1.45-poly.6 (20d839d), `tools/strata_bench.py` | 32K | 13 of 33 guesses kept | 11.6 in a short chat (10.6 to 13.7), 9.4 in an agent session | 136 at 4K, 110 at 16K | |
 | [LionelColaso](https://github.com/VecSzn/PolyStrata/pull/111) | GTX 1650 4 GB | Core i5-9300H; 23.9 GiB; Windows 11 | MiniCPM-V 4.7 35B-A3B mix_q3gud_im, 0.1.45-poly.6 (20d839d), `tools/strata_bench.py` | 32K | 26 of 60 guesses kept | 17.8 in a short chat (15.6 to 20.6), 15.0 in an agent session | 147 at 4K, 116 at 16K | the Clover row above, on the same PC |
 | [HexhamAllstar](https://github.com/VecSzn/PolyStrata/pull/113) | RTX 3080 10 GB | Ryzen 7 5700X3D; 63.9 GiB; Windows 11 | Tiel Coder 35B-A3B UD-Q4_K_XL, 0.1.45, `tools/strata_bench.py` | 64K | on, 73% of the guesses kept | 77 in a short chat (66 to 85), 80 in an agent session | 1,420 at 4K, 2,527 at 16K | |
+| [benchman-ai](https://github.com/simplexai-labs/PolyStrata/pull/127) | RTX 5070 Ti 16 GB | Ryzen 7 5700X3D; 63.9 GiB; Windows 10 | Qwen3.6-35B-A3B UD-Q4_K_M, 0.1.45, `tools/strata_bench.py` | 32K | on, 78% of the guesses kept | 164 in a short chat (134 to 201), 153 in an agent session | 2,158 at 4K, 3,105 at 16K | |
+| [benchman-ai](https://github.com/simplexai-labs/PolyStrata/pull/127) | RTX 5070 Ti 16 GB | Ryzen 7 5700X3D; 63.9 GiB; Windows 10 | DeepSeek V4 Flash UD-IQ2_XXS, 0.1.45, `tools/strata_bench.py` | 32K | 52 of 120 guesses kept | 3.4 in a short chat (2.4 to 3.9), 1.7 in an agent session | 104 at 4K, 129 at 16K | the 90.9 GB file does not fit in 64 GB of RAM: the disk was busy while it wrote |
+| [Hazelhof](https://github.com/simplexai-labs/PolyStrata/pull/134) | 4x RTX 5080 16 GB on a PEX89048 PCIe 5.0 switch, Gen5 x8 each, the layers split over all four | Core Ultra 7 270K Plus; 125.2 GiB DDR5-6400; Linux, CUDA 13.3 | GLM 5.3 Flash GSQ-RCO 3.0bit, main at 2d6a8f9b built from source; 4,652 of 12,384 experts in VRAM | 32K | on, 75% of the guesses kept | 64 in a short chat (51 to 72), 62 in an agent session | 479 at 4K, 573 at 16K | a one-hour soak: 1,621 requests, no failures, decode 69.4 tok/s median in every quarter of the hour |
 
 Setup offers Tiel Coder now (`--family tiel`), and not the HauhauCS file. How to give setup such a file is in the
 [FAQ](FAQ.md#can-i-run-a-fine-tune-or-another-model-with-the-same-architecture).
@@ -190,6 +193,14 @@ fast.
   PolyStrata 0.1.45 in Docker on a CUDA 12.9 image built for sm_70, Qwen3.8-Flash-Next UD-IQ4_XS (Unsloth), 262,144-token context, `--kv int8`,
   split over both cards; `tools/strata_bench.py --long`: chat 53.9 tok/s (27 to 89 as the expert cache warms), prompt
   1,242 / 1,885 / 2,244 tok/s at 4K / 16K / 32K, agent turns 62.7 tok/s at a 69% cache hit.
+- [2026-11-02: RTX 5070 Ti 16 GB, Ryzen 7 5700X3D, 64 GB RAM](../bench/results/2026-11-02-community-rtx-5070-ti-qwen3-8-flash-next-iq2-xs/README.md):
+  PolyStrata 0.1.45 on Windows 10, Qwen3.8-Flash-Next IQ2_XS and
+  [IQ3_S](../bench/results/2026-11-02-community-rtx-5070-ti-qwen3-8-flash-next-iq3-s/README.md), 32K context,
+  `tools/strata_bench.py`: chat 93.1 / 66.3 tok/s, prompt 1,492 / 916 tok/s at 4K and 2,213 / 1,496 at 16K.
+- [2026-11-03: RTX 5090 32 GB held to 450 W, Ryzen 7 9800X3D, 183 GiB RAM](../bench/results/2026-11-03-community-rtx-5090-qwen38-flash-next-ud-q5-k-xl/README.md):
+  Qwen3.8-Flash-Next UD-Q5_K_XL (158.3 GB), 1M context with `--kv int8 --kv-resident 32768`, headless Linux,
+  v0.1.45-poly.6 and poly.7 built from source on the same host, one run a point: decode 70.0 -> 77.8 tok/s at 256K
+  and 62.6 -> 66.8 at 1M, prompt 4,128 -> 4,217 tok/s at 256K and 3,230 -> 3,046 at 1M; RAM peak 5.3 GiB lower.
 
 ## Run the benchmark
 
