@@ -1,5 +1,6 @@
-// HIP prompt attention on FP32 inputs (STRATA_HIP_PREFILL_FP32=1): attend_batch() over q8_0 caches against an independent FP64 reference and the
-// default path (FP16 inputs on the products), the fallbacks (a workspace too short for FP32 rows, an FP16 cache), and a ragged chunk.
+// HIP prompt attention on FP32 inputs (STRATA_HIP_PREFILL_FP32=1: hipBLAS SGEMM on a dequantized copy; =2: our own kernels reading the q8_0 cache as it
+// lies): attend_batch() over q8_0 caches against an independent FP64 reference and the default path (FP16 inputs on the products), the fallbacks (a
+// workspace too short for FP32 rows, an FP16 cache), and ragged chunks, block sizes and head sizes.
 // No GGUF or model is needed; needs a card (exit 77 without a HIP device).
 #include "strata/poly/kernels.hpp"
 
@@ -139,21 +140,25 @@ double against(const Fixture& f, const std::vector<float>& o, double& largest) {
 void one(const Case& c, void* blas) {
     const Fixture f(c.g, c.ctx, c.rows);
     const std::string what = "dim " + std::to_string(c.g.dim) + " ctx " + std::to_string(c.ctx) + " rows " + std::to_string(c.rows) + " scratch " + std::to_string(c.score_floats);
-    const auto old = run(f, c, "0", true, blas), fp32 = run(f, c, "1", true, blas);
+    const auto old = run(f, c, "0", true, blas), fp32 = run(f, c, "1", true, blas), own = run(f, c, "2", true, blas);
     double lg = 0;
-    const double e0 = against(f, old, lg), e1 = against(f, fp32, lg);
-    std::printf("%-58s against FP64: default %.2e, FP32 %.2e (largest %.3g)\n", what.c_str(), e0, e1, lg);
-    require(e1 <= 1e-5 * lg, "FP32 path against FP64: " + what);
+    const double e0 = against(f, old, lg), e1 = against(f, fp32, lg), e2 = against(f, own, lg);
+    std::printf("%-58s against FP64: default %.2e, =1 %.2e, =2 %.2e (largest %.3g)\n", what.c_str(), e0, e1, e2, lg);
+    require(e1 <= 1e-5 * lg, "FP32 path (=1) against FP64: " + what);
+    require(e2 <= 1e-5 * lg, "own kernels (=2) against FP64: " + what);
     require(e0 <= 1e-3 * lg, "default path against FP64: " + what);
-    ++checks;
-    ++checks;
+    checks += 3;
     require(std::memcmp(old.data(), fp32.data(), old.size() * 4) != 0, "the FP32 path was not taken: " + what);
+    require(std::memcmp(fp32.data(), own.data(), own.size() * 4) != 0, "the own kernels were not taken: " + what);
     // a workspace too short for 256 FP32 rows: the default path, bitwise
     Case shorter = c;
     shorter.work_halves = size_t(200) * f.width;
     const auto fall = run(f, shorter, "1", true, blas), plain = run(f, shorter, "0", true, blas);
     require(!std::memcmp(fall.data(), plain.data(), plain.size() * 4), "short workspace is not the default path: " + what);
-    ++checks;
+    // =2 needs no workspace: the same bits as with the full one
+    const auto own_short = run(f, shorter, "2", true, blas);
+    require(!std::memcmp(own_short.data(), own.data(), own.size() * 4), "=2 depends on the workspace: " + what);
+    checks += 2;
 }
 }  // namespace
 #endif
@@ -172,13 +177,14 @@ int main() {
         one({{256, 16, 2}, 9000, 600, big, wh2048}, blas);   // two chunks of 512 and 88
         one({{256, 16, 2}, 12000, 500, size_t(9) << 20, wh2048}, blas);   // little scratch: blocks of a few hundred keys, many of them
         one({{128, 32, 4}, 6000, 33, big, size_t(2048) * 512}, blas);   // another geometry: heads of 128, 8 to a group
+        one({{64, 16, 4}, 4500, 90, big, size_t(2048) * 256}, blas);    // heads of 64, 4 to a group: half a tile of values
         // an FP16 cache is not this path's: the same bits with the flag set
         {
             const Case c{{256, 16, 2}, 4000, 20, big, wh2048};
             const Fixture f(c.g, c.ctx, c.rows);
-            const auto a = run(f, c, "0", false, blas), b = run(f, c, "1", false, blas);
-            require(!std::memcmp(a.data(), b.data(), a.size() * 4), "FP16 cache differs with the flag");
-            ++checks;
+            const auto a = run(f, c, "0", false, blas), b = run(f, c, "1", false, blas), d = run(f, c, "2", false, blas);
+            require(!std::memcmp(a.data(), b.data(), a.size() * 4) && !std::memcmp(a.data(), d.data(), a.size() * 4), "FP16 cache differs with the flag");
+            checks += 2;
         }
         ck(hipDeviceSynchronize()); ck(hipGetLastError());
         std::printf("poly_hip_prefill_fp32_test: PASS checks=%d\n", checks);
