@@ -13,13 +13,25 @@
 
 namespace {
 constexpr int D = 128;
+#if !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+// Volta has no BF16: the hi/lo residual pairs are carried in FP16 halves instead (11+11 mantissa bits,
+// more than BF16's 8+8, inside FP16's narrower exponent range; this kernel's operands stay well within it).
+using bf16 = __half;
+#else
 using bf16      = nv_bfloat16;
+#endif
+
+#if !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+// The kernel body reads a residual pair back through the BF16 intrinsic; give the same call the FP16
+// meaning for the __half elements the Volta arm stores (this overload hides the BF16 one inside the TU).
+static __device__ __forceinline__ float __bfloat162float(__half h) { return __half2float(h); }
+#endif
 
 template <int R, int C> struct matrix {
     bf16 hi[R * C], lo[R * C];
 
     static __device__ __forceinline__ int index(int r, int c) {
-#ifdef GGML_USE_HIP
+#if defined(GGML_USE_HIP) || (!defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE))
         return r * C + c;
 #else
         return 2 * ggml_cuda_mma::swizzle<C / 2, nv_bfloat162>(r * (C / 2) + c / 2, r) + c % 2;
@@ -30,6 +42,13 @@ template <int R, int C> struct matrix {
 #ifdef GGML_USE_MUSA
         store(r, c, x.x);
         store(r, c + 1, x.y);
+#elif !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+        const int   i                    = index(r, c);
+        const auto  h                    = __float22half2_rn(x);
+        const float2 rounded             = __half22float2(h);
+        *reinterpret_cast<__half2 *>(hi + i) = h;
+        *reinterpret_cast<__half2 *>(lo + i) =
+            __float22half2_rn(make_float2(x.x - rounded.x, x.y - rounded.y));
 #else
         const int    i                            = index(r, c);
         const auto   h                            = __float22bfloat162_rn(x);
@@ -41,10 +60,17 @@ template <int R, int C> struct matrix {
     }
 
     __device__ __forceinline__ void store(int r, int c, float x) {
+#if !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+        const int   i = index(r, c);
+        const __half h = __float2half_rn(x);
+        hi[i]          = h;
+        lo[i]          = __float2half_rn(x - __half2float(h));
+#else
         const int  i = index(r, c);
         const bf16 h = __float2bfloat16(x);
         hi[i]        = h;
         lo[i]        = __float2bfloat16(x - __bfloat162float(h));
+#endif
     }
 };
 
@@ -63,12 +89,59 @@ template <int C, int V> struct alignas(128) shared {
     static __device__ __forceinline__ int lower_index(int r, int c) { return r * C + c; }
 };
 
-#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3)) || \
+    (!defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE))
 using namespace ggml_cuda_mma;
 #ifdef GGML_USE_HIP
 using acc    = tile<16, 16, float, DATA_LAYOUT_J_MAJOR>;
 using a_tile = tile<16, 8, nv_bfloat162, DATA_LAYOUT_I_MAJOR_MIRRORED>;
 using b_tile = a_tile;
+#elif !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+// Volta arm: the pinned helpers only know ldmatrix (sm_75+) and wmma, so this tile layer is local.
+// A warp runs four independent m8n8k4 products, one per quad-pair (lanes 4q..4q+3 and 16+4q..16+4q+3;
+// thread j = (lane & 3) + 4 * (lane >> 4) within the pair). acc is a logical 16x16 of four quad-pair
+// 8x8 quadrants: pair q owns rows 8*(q >> 1)..+8 and columns 8*(q & 1)..+8, and register l of a thread
+// sits at the row/column of the V100-measured mapping documented in qsa_prompt_attn.cu. Operand
+// fragments are the per-thread slices: one A row / one B column of 16 k-halves each (k 0..1, 2..3 as
+// f16x2 pairs per 4-k step, as in the qsa Volta scorer).
+struct vfrag {
+    static constexpr int ne = 8;      // __half2 registers: 16 halves, 4 m8n8k4 k-steps of 4
+    __half2              x[ne]      = {};
+};
+struct vfrag_a : vfrag { static constexpr bool IS_A = true;  };
+struct vfrag_b : vfrag { static constexpr bool IS_A = false; };
+struct vtile {
+    static constexpr int ne = 8;      // floats per thread: its quad-pair's 8x8 quadrant fragment
+    float                x[ne]      = {};
+    static __device__ __forceinline__ int get_i(const int l) {
+        const int lane = threadIdx.x & 31, pair = (lane >> 2) & 3;
+        return 8 * (pair >> 1) + (lane & 1) + 4 * (lane >> 4) + 2 * ((l >> 1) & 1);
+    }
+    static __device__ __forceinline__ int get_j(const int l) {
+        const int lane = threadIdx.x & 31, pair = (lane >> 2) & 3;
+        return 8 * (pair & 1) + (lane & 2) + 4 * (l >> 2) + (l & 1);
+    }
+};
+using acc    = vtile;
+using a_tile = vfrag_a;
+using b_tile = vfrag_b;
+// m8n8k4 row.col: A is the thread's row fragment, B its column fragment; D the quad-pair's 8x8.
+__device__ __forceinline__ void mma(acc & d, const a_tile & a, const b_tile & b) {
+    // mma.sync.aligned needs every lane of the warp arrived. On Volta's independent thread
+    // scheduling a warp is not guaranteed reconverged after lane-divergent code (the q/k prefetch
+    // reads, the forward substitution), and the products follow both; re-align explicitly.
+    __syncwarp();
+    const int * ai = reinterpret_cast<const int *>(a.x);
+    const int * bi = reinterpret_cast<const int *>(b.x);
+#pragma unroll
+    for (int s = 0; s < a_tile::ne / 2; ++s) {
+        asm volatile("mma.sync.aligned.m8n8k4.row.col.f32.f16.f16.f32 "
+                     "{%0,%1,%2,%3,%4,%5,%6,%7}, {%8,%9}, {%10,%11}, {%0,%1,%2,%3,%4,%5,%6,%7};\n"
+                     : "+f"(d.x[0]), "+f"(d.x[1]), "+f"(d.x[2]), "+f"(d.x[3]),
+                       "+f"(d.x[4]), "+f"(d.x[5]), "+f"(d.x[6]), "+f"(d.x[7])
+                     : "r"(ai[2 * s]), "r"(ai[2 * s + 1]), "r"(bi[2 * s]), "r"(bi[2 * s + 1]));
+    }
+}
 #else
 using acc    = tile<16, 8, float>;
 using a_tile = tile<16, 8, nv_bfloat162>;
@@ -86,6 +159,33 @@ __device__ __forceinline__ tile_t load(const matrix<R, C> & m, int row, int col,
         const bf16 x = data[TRANS ? m.index(c, r) : m.index(r, c)];
         const bf16 y = data[TRANS ? m.index(c + 1, r) : m.index(r, c + 1)];
         t.x[i]       = __float22bfloat162_rn(make_float2(__bfloat162float(x), __bfloat162float(y)));
+    }
+#elif !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE)
+    // Plain row-major smem and a per-thread fragment gather: quad-pair q takes the A rows / B columns of
+    // its own quadrant (A strides 8 rows, B strides 8 columns of the 16x16 tile), thread j of the pair
+    // carrying row/column base+j. Along k, the plain load takes 4 consecutive halves of a matrix row and
+    // the transposed load 4 halves down a matrix column. Bank conflicts are left as they fall (HIP arm
+    // precedent); only the low/high residual half is selected by `low`, as before.
+    const int lane = threadIdx.x & 31;
+    const int pair = (lane >> 2) & 3, jj = (lane & 3) + 4 * (lane >> 4);
+    const int base = row + 8 * (tile_t::IS_A ? (pair >> 1) : (pair & 1)) + jj;
+#pragma unroll
+    for (int s = 0; s < tile_t::ne / 2; ++s) {
+        const int k0 = col + 4 * s;
+        __half     h0, h1, h2, h3;
+        if constexpr (TRANS) {
+            h0 = data[m.index(k0, base)];
+            h1 = data[m.index(k0 + 1, base)];
+            h2 = data[m.index(k0 + 2, base)];
+            h3 = data[m.index(k0 + 3, base)];
+        } else {
+            h0 = data[m.index(base, k0)];
+            h1 = data[m.index(base, k0 + 1)];
+            h2 = data[m.index(base, k0 + 2)];
+            h3 = data[m.index(base, k0 + 3)];
+        }
+        t.x[2 * s]         = __halves2half2(h0, h1);
+        t.x[2 * s + 1]     = __halves2half2(h2, h3);
     }
 #else
     const auto * packed = reinterpret_cast<const nv_bfloat162 *>(data);
@@ -131,10 +231,11 @@ template <int R, int C> __device__ __forceinline__ void store(matrix<R, C> & m, 
 // Keep recurrent state in FP32; pack high/residual BF16 operands inside the block.
 template <int C, int V, int BLOCKS = 1>
 static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_mma_args a) {
-#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
+#if defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3)) || \
+    (!defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE))
     static_assert(ggml_cuda_get_physical_warp_size() == 32, "GDN MMA requires 32-lane warps");
     constexpr int WARPS = 8;
-#ifdef GGML_USE_HIP
+#if defined(GGML_USE_HIP) || (!defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE))
     constexpr int N = 16;
 #else
     constexpr int N = 8;
@@ -370,7 +471,8 @@ static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_m
 #endif // defined(AMPERE_MMA_AVAILABLE) || (defined(AMD_WMMA_AVAILABLE) && defined(RDNA3))
 }
 
-// The kernel above is unchanged from the inspected upstream source. Only this device adapter is local.
+// The kernel above matches the inspected upstream source except for two preprocessor gate extensions that
+// admit the Volta arm (recorded in gdn_mma_provenance.json). The tile layer it compiles against is local.
 struct DeviceInfo {
     int major = 0, minor = 0, multiprocessors = 0;
     size_t shared_bytes = 0;

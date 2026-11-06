@@ -5,5 +5,20 @@
   "kernel_body_sha256": "ea7103b9dba784fb55c122f3dd88e906a7c253e1011a979a68d99d3b175dd84e",
   "helpers_sha256": "868710b3d9f220c5eaf61ffcd6d0a9a691cf39070bf85d688e267a94a6a3c5d8",
   "pinned_ggml_revision": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
-  "pinned_mma_sha256": "c7e0f3332da182e203b4b953f9fa8535ffca3767d2b7d4d7dbf7ce486262d1af"
+  "pinned_mma_sha256": "c7e0f3332da182e203b4b953f9fa8535ffca3767d2b7d4d7dbf7ce486262d1af",
+  "divergences": [
+    {
+      "what": "Volta (sm_70) arm for the GDN tensor-core path (branch m2-volta-gdn)",
+      "date": "2026-10-25",
+      "kernel_body_sha256": "ed18e22bd8434598ca842871bf39bac378780a1bd76442513c241d2c9f8f0b34",
+      "kernel_body_changes": "Only two preprocessor lines inside gdn_single differ from the pinned body: the arch gate admits (!__HIPCC__ && VOLTA_MMA_AVAILABLE) alongside AMPERE/HIP-RDNA3, and the tile width N is 16 under the same condition (as on HIP). Every other body line is byte-identical; the kernel_body_sha256 above still pins the unextended upstream body.",
+      "adapter_additions": "All other changes are in the local adapter around the body, guarded by #if !defined(__HIPCC__) && defined(VOLTA_MMA_AVAILABLE) (the macro comes from the pinned ggml common.cuh, __CUDA_ARCH__ == 700): a local m8n8k4 tile layer (vfrag/vfrag_a/vfrag_b/vtile and an mma() wrapper issuing mma.sync.aligned.m8n8k4.row.col.f32.f16.f16.f32, the V100-measured fragment/C mapping documented in src/kernels/cuda/qsa_prompt_attn.cu; the wrapper re-aligns the warp with __syncwarp() first, since mma.sync.aligned needs every lane arrived and Volta's independent thread scheduling does not guarantee reconvergence after the kernel's lane-divergent q/k prefetch reads and forward substitution) instead of the untouched ldmatrix helpers; per-thread fragment gathers in load<>() from plain row-major shared memory (the HIP arm's layout); FP16 hi/lo residual storage in matrix::store/store2 (Volta has no BF16; 11+11 mantissa bits carry the residual scheme, and the host preprocessing keeps every operand inside FP16's exponent range, so no qsa-style pre-scaling was needed), with a local __bfloat162float(__half) overload so the body's residual read-back compiles unchanged. Host dispatch: gdn_mma_policy.hpp admits (7,0) only under STRATA_EXPERIMENTAL_SM60, so the ready-made engine keeps byte-identical behavior.",
+      "touched_files": [
+        "src/kernels/cuda/gdn_mma.cu",
+        "src/kernels/cuda/gdn_mma_provenance.json",
+        "include/strata/kernels/gdn_mma_policy.hpp",
+        "src/kernels/gdn_mma_policy_test.cpp"
+      ]
+    }
+  ]
 }

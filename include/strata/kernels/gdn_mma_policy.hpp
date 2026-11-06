@@ -6,6 +6,11 @@ namespace strata::kernels {
 enum class GdnMmaPath { unavailable, whole_head, slice32_one_block, slice32_two_blocks };
 // Match the inspected upstream schedule: GA10x, Ada, Blackwell and DGX Spark.
 constexpr bool gdn_mma_arch(int major, int minor) {
+#if defined(STRATA_EXPERIMENTAL_SM60)
+    // The Volta (sm_70) m8n8k4 arm of the adapter, this experimental build only; the ready-made
+    // engine keeps exactly the upstream dispatch.
+    if (major == 7 && minor == 0) return true;
+#endif
     return (major == 8 && (minor == 6 || minor == 9)) || (major == 12 && (minor == 0 || minor == 1));
 }
 constexpr bool gdn_mma_shape(int dim, int heads, int key_heads, int rows, bool snapshots) {
