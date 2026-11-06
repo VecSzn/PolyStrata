@@ -2,7 +2,7 @@
 
 Back to [README.md](../../README.md)
 
-**Flint 40B-A2.5B** by Recursive, made for coding agents: a file of 18 to 42 GB. Most of its layers look back only 513 tokens, so a long conversation takes little VRAM: a 128K context takes 2.6 GB more than 32K.
+**Flint 40B-A2.5B** by Recursive, made for coding agents: a file of 18 to 42 GB. Most of its layers look back only 513 tokens, so a long conversation takes little VRAM: a 128K context takes 2.6 GB more than 32K. The attention caches can be stored as Q8_0 blocks (`--kv q8_0`), halving their VRAM: 15,232 bytes a token across the 14 layers that attend the whole context, against 28,672 in fp16, so the 128K-versus-32K step is 1.4 GB instead ([Q8_KV.md](../Q8_KV.md)).
 
 ## How fast is it?
 

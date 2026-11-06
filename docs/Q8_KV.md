@@ -2,7 +2,11 @@
 
 `strata-poly` can store its attention K and V caches in the ggml **Q8_0** format instead of fp16. It is
 opt-in: `--kv q8_0`. The default, `--kv fp16`, is unchanged and byte-identical to the build before this
-option existed. The format halves the KV cache's VRAM and, on the models tested, leaves the answers alone.
+option existed. The format halves the KV cache's VRAM. On the `qwen35moe` models the answers do not move; on
+Flint they move at about 2% of the steps (below).
+
+In this version it is offered for `qwen35moe` (Tiel, Ornith, Occamy), `kolibri1` and `flint` files; another
+architecture is rejected at load.
 
 Gemma 4 has its own two, in the same Q8_0 rule but its own layout: `--kv int8` and `--kv int8k`
 ([the int8 pair, below](#the-int8-pair-for-gemma-4-strata-poly---kv-int8-and---kv-int8k)).
@@ -27,11 +31,15 @@ the engine prints its row size at load:
 strata-poly: q8_0 KV cache: 544 bytes a row
 ```
 
-544 = 512 codes + 2 blocks × 2 scales, a head, K and V. `--kv q8_0` needs `n_kv * head_dim` to be a multiple
-of 32; the models here are. A grammar that is not gets a clear error rather than a wrong answer.
+544 = 512 codes (2 heads × 256 values) + 32 bytes of scales (2 heads × 8 blocks × 2 bytes): a row of K, and a
+row of V beside it. Flint prints the same number from a different shape (`n_kv = 4`, `head_dim = 128`: 512 codes
++ 4 heads × 4 blocks × 2 bytes), and 14 of its 49 layers attend the whole context, so a token costs 14 × 2 × 544 =
+**15,232 bytes** of q8_0 against fp16's 28,672. `--kv q8_0` needs `n_kv * head_dim` to be a multiple of 32; the
+models here are. A grammar that is not gets a clear error rather than a wrong answer.
 
 All three models loaded and answered with `--kv q8_0` at the full 131072-token context, and with a picture
-through the vision encoder (`strata-vision`), each replying `KV OK` to the fixed prompt.
+through the vision encoder (`strata-vision`), each replying `KV OK` to the fixed prompt. Flint loaded at
+131072 with q8_0 too: a 125,007-token needle prompt was read and its answer written (below).
 
 ## What it was measured on
 
@@ -74,8 +82,12 @@ Per token, and in total at a full 131072-token context:
 | Tiel | 11 | 11 968 B | 22 528 B | 1.461 GiB | 2.750 GiB | 1.289 GiB |
 | Ornith | 11 | 11 968 B | 22 528 B | 1.461 GiB | 2.750 GiB | 1.289 GiB |
 | Occamy | 10 | 10 880 B | 20 480 B | 1.328 GiB | 2.500 GiB | 1.172 GiB |
+| Flint | 14 | 15 232 B | 28 672 B | 1.859 GiB | 3.500 GiB | 1.641 GiB |
 
-**46.88% less KV VRAM** for all three, matching the per-token arithmetic exactly.
+**46.88% less KV VRAM** for all four, matching the per-token arithmetic exactly. Flint's 35 window layers keep
+rings of `window + prompt batch` rows rather than the whole context: 513 + 1024 rows a side, 56 MiB of q8_0
+against 105 MiB of fp16 at the default 1024-row prompt batch, and its parked conversations (the window's 513 rows)
+take 18.6 MiB against 35.1 MiB.
 
 The engine's default KV cache grows as the conversation does, so a short prompt barely moves the load-time
 expert cache — but with `--kv-whole`, which reserves the whole context's KV at load, the freed VRAM goes to
@@ -105,14 +117,52 @@ each arm a fresh process, median of four steps:
 
 Q8_0 against fp16: prompt **−1.4% to +0.2%**, decode **−0.6% to −0.2%** — within run-to-run scatter.
 
+### Flint on a laptop's 8 GB card
+
+`Flint-40B-A2.5B-abliterated-IQ4_XS.gguf` (IQ4_XS), RTX 4070 Laptop (8 GiB), 24 threads, CUDA, each arm a
+fresh process, greedy. Five random 32-id prompts of 128 tokens each, fp16's picks against q8_0's teacher-forced
+top-1 (`tools/kv_agree.py`, which runs the second arm with `--follow ... --top-probs 1`): **628 of 640 steps
+agree = 98.12%** (per prompt 127, 122, 126, 125 and 128 of 128). On a 9,001-token prompt the two arms wrote the
+same 8 tokens.
+
+Speed, the engine's defaults (lookup guesses on):
+
+| prompt | arm | prefill tok/s | decode tok/s |
+| --- | --- | ---: | ---: |
+| 15,000 ids | fp16 | 1570.9 | 93.21 |
+| 15,000 ids | q8_0 | 1560.8 | 100.47 |
+| 28,863 tokens of repo text | fp16 | 1302.5 / 1249.1 / 1248.6 | 62.2 / 76.2 / 73.0 |
+| 28,863 tokens of repo text | q8_0 | 1283.8 / 1231.3 / 1231.3 | 62.9 / 73.3 / 70.3 |
+
+The 28.9K rows are three needle requests (`tools/needle_bench.py`, depths 10 / 50 / 90, 512-token answers).
+Both arms found the needle **3 of 3**; q8_0's prefill is 1.4% slower and its decode 1.1% faster to 3.8% slower
+(mean −2.1%) — inside the 90% bar. The 15K row's decode is inflated by the lookup guesses (18 of 18 accepted in
+both arms); its q8_0 arm is 7.8% faster in that single run, which the expert figures (54.4% read from VRAM under
+q8_0 against 56.3% under fp16) do not explain — one run, not a median.
+
+VRAM at 28.9K of context: the expert cache held **3292 of 12032 experts (5.12 GiB) under q8_0 against 3011
+(4.69 GiB) under fp16 — 281 more experts, 0.43 GiB**, 162 against 156 MiB left. That is the full layers'
+28,863 × 13,440 B = 370 MiB plus the window rings' 49 MiB.
+
+The caveat below appeared here too: a q8_0 server at `--max-context 36864` without a reserve failed one answer
+at 28.9K with `cudaGraphInstantiate: out of memory` after 56 generated tokens. The 128K run carried
+`--vram-reserve-mib 512` and did not.
+
+At 131072 (`--max-context 131072 --vram-reserve-mib 512`), the same 125,007-token needle prompt was read at
+483 tok/s under q8_0 and 490 under fp16 (259 against 255 s), and the answer written at 29.4 against 30.5 tok/s —
+both found, both within run-to-run scatter. At this length the card, not the KV bytes, sets the clock: the expert
+cache's hit rate during the answer was 45.3% under q8_0 and 34.1% under fp16, and the answer times are equal.
+What q8_0 buys there is the 1.6 GiB of KV it does not put on the card (1.86 against 3.50 GiB), headroom for the
+experts — 281 more of them at 28.9K — rather than a faster clock.
+
 ## A caveat that is not about Q8_0
 
 At 131072 with the default 256 MiB reserve, long chats intermittently fail with
 `cudaGraphInstantiate: out of memory`: the engine grows the expert cache down to 128 MiB free, then a newly
 recorded CUDA graph needs more than what is left. This is **pre-existing and general**: it reproduces on the
 unchanged fp16 path too, so it is not caused by `--kv q8_0`. `--vram-reserve-mib 512` removes it — all four
-model/format combinations, eight requests each, with and without a picture, saw zero OOM. The numbers above
-were taken with that 512 MiB reserve.
+model/format combinations, eight requests each, with and without a picture, saw zero OOM. The qwen35moe numbers
+above were taken with that 512 MiB reserve.
 
 The three run configs (`strata-tiel.json`, `strata-ornith.json` and `strata-occamy.json`) now ship with
 `--vram-reserve-mib 512`, so the OOM does not occur with them. With that reserve, Tiel at the full
@@ -124,7 +174,7 @@ The three run configs (`strata-tiel.json`, `strata-ornith.json` and `strata-occa
 - `glm5next` / GLM 5.3 Flash (`dsa_attend`): its attention is not the one this cache quantizes, so neither
   `--kv q8_0` nor `--kv int8` is offered for it.
 - `--kv q8_0` and a `gemma4` file: still rejected cleanly at load
-  (`--kv q8_0 is only supported for qwen35moe models in v1; this is a 'gemma4' model`), not run.
+  (`--kv q8_0 is supported for qwen35moe, kolibri1 and flint models in v1; this is a 'gemma4' model`), not run.
 - ROCm/HIP: the same kernels, measured below on an AMD card (it was rejected on HIP until that was done).
 - The default path stays byte-identical to the last release.
 
@@ -137,17 +187,30 @@ tokens the poly engine's `--kv q8_0` produced on all three models. It was run on
 file is far larger than the card; only the short deterministic answers are a meaningful signal across engines.
 Full transcript in the T8.5 report.
 
+Flint is a generic model there: `-ctk q8_0 -ctv q8_0` goes through llama.cpp's ordinary KV path. Its CUDA
+attention reads the Q8_0 blocks with a VEC kernel at one or two tokens a step and dequantizes K and V to fp16
+for the TILE/MMA prompt tiers — the same split this engine has (the float q8_0 readers for a token, the
+dequantizing workspace for a prompt batch). There was no faster reader to copy; the work here was the cache
+plumbing, the window layers' rings and the state and conversation mirrors.
+
 ## Files touched
 
 - `src/poly/engine.hpp` — `KvFmt` and `Options::kv_format` (default `kFp16`).
 - `src/poly/main.cpp` — `--kv fp16|q8_0` parsing and help text.
-- `src/poly/engine.cpp` — the `qwen35moe`-only check and the clean rejection for other architectures.
+- `src/poly/engine.cpp` — the `qwen35moe` / `kolibri1` / `flint` allowlist and the clean rejection for other
+  architectures.
 - `src/poly/qwen35.hpp`, `src/poly/qwen35.cpp` — the Q8_0 cache pointers, allocation, save/load, the row-size
   print, and the attention path that reads codes+scales.
+- `src/poly/flint.hpp`, `src/poly/flint.cpp` — the same for Flint: codes and scales arrays for the 14 full
+  layers and for the 35 window layers' rings, the q8 store on the plain and the recorded path, `Kvq8` and
+  sinks in decode, the dequantizing workspace in a prompt batch, the per-sequence rows, and the state and
+  conversation mirrors. No kernel changed.
 - `src/poly/kernels.cu`, `include/strata/poly/kernels.hpp` — `store_q8` / `store_q8_at` and the Q8_0 attention
   readers (scores and outputs).
 - `src/poly/kv_q8_test.cpp` (new) — the kernel unit test: round-trip within half a block scale, byte-exact
   layout, and the ring store.
+- `tools/kv_agree.py` (new) — teacher-forced top-1 agreement of one KV format against another, the harness the
+  Flint numbers below come from.
 - `CMakeLists.txt` — the `poly_kv_q8_test` target and its `add_test`.
 - `strata-tiel.json`, `strata-ornith.json`, `strata-occamy.json` — the three run configs now carry
   `--kv q8_0` and `--vram-reserve-mib 512`.
@@ -158,6 +221,8 @@ Full transcript in the T8.5 report.
 - **CUDA:** builds clean; the test-suite run is **116/117**. The one failure, `ple_parity`, is a missing model
   file (`.../Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf: cannot open`), unrelated to this change.
   `poly_kv_q8_test` passes (0.23 s), `poly_kv_int8_test` 35/35 (0.4 s).
+- **Flint:** built and exercised on CUDA only (RTX 4070 Laptop). No kernel changed — the q8_0 readers a HIP build
+  compiles are the ones Tiel already runs there — but this change was not built for HIP.
 - **HIP:** builds clean for gfx1201; `poly_kv_q8_test` passes (91,530 values checked) on an RX 9070 XT. The
   int8 family builds there too: the MMA tier's PTX has an empty body and `attend_int8` never selects it
   (`tensor_cores()` is false under `__HIPCC__`), so the dp4a tier and the fp16 twin carry the prompt path;
