@@ -155,6 +155,29 @@ cache's hit rate during the answer was 45.3% under q8_0 and 34.1% under fp16, an
 What q8_0 buys there is the 1.6 GiB of KV it does not put on the card (1.86 against 3.50 GiB), headroom for the
 experts — 281 more of them at 28.9K — rather than a faster clock.
 
+### Flint on an RX 7900 XT (HIP)
+
+The same branch built for `gfx1100` with ROCm 10.1 on an RX 7900 XT (20 GB, Ryzen 7 7800X3D, 59 GB of RAM), the
+engine's defaults, each arm a fresh process. It prints the same `544 bytes a row` row.
+
+Agreement: **626 of 640 = 97.81%** (5 × 128, the same seed as the laptop run above). The 15,000-token prompt:
+1,748.9 prefill / 183.62 decode tok/s under fp16 against 1,771.1 / 101.65 under q8_0 — that decode gap is the
+lookup guesses (100 of 107 accepted against 45 of 68), not the cache. With `--window 1 --lookup 0 --no-draft`
+the same prompt gives 1,796.5 / 86.86 against 1,787.1 / 84.65: prefill −0.5%, decode −2.5%.
+
+The 28,863-token needle: found at all three depths by both formats. Prefill 1,302.2 / 1,269.6 / 1,247.8 against
+1,299.5 / 1,271.6 / 1,259.6 tok/s (−0.2% to −0.9%); decode 76.8 / 76.8 / 82.0 against 77.5 / 86.0 / 87.1 (the
+drafts accepted again). The expert cache held 11,000 against 11,061 of 12,032 experts (17.1 against 17.2 GiB).
+
+At 131072 with `--vram-reserve-mib 512`, the 125,007-token prompt was read at 440.1 tok/s under fp16 and
+433.5-440.3 under q8_0 — equal on this card — and both found the needle; the answers were 117 tokens at 27.0 tok/s
+and 116 at 30.6. The expert cache held 10,999 (17.1 GiB) against 11,059 (17.2 GiB), and its hit rate during the
+answer was 85.8% against 95.8%.
+
+One harness note: with `--max-tokens 256` the q8_0 arm spent the whole cap in thinking twice and returned no
+answer (the needle script then counts a miss); at 1024 it closed thinking at 94 tokens and answered at 115-116.
+The same prompt answered at 131 tokens on the laptop with a 512 cap. That is the model's thinking, not the cache.
+
 ## A caveat that is not about Q8_0
 
 At 131072 with the default 256 MiB reserve, long chats intermittently fail with
@@ -221,8 +244,8 @@ plumbing, the window layers' rings and the state and conversation mirrors.
 - **CUDA:** builds clean; the test-suite run is **116/117**. The one failure, `ple_parity`, is a missing model
   file (`.../Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf: cannot open`), unrelated to this change.
   `poly_kv_q8_test` passes (0.23 s), `poly_kv_int8_test` 35/35 (0.4 s).
-- **Flint:** built and exercised on CUDA only (RTX 4070 Laptop). No kernel changed — the q8_0 readers a HIP build
-  compiles are the ones Tiel already runs there — but this change was not built for HIP.
+- **Flint:** built and exercised on CUDA (RTX 4070 Laptop) and on HIP (RX 7900 XT, gfx1100, ROCm 10.1). No kernel
+  changed; the engine-side cache code is the same on both, and the HIP numbers are below.
 - **HIP:** builds clean for gfx1201; `poly_kv_q8_test` passes (91,530 values checked) on an RX 9070 XT. The
   int8 family builds there too: the MMA tier's PTX has an empty body and `attend_int8` never selects it
   (`tensor_cores()` is false under `__HIPCC__`), so the dp4a tier and the fp16 twin carry the prompt path;
