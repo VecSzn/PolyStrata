@@ -60,8 +60,14 @@ __global__ void __launch_bounds__(kThreads) gemm_q8(const Args a) {
     const int gofs = g * a.dim;   // the group's values within a cache row (a multiple of 32)
     const int swidth = a.width >> 5;
 
-    // what a thread loads for a tile: A: 8 codes; B: 8 floats.  (row, half) = (tid & 127, tid >> 7) for the k-contiguous operands
+    // what a thread loads for a tile: A: 8 codes; B: 8 floats.  (row, half) = (tid & 127, tid >> 7) for the k-contiguous operands; on RDNA1 (gfx1010 to
+    // gfx1012) (tid >> 1, tid & 1): the two lanes of a row are neighbours, so a load instruction of a wave touches 16 rows, not 32 (measured on gfx1010,
+    // the scores product 1.00 -> 0.88 ms).  Not measured on other cards, which keep the first mapping.
+#if defined(__gfx1010__) || defined(__gfx1011__) || defined(__gfx1012__)
+    const int lrow = tid >> 1, lhalf = tid & 1;
+#else
     const int lrow = tid & (BM - 1), lhalf = tid >> 7;
+#endif
     float ra[8], rb[8];
 
     // the thread's rows, once: B's column and the cache row it reads; per tile only a 32-bit step is added
