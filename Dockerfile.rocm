@@ -1,0 +1,150 @@
+# syntax=docker/dockerfile:1
+#
+# PolyStrata: Qwen3.8-Flash-Next on AMD GPUs via ROCm (RX 7900 XT / XTX (gfx1100),
+# RX 9070 series / Radeon AI PRO R9700 (gfx1201) - maintainers-validated; see
+# docs/AMD_HIP.md). Vision is CPU-only on the HIP backend (build_vision_cpu).
+#
+# The engine is compiled during docker build, so the first container start only
+# downloads the model (~70 GB) and starts the server. docker build has no GPU,
+# so the gfx targets are fixed here: the engine is a fat binary with a code
+# object per listed arch. Keep both archs unless you want a faster build for a
+# single card (narrow HIP_ARCHITECTURES to just yours).
+#
+# setup.py's rocm_root() accepts a system ROCm >= 7.0 when hipcc, libhipblas and 
+# the hip-lang dev files are present (the -full base has all three). This image
+# defaults to 7.2.4 on Ubuntu 24.04 LTS, but newer Ubuntu and ROCm versions may also be used.
+#
+# Build:
+#   docker build -t strata -f Dockerfile.rocm .
+#   docker build -t strata -f Dockerfile.rocm --build-arg HIP_ARCHITECTURES=gfx1100 .   # 7900 XT only
+#   docker build -t strata -f Dockerfile.rocm --build-arg BASE_IMAGE=rocm/dev-ubuntu-26.04:10.1.0-full .   # ROCm 10.1.0 build
+#
+# Run (host needs the amdgpu driver; the container needs KFD + DRI passed through):
+#   docker run --rm \
+#     --device=/dev/kfd --device=/dev/dri --group-add video \
+#     -p 8080:8080 \
+#     --ulimit memlock=-1 \
+#     -v strata-data:/data \
+#     -e MODEL=IQ2_XS \
+#     strata
+#
+# hipBLASLt tuning (docs/AMD_HIP.md): tune_hipblaslt is built into the image but
+# cannot run at build time (no GPU in the build). Run it once inside a running
+# container on the target card, save the table to the /data volume, and mount or
+# point STRATA_HIPBLASLT_TUNING at it on later runs. The table is pinned to the
+# exact hipBLASLt version that generated it - re-tune after any ROCm bump.
+#
+# Setup choices are env vars, read by docker-entrypoint.sh: FAMILY, MODEL, CONTEXT,
+# VISION (no | yes | cpu), KV (int8 | q4_0 | k8v4), GPU (one card) or GPUS ("0,2"
+# or "all", with LAYER_SPLIT), LOW_RAM (auto | on | off), HOST, PORT, API_KEY.
+#
+# Only the model files, the prepared pack, the MTP layer and the install config
+# live in the /data volume; the engine is part of the image. PolyStrata loads 32-62 GB
+# into RAM, so a capped container needs -e LOW_RAM=on: setup.py reads the RAM from
+# /proc/meminfo, which here is the host's total, not the container's limit. Add an
+# API key before exposing the port to a network: -e API_KEY=<secret>. Pass
+# -e REINSTALL=1 to change the model settings later.
+#
+# --gpus all on a host with two usable cards: setup takes both (the layer split is
+# its recommended default). Pin one card with -e GPU=0, or name them with
+# -e GPUS=0,2. A volume set up for one card switches to the pair on its first start
+# on a two-card host unless GPU or GPUS pins it. LOW_RAM=on runs on one card.
+
+ARG BASE_IMAGE=rocm/dev-ubuntu-24.04:7.2.4-complete
+FROM ${BASE_IMAGE}
+
+# STRATA_EXECV=1: setup.py replaces itself with the server, so the server is PID 1
+# and docker stop's SIGTERM reaches it (see setup.start). Normal Linux starts, which
+# don't set it, keep spawning the server as a child.
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 LANG=C.UTF-8 STRATA_EXECV=1 BACKEND=hip
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl git libatomic1 libgomp1 \
+        python3 python3-pip python3-venv unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/strata
+COPY . .
+
+# Target all maintainer- and community-validated archs for a fat build by default.
+# Narrow to one for a faster build or add your own (e.g. gfx1030).
+ARG HIP_ARCHITECTURES=gfx1100;gfx1101;gfx1200;gfx1201
+ARG BUILD_VISION=1
+
+# fail the build early if the base image ever lacks what setup.py's rocm_root()
+# needs to accept a system ROCm (hipcc, libhipblas, hip-lang dev files)
+RUN test -x /opt/rocm/bin/hipcc \
+    && ls /opt/rocm/lib/libhipblas.so* >/dev/null \
+    && ls /opt/rocm/lib/cmake/hip-lang/hip-lang-config.cmake /opt/rocm/lib64/cmake/hip-lang/hip-lang-config.cmake 2>/dev/null | grep -q . \
+    || { echo "base image lacks the ROCm development files"; exit 1; }
+
+RUN python3 -m venv .venv \
+    && .venv/bin/pip install --no-cache-dir --upgrade pip \
+    && .venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && chmod +x setup.sh docker-entrypoint.sh
+
+# llama.cpp at the pinned commit, then the engine built exactly the way
+# setup.py's build_engine_hip() builds it (same defs, same BUILD.json stamp), so
+# the first container start reuses the image engine instead of recompiling.
+# Vision encoder remains CPU-only for now on HIP; tools/vision is built
+# without CUDA here.
+RUN .venv/bin/python - <<'PYEOF'
+import json, os, pathlib, shutil
+import setup
+
+
+# Target all maintainer- and community-validated archs for a fat build by default.
+# Narrow to one for a faster build or add your own (e.g. gfx1030).
+llama = setup.get_llama_cpp()
+archs = [a for a in os.environ.get("HIP_ARCHITECTURES", "gfx1100;gfx1101;gfx1200;gfx1201").strip().strip('"').replace(",", ";").split(";") if a]
+root, libs = setup.rocm_root(archs)
+assert root == pathlib.Path("/opt/rocm"), f"rocm_root picked {root}, not the base image's ROCm"
+bitcode = next((p for p in (root / "lib" / "llvm" / "amdgcn" / "bitcode", root / "amdgcn" / "bitcode") if p.is_dir()),
+               root / "amdgcn" / "bitcode")
+os.environ.update({"HIP_PLATFORM": "amd", "HIP_COMPILER": "clang", "HIP_RUNTIME": "rocclr",
+                   "ROCM_PATH": str(root), "HIP_PATH": str(root)})
+os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(libs + [os.environ.get("LD_LIBRARY_PATH", "")]).rstrip(os.pathsep)
+os.environ["PATH"] = os.pathsep.join([str(root / "bin"), str(root / "llvm" / "bin"), os.environ.get("PATH", "")])
+
+setup.cmake_build(setup.ROOT, setup.ROOT / "build-hip", "strata",
+    ["-DSTRATA_ENABLE_HIP=ON", "-DSTRATA_ENABLE_CUDA=OFF", "-DSTRATA_Q6K_EXPERTS=ON", "-DSTRATA_MMQ_KQUANTS=ON", "-DSTRATA_BUILD_TESTS=OFF",
+     "-DSTRATA_PREFILL_MMQ=ON", "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
+     f"-DCMAKE_HIP_COMPILER={root / 'llvm' / 'bin' / 'clang++'}",
+     f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}",
+     "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
+     f"-DCMAKE_HIP_FLAGS=--rocm-path={root} --rocm-device-lib-path={bitcode}",
+     f"-DSTRATA_GGML_DIR={llama}"], None, "")
+
+setup.cmake_build(setup.ROOT, setup.ROOT / "build-hip", "tune_hipblaslt", [], None, "")
+
+eng = setup.ROOT / "engine"
+eng.mkdir(exist_ok=True)
+shutil.copy2(setup.ROOT / "build-hip" / setup.EXE, eng / setup.EXE)
+if (setup.ROOT / "build-hip" / setup.KQ_LIB).exists():      # the K-quant MMQ prompt library (UD-Q4/Q5/Q6_K_XL files)
+    shutil.copy2(setup.ROOT / "build-hip" / setup.KQ_LIB, eng / setup.KQ_LIB)
+shutil.copy2(setup.ROOT / "build-hip" / "tune_hipblaslt", eng / "tune_hipblaslt")
+meta = {"source": "local-hip", "backend": "hip", "version": setup.source_version(), "archs": archs,
+        "vision": "none", "lib_dirs": libs, "src": setup.source_hash(setup.ENGINE_SOURCES),
+        "vision_src": setup.source_hash(setup.VISION_SOURCES)}
+if os.environ.get("BUILD_VISION", "1") == "1":
+    setup.cmake_build(setup.ROOT / "tools" / "vision", setup.ROOT / "build-vision", "strata-vision",
+        [f"-DLLAMA_DIR={llama}", "-DSTRATA_VISION_CUDA=OFF"], None, "")
+    shutil.copy2(setup.ROOT / "build-vision" / "bin" / setup.VEXE, eng / setup.VEXE)
+    meta["vision"] = "cpu"
+(eng / "BUILD.json").write_text(json.dumps(meta, indent=1))
+PYEOF
+
+# the cmake trees are build-time only; the engine itself is what the container needs
+RUN rm -rf build build-hip build-vision
+
+VOLUME ["/data"]
+EXPOSE 8080
+
+# /health is answered before the API key gate, so it works with or without one.
+# The port only opens after the model loads (1-3 minutes, longer on a first run),
+# so the start period is generous: a too short one marks a still-loading container
+# unhealthy and a restart policy would kill it mid-download.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
+  CMD curl -fs "http://127.0.0.1:${PORT:-8080}/health" || exit 1
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
