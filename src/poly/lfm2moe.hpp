@@ -49,6 +49,12 @@ private:
         Dev wq, wk, wv, q_norm, k_norm;
         uint16_t* keys = nullptr;   ///< max_context * n_kv * head_dim, fp16
         uint16_t* vals = nullptr;
+        // --kv q8_0 keeps those rows as ggml Q8_0 instead: n_kv * head_dim int8 codes and an fp16 scale a
+        // 32-value block, in two arrays a side (store_q8)
+        int8_t* k_codes = nullptr;
+        uint16_t* k_scales = nullptr;
+        int8_t* v_codes = nullptr;
+        uint16_t* v_scales = nullptr;
         // a dense layer's FFN
         Dev ffn_gate, ffn_up, ffn_down;
         // routed experts: the bias their pick adds to the gates
@@ -60,6 +66,7 @@ private:
     void attn(Block& B, int64_t pos, int n);
     void attn_rows(Block& B, int n);
     void dense_ffn(Block& B, int il, int n);
+    bool q8() const { return opt_.kv_format == KvFmt::kQ8_0; }
 
     std::vector<Block> blocks_;   ///< one a layer of layers_
     std::vector<int> kv_heads_;   ///< a layer's key heads; 0 for a convolution layer
@@ -76,6 +83,8 @@ private:
           *score_ = nullptr;
     float* awork_ = nullptr;   ///< a prompt batch's attention (attend_batch)
     size_t score_n_ = 0;       ///< the floats of score_: room for attend()'s blocks of rows too
+    float* q8w_ = nullptr;     ///< --kv q8_0: a prompt batch's K and V, dequantized to fp16 (kwork | vwork)
+    size_t work_halves_ = 0;   ///< the halves of each of q8w_'s two halves
 };
 
 }  // namespace strata::poly
