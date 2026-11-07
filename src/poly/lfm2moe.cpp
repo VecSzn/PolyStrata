@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -17,6 +18,7 @@ namespace {
 constexpr int kTaps = 3;   // what shortconv is written for; checked at load
 constexpr float kMinWeightSum = 6.103515625e-5f;   // the floor ggml's MoE graph puts under the gate sum
 constexpr size_t kScoreFloats = size_t(16) << 20;  // the attention's scores of the tokens it takes at a time
+constexpr size_t kQ8WorkRows = 2048;               // the K or V blocks a q8 prompt batch dequantizes at a time
 
 // llama.cpp's LLM_TENSOR_OUTPUT_NORM_LFM2: the output's norm is called token_embd_norm in these files
 const Names kAlias[] = {
@@ -60,6 +62,7 @@ void Lfm2Moe::load_geometry() {
     }
     need(n_kv_ > 0, "no attention layer");
     need(head_dim_ % 2 == 0 && head_dim_ <= 256, "bad head size");
+    need(!q8() || (n_kv_ * head_dim_) % 32 == 0, "--kv q8_0 needs n_kv * head_dim to be a multiple of 32");
     need(shape_i("shortconv.l_cache") == kTaps, "shortconv.l_cache is not 3");
     need(shape_i("expert_gating_func") == 2, "the expert gate is not a sigmoid");
     const MetaValue* dense = find("leading_dense_block_count");
@@ -122,16 +125,26 @@ size_t Lfm2Moe::recurrent_floats() const { return size_t(n_conv_) * 2 * n_embd_;
 
 int Lfm2Moe::widest() const { return n_head_ * head_dim_; }
 
-// The attention layers' caches, and each convolution layer's two past inputs in state_.
+// The attention layers' caches, and each convolution layer's two past inputs in state_.  Under --kv q8_0 a row is
+// its codes and, in a second array, an fp16 scale a 32-value block (store_q8).
 void Lfm2Moe::alloc_caches() {
-    const size_t row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t);
+    const size_t row = (size_t) n_kv_ * head_dim_;
+    const size_t scales = (size_t) n_kv_ * (head_dim_ / 32) * sizeof(uint16_t);   // a q8_0 row's scales
+    if (q8()) std::fprintf(stderr, "strata-poly: q8_0 KV cache: %zu bytes a row\n", row + scales);
     float* st = state_;
     for (int il = 0; il < (int) blocks_.size(); ++il) {
         Block& B = blocks_[(size_t) il];
         if (!runs(il)) continue;
         if (B.attn) {
-            B.keys = (uint16_t*) kv_alloc(row, 1);
-            B.vals = (uint16_t*) kv_alloc(row, 1);
+            if (q8()) {
+                B.k_codes = (int8_t*) kv_alloc(row, 1);
+                B.k_scales = (uint16_t*) kv_alloc(scales, 1);
+                B.v_codes = (int8_t*) kv_alloc(row, 1);
+                B.v_scales = (uint16_t*) kv_alloc(scales, 1);
+            } else {
+                B.keys = (uint16_t*) kv_alloc(row * sizeof(uint16_t), 1);
+                B.vals = (uint16_t*) kv_alloc(row * sizeof(uint16_t), 1);
+            }
         } else {
             B.past = st;
             st += size_t(2) * n_embd_;
@@ -155,6 +168,11 @@ void Lfm2Moe::assign_scratch() {
                         attend_split_floats(chunk_, n_head_, opt_.max_context, head_dim_));
     score_ = fbuf(score_n_);
     if (rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
+    if (rows_ >= kStageRows && q8()) {
+        // the K and V blocks a q8 prompt batch dequantizes, side by side; work_halves_ halves each
+        work_halves_ = kQ8WorkRows * (size_t) n_kv_ * head_dim_;
+        q8w_ = fbuf((2 * work_halves_ + 1) / 2);
+    }
 }
 
 void Lfm2Moe::save_layer(int il, int64_t, uint8_t* dst) {
@@ -165,18 +183,38 @@ void Lfm2Moe::save_layer(int il, int64_t, uint8_t* dst) {
        "save state");
 }
 
-size_t Lfm2Moe::card_row_bytes() const { return (size_t) n_attn_ * 2 * n_kv_ * head_dim_ * sizeof(uint16_t); }
+// The attention layers' rows of the whole context.  Under --kv q8_0 a row is its codes and, in a second array, a
+// scale every 32 of them; the two are saved one after the other on each side, as Flint's full layers' are.
+size_t Lfm2Moe::card_row_bytes() const {
+    const size_t code_row = (size_t) n_kv_ * head_dim_ * (q8() ? 1 : sizeof(uint16_t));
+    const size_t scale_row = q8() ? (size_t) n_kv_ * (head_dim_ / 32) * sizeof(uint16_t) : 0;
+    return (size_t) n_attn_ * 2 * (code_row + scale_row);
+}
 
 void Lfm2Moe::save_card_rows(int64_t first, int64_t n, uint8_t* dst) {
     if (first < 0 || n < 0 || first + n > opt_.max_context)
         throw std::logic_error("save_rows: the rows are outside the context");
     ck(cudaStreamSynchronize(cs(st_)), "save rows");
-    const size_t row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t), at = (size_t) first * row, bytes = (size_t) n * row;
+    const size_t code_row = (size_t) n_kv_ * head_dim_ * (q8() ? 1 : sizeof(uint16_t));
+    const size_t scale_row = q8() ? (size_t) n_kv_ * (head_dim_ / 32) * sizeof(uint16_t) : 0;
+    const size_t at_c = (size_t) first * code_row, at_s = (size_t) first * scale_row;
+    const size_t n_c = (size_t) n * code_row, n_s = (size_t) n * scale_row;
     for (const Block& B : blocks_) {
-        if (!B.keys || bytes == 0) continue;
+        if (!B.attn || n == 0 || !(q8() ? B.k_codes != nullptr : B.keys != nullptr)) continue;
+        if (q8()) {
+            ck(cudaMemcpy(dst, (const uint8_t*) B.k_codes + at_c, n_c, cudaMemcpyDeviceToHost), "save rows");
+            dst += n_c;
+            ck(cudaMemcpy(dst, (const uint8_t*) B.k_scales + at_s, n_s, cudaMemcpyDeviceToHost), "save rows");
+            dst += n_s;
+            ck(cudaMemcpy(dst, (const uint8_t*) B.v_codes + at_c, n_c, cudaMemcpyDeviceToHost), "save rows");
+            dst += n_c;
+            ck(cudaMemcpy(dst, (const uint8_t*) B.v_scales + at_s, n_s, cudaMemcpyDeviceToHost), "save rows");
+            dst += n_s;
+            continue;
+        }
         for (const uint16_t* cache : {B.keys, B.vals}) {
-            ck(cudaMemcpy(dst, (const uint8_t*) cache + at, bytes, cudaMemcpyDeviceToHost), "save rows");
-            dst += bytes;
+            ck(cudaMemcpy(dst, (const uint8_t*) cache + at_c, n_c, cudaMemcpyDeviceToHost), "save rows");
+            dst += n_c;
         }
     }
 }
@@ -186,13 +224,28 @@ void Lfm2Moe::load_card_rows(const uint8_t* src, int64_t from, int64_t count, in
         throw std::logic_error("load_rows: the rows are outside what was saved");
     cover(first + n);
     ck(cudaStreamSynchronize(cs(st_)), "load rows");
-    const size_t row = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t), at = (size_t) first * row, bytes = (size_t) n * row;
-    const size_t skip = (size_t) (first - from) * row, all = (size_t) count * row;
+    const size_t code_row = (size_t) n_kv_ * head_dim_ * (q8() ? 1 : sizeof(uint16_t));
+    const size_t scale_row = q8() ? (size_t) n_kv_ * (head_dim_ / 32) * sizeof(uint16_t) : 0;
+    const size_t at_c = (size_t) first * code_row, at_s = (size_t) first * scale_row;
+    const size_t n_c = (size_t) n * code_row, n_s = (size_t) n * scale_row;
+    const size_t sk_c = (size_t) (first - from) * code_row, sk_s = (size_t) (first - from) * scale_row;
+    const size_t all_c = (size_t) count * code_row, all_s = (size_t) count * scale_row;
     for (const Block& B : blocks_) {
-        if (!B.keys || bytes == 0) continue;
+        if (!B.attn || n == 0 || !(q8() ? B.k_codes != nullptr : B.keys != nullptr)) continue;
+        if (q8()) {
+            ck(cudaMemcpy((uint8_t*) B.k_codes + at_c, src + sk_c, n_c, cudaMemcpyHostToDevice), "load rows");
+            src += all_c;
+            ck(cudaMemcpy((uint8_t*) B.k_scales + at_s, src + sk_s, n_s, cudaMemcpyHostToDevice), "load rows");
+            src += all_s;
+            ck(cudaMemcpy((uint8_t*) B.v_codes + at_c, src + sk_c, n_c, cudaMemcpyHostToDevice), "load rows");
+            src += all_c;
+            ck(cudaMemcpy((uint8_t*) B.v_scales + at_s, src + sk_s, n_s, cudaMemcpyHostToDevice), "load rows");
+            src += all_s;
+            continue;
+        }
         for (uint16_t* cache : {B.keys, B.vals}) {
-            ck(cudaMemcpy((uint8_t*) cache + at, src + skip, bytes, cudaMemcpyHostToDevice), "load rows");
-            src += all;
+            ck(cudaMemcpy((uint8_t*) cache + at_c, src + sk_c, n_c, cudaMemcpyHostToDevice), "load rows");
+            src += all_c;
         }
     }
 }
@@ -223,7 +276,17 @@ void Lfm2Moe::attn(Block& B, int64_t pos, int n) {
     head_norm_rope(kraw_, head_dim_, fp(B.k_norm), k_, head_dim_, n_kv_, n_rot_, theta_scale_, pos, n, rms_eps_, st_,
                    nullptr, nullptr, 1, at ? at + 1 : nullptr);
     lin(B.wv, xn_, v_, n, xq_);
-    if (at) {
+    const bool is_q8 = q8();
+    if (is_q8) {
+        const int width = n_kv_ * head_dim_;
+        if (at) {
+            store_q8_at(k_, B.k_codes, B.k_scales, width, at, n, 0, st_);
+            store_q8_at(v_, B.v_codes, B.v_scales, width, at, n, 0, st_);
+        } else {
+            store_q8(k_, B.k_codes, B.k_scales, width, pos, n, st_);
+            store_q8(v_, B.v_codes, B.v_scales, width, pos, n, st_);
+        }
+    } else if (at) {
         store_f16_at(k_, B.keys, n_kv_ * head_dim_, at, n, 0, st_);
         store_f16_at(v_, B.vals, n_kv_ * head_dim_, at, n, 0, st_);
     } else {
@@ -231,13 +294,20 @@ void Lfm2Moe::attn(Block& B, int64_t pos, int n) {
         store_f16(v_, B.vals, n_kv_ * head_dim_, pos, n, st_);
     }
     const float scale = 1.f / std::sqrt((float) head_dim_);
-    // a prompt batch through cuBLAS; a few tokens with the kernels that give a token the same bits in any company
-    if (n >= kStageRows)
-        attend_batch(blas_, q_, B.keys, B.vals, pos, n, score_, (size_t) chunk_ * n_head_ * opt_.max_context, awork_,
-                     att_, head_dim_, n_head_, n_kv_, scale, st_);
-    else
-        attend(q_, B.keys, B.vals, pos, n, score_, chunk_, att_, head_dim_, n_head_, n_kv_, scale, st_, 0, 0, false,
-               at, at ? room(n) : 0, score_n_);
+    const Kvq8 kq = is_q8 ? Kvq8{B.k_codes, B.k_scales} : Kvq8{},
+                vq = is_q8 ? Kvq8{B.v_codes, B.v_scales} : Kvq8{};
+    // a prompt batch through cuBLAS; a few tokens with the kernels that give a token the same bits in any company.
+    // Under q8 each block of K and V the prompt batch's products read is dequantized into q8w_ (kwork then vwork)
+    if (n >= kStageRows) {
+        uint16_t* kw = is_q8 ? (uint16_t*) q8w_ : nullptr;
+        uint16_t* vw = is_q8 ? kw + work_halves_ : nullptr;
+        attend_batch(blas_, q_, is_q8 ? nullptr : B.keys, is_q8 ? nullptr : B.vals, pos, n, score_,
+                     (size_t) chunk_ * n_head_ * opt_.max_context, awork_, att_, head_dim_, n_head_, n_kv_, scale, st_,
+                     0, 0, false, kq, vq, kw, vw, is_q8 ? work_halves_ : 0);
+    } else {
+        attend(q_, is_q8 ? nullptr : B.keys, is_q8 ? nullptr : B.vals, pos, n, score_, chunk_, att_, head_dim_, n_head_,
+               n_kv_, scale, st_, 0, 0, false, at, at ? room(n) : 0, score_n_, kq, vq);
+    }
     lin(B.wo, att_, ao_, n);
 }
 
@@ -249,6 +319,7 @@ void Lfm2Moe::attn_rows(Block& B, int n) {
     lin(B.wv, xn_, v_, n, xq_);
     const float scale = 1.f / std::sqrt((float) head_dim_);
     const size_t kv = (size_t) n_kv_ * head_dim_, hq = (size_t) n_head_ * head_dim_;
+    const bool is_q8 = q8();
     for (int i = 0; i < n; ++i) {
         const Row& r = rows_of_[i];
         const long long* ai = at_ + 2 * i;
@@ -256,16 +327,26 @@ void Lfm2Moe::attn_rows(Block& B, int n) {
                        1, rms_eps_, st_, nullptr, nullptr, 1, ai + 1);
         head_norm_rope(kraw_ + i * kv, head_dim_, fp(B.k_norm), k_ + i * kv, head_dim_, n_kv_, n_rot_, theta_scale_, 0,
                        1, rms_eps_, st_, nullptr, nullptr, 1, ai + 1);
-        uint16_t* kc = (uint16_t*) seq_buf(r.seq, B.keys);
-        uint16_t* vc = (uint16_t*) seq_buf(r.seq, B.vals);
-        store_f16_at(k_ + i * kv, kc, (int) kv, ai, 1, 0, st_);
-        store_f16_at(v_ + i * kv, vc, (int) kv, ai, 1, 0, st_);
+        Kvq8 kq{}, vq{};
+        uint16_t* kc = nullptr;
+        uint16_t* vc = nullptr;
+        if (is_q8) {
+            kq = {(int8_t*) seq_buf(r.seq, B.k_codes), (uint16_t*) seq_buf(r.seq, B.k_scales)};
+            vq = {(int8_t*) seq_buf(r.seq, B.v_codes), (uint16_t*) seq_buf(r.seq, B.v_scales)};
+            store_q8_at(k_ + i * kv, (int8_t*) kq.codes, (uint16_t*) kq.scales, (int) kv, ai, 1, 0, st_);
+            store_q8_at(v_ + i * kv, (int8_t*) vq.codes, (uint16_t*) vq.scales, (int) kv, ai, 1, 0, st_);
+        } else {
+            kc = (uint16_t*) seq_buf(r.seq, B.keys);
+            vc = (uint16_t*) seq_buf(r.seq, B.vals);
+            store_f16_at(k_ + i * kv, kc, (int) kv, ai, 1, 0, st_);
+            store_f16_at(v_ + i * kv, vc, (int) kv, ai, 1, 0, st_);
+        }
         const int64_t keep = pos_;
         pos_ = r.pos;
         const int sized = room(1);
         pos_ = keep;
         attend(q_ + i * hq, kc, vc, r.pos, 1, score_, chunk_, att_ + i * hq, head_dim_, n_head_, n_kv_, scale, st_, 0, 0,
-               false, ai, sized, score_n_);
+               false, ai, sized, score_n_, kq, vq);
     }
     lin(B.wo, att_, ao_, n);
 }
