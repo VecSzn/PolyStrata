@@ -180,7 +180,9 @@ several conversations in RAM, downloads the file, checks its SHA-256, writes the
 - **Most layers have no attention.** 30 of its 40 layers mix the tokens with a short convolution over the last
   three: each projects a token to three vectors B, C and x, convolves B times x, and scales the result by C. Its
   state is two vectors a layer. The other 10 layers attend over the whole conversation, with 8 key heads of 64
-  values, so a context token takes 20,480 bytes of VRAM: a 128K context takes 2.0 GB more than 32K.
+  values, so a context token takes 20,480 bytes of VRAM: a 128K context takes 2.0 GB more than 32K. With
+  `--kv q8_0` those rows are ggml Q8_0 blocks instead and a token takes 10,880 bytes, half
+  ([Q8_KV.md](Q8_KV.md)).
 - **The experts.** 38 layers have 64 routed experts each, of which a token uses 4, with sigmoid gates, a bias that
   steers the pick and weights that sum to one. There is no shared expert. The first two layers have a plain FFN.
   The output matrix is the token table.
