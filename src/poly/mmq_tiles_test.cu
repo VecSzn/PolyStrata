@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <numeric>
 #include <random>
@@ -107,9 +108,28 @@ int run_case(const Quant& q, const std::vector<int>& rows, const std::vector<int
             std::vector<float> a((size_t) total * kRows), b((size_t) total * kRows);
             cudaMemcpy(a.data(), dref, a.size() * 4, cudaMemcpyDeviceToHost);
             cudaMemcpy(b.data(), dcls, b.size() * 4, cudaMemcpyDeviceToHost);
+#if !defined(GGML_USE_HIP)
+            // CUDA: the fused MMQ reduction order depends on each launch's tile width (max_rows), so the staged
+            // launches and the single reference launch can differ in the last floating-point bit on some cards.
+            // Allow that last-bit noise here; HIP keeps the bit-exact check below, where it is stable.
+            auto close = [](float x, float y) {
+                const float scale = std::fmax(std::fabs(x), std::fabs(y));
+                return std::fabs(x - y) <= 1e-6f * scale + 1e-12f;
+            };
+            bad = 0;   // row i of the class layout is row gather_cls[i] of the reference
+            for (int i = 0; i < total; ++i) {
+                const float* ra = &a[(size_t) gather_cls[(size_t) i] * kRows];
+                const float* rb = &b[(size_t) i * kRows];
+                int row_ok = 1;
+                for (int r = 0; r < kRows; ++r)
+                    if (!close(ra[(size_t) r], rb[(size_t) r])) { row_ok = 0; break; }
+                if (!row_ok) ++bad;
+            }
+#else
             bad = 0;   // row i of the class layout is row gather_cls[i] of the reference
             for (int i = 0; i < total; ++i)
                 if (std::memcmp(&b[(size_t) i * kRows], &a[(size_t) gather_cls[(size_t) i] * kRows], kRows * 4) != 0) ++bad;
+#endif
         }
     }
     for (void* p : {(void*) dw, (void*) dx, (void*) d_iota, (void*) d_gref, (void*) d_gcls, (void*) d_rb, (void*) d_cb, xq,
