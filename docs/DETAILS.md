@@ -2413,3 +2413,40 @@ buffers during prefill. Unset or `0` keeps the stock copies. The setting is capt
 restart to change it. It can also be set in the server model's `env` map. Builds without SSE2 keep stock copies.
 This applies to the shared strata-poly staging path; the original strata engine and background expert swaps
 are unchanged. No extra host or GPU buffer is allocated, and the model file mapping is unchanged.
+
+## strata-poly: size-class MMQ launches for staged experts
+
+While a prompt is read, the experts that are not in VRAM are copied through the staging buffer and multiplied by
+llama.cpp's quantized matrix kernels (MMQ), the experts of a round in one launch. That launch takes its tile
+width, the number of rows of a tile, from its largest expert (`mul_mat_q_switch_J`), and a tile computes all of
+its columns whatever rows are in them. A prompt batch spreads its rows unevenly: on the RX 5700 XT run below
+the median staged expert had 15 rows and the largest 463, so every launch used the widest tile (64) and only 43%
+of the columns it computed held a row.
+
+`STRATA_POLY_STAGED_TILES=8,16,32` puts the experts of a round in size classes (up to 8 rows, up to 16, up to
+32, more) and makes one launch for each class that has rows, so that each uses the tile its experts need. The
+numbers are ascending row counts, at most 7 of them. Unset, empty or invalid (a message is printed) keeps the
+single launch. The setting is read when the engine starts, so restart to change it, and it can be set in the
+server model's `env` map. A round's rows lie class after class, and each class has its own bounds in which the
+other classes' experts have no rows, as the cached experts' classes already do; the rows' products do not
+depend on the tile they are in, and `poly_mmq_tiles_test` checks that to the bit. The tables grow by
+`2 x 8 x (2 x experts + 2)` integers (33 KB for 256 experts), allocated whether or not it is set. Experts already in VRAM keep
+their own classes.
+
+Measured on an RX 5700 XT 8 GB (gfx1010), Windows, Tiel Coder 35B-A3B UD-Q4_K_XL, `--kv q8_0`,
+`--vram-reserve-mib 384`, a cold prompt of 18,932 tokens (the repository's docs text), one engine start for
+each run, tokens/s of the prompt read:
+
+| `STRATA_POLY_STAGED_TILES` | run 1 | run 2 |
+|---|---|---|
+| unset | 246.9 | 248.5 |
+| `8,16,32` | 272.8 | 270.9 |
+| `4,8,16,32` | 274.4 | |
+
+That is +10%. On the same card with the engine's other gfx1010 changes (not in this tree: the SDWA int8 dot
+product, the FP32 prompt attention) the prompt read of 77,136 tokens went from 297 to 339 tokens/s (+14%) and
+of 18,932 tokens from 390 to 471 (+21%): the staged experts' launches are a larger share of the prompt there.
+More classes than `8,16,32` gained nothing measurable. The gain depends on how unevenly the rows fall, so on the
+number of tokens in a batch, the number of experts, how many are cached in VRAM and the card's tile table; a
+card with a different MMQ tile table (`mmq-config-*.cuh`) may gain more, less or nothing. Only gfx1010 was
+measured.
