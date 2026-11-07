@@ -3857,7 +3857,9 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
     float* weight32 = score + cells;
     float* qg32 = score + 2 * cells;   // the grouped queries as floats, in the scratch past the scores and weights
 #else
+    const bool own = false;
     const bool f32 = false;
+    const int work_rows_f = 0;
     const size_t cells = score_floats / 3 * 2;
 #endif
     half* weight = (half*) (score + cells);
