@@ -11,6 +11,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #if defined(STRATA_USE_HIP)
+#include "hip_prefill_gemm.cuh"
 #include "hip_value_split.cuh"
 #endif
 
@@ -1781,6 +1782,58 @@ __global__ void attn_scale_kernel(float* out, const float* __restrict__ factor, 
     if (!divide && f == 1.0f) return;
     out[size_t(blockIdx.y) * dim + i] *= divide ? 1.0f / f : f;
 }
+
+#if defined(STRATA_USE_HIP)
+// STRATA_HIP_PREFILL_FP32 (attend_batch()): the same products on FP32 inputs.  On gfx1010 hipBLAS's FP32 products
+// run at about 4.5 to 5 TFLOPS where its FP16-input, FP32-sum ones reach 3 to 4 (there is no packed FP16 math with an
+// FP32 sum on the card), so the queries, the dequantized keys and values and the softmax's weights stay FP32.
+__global__ void attn_group_f32_kernel(const float* __restrict__ src, float* __restrict__ dst, int dim, int n_head,
+                                      int kv_heads, int tokens) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= dim) return;
+    dst[attn_by_group(blockIdx.y, n_head, kv_heads, tokens) * dim + i] = src[size_t(blockIdx.y) * dim + i];
+}
+
+__global__ void dequant_q8_f32_kernel(const int8_t* __restrict__ codes, const uint16_t* __restrict__ scales,
+                                      float* __restrict__ out, int width, long long row) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= width) return;
+    const size_t r = (size_t) (row + blockIdx.y), at = r * width;
+    const float d = __half2float(__ushort_as_half(scales[r * (width >> 5) + (i >> 5)]));
+    out[(size_t) blockIdx.y * width + i] = (float) codes[at + i] * d;
+}
+
+// attn_softmax_block_kernel with the weights as floats, and their sum the sum of those.
+__global__ void attn_softmax_block_f32_kernel(const float* __restrict__ score, float* __restrict__ weight, int n_keys,
+                                              int ld, long long row0, long long pos, int first, int window,
+                                              int tokens, int per, long long last, float* top, float* sum,
+                                              float* shrink, bool fresh) {
+    __shared__ float part[8];
+    const int tok = first + (blockIdx.x % (tokens * per)) / per;
+    long long lo;
+    const int n = attn_rows(pos + tok, window, last, &lo);
+    const long long end = lo + n;
+    const int j0 = lo > row0 ? int(lo - row0) : 0, j1 = end - row0 < n_keys ? int(end - row0) : n_keys;
+    const float* row = score + size_t(blockIdx.x) * ld;   // a row of the block's columns lies `ld` floats on
+    float* w = weight + size_t(blockIdx.x) * ld;
+    float mx = -INFINITY;
+    for (int j = j0 + threadIdx.x; j < j1; j += blockDim.x) mx = fmaxf(mx, row[j]);
+    mx = block_max(mx, part);
+    const float before = fresh ? -INFINITY : top[blockIdx.x], now = fmaxf(before, mx);
+    float s = 0.0f;
+    for (int j = threadIdx.x; j < n_keys; j += blockDim.x) {
+        const float e = j >= j0 && j < j1 ? expf(row[j] - now) : 0.0f;
+        w[j] = e;
+        s += e;
+    }
+    s = block_sum(s, part);
+    if (threadIdx.x != 0) return;
+    const float f = mx == -INFINITY ? 1.0f : expf(before - now);
+    top[blockIdx.x] = now;
+    sum[blockIdx.x] = (fresh ? 0.0f : sum[blockIdx.x] * f) + s;
+    shrink[blockIdx.x] = f;
+}
+#endif
 
 // One m16n8k32 on the int8 tensor cores: A is [16][32] row-major (a query's codes), B is [8][32] (a key's codes,
 // and that is the column-major 32x8 the instruction asks for), C comes back as a 16x8 block of int32 in four
@@ -3785,7 +3838,30 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
     // The products take halves and sum floats, on the tensor cores: the cache's rows as they lie there, the
     // queries and the softmax's weights rounded.  Two thirds of the scratch are for a block's scores, the rest
     // for their weights.
+#if defined(STRATA_USE_HIP)
+    // STRATA_HIP_PREFILL_FP32=1: the products on FP32 inputs (see attn_group_f32_kernel).  Needs a q8 cache whose
+    // workspace holds a block of FP32 rows, and scratch for the grouped queries; the scores and the weights then
+    // take half of what is left each.
+    // =2: our own kernels (hip_prefill_gemm.cuh) read the q8 cache as it lies, with no FP32 copy of it and no workspace.
+    const char* fp32_env = std::getenv("STRATA_HIP_PREFILL_FP32");
+    const int level = fp32_env && !fp32_env[1] && (fp32_env[0] == '1' || fp32_env[0] == '2') ? fp32_env[0] - '0' : 0;
+    const size_t qres = std::max<size_t>(kAttendResults / sizeof(float), size_t(16) * n_head * dim);
+    const int work_rows_f = width > 0 ? (int) std::min<size_t>(work_halves / 2 / (size_t) width, (size_t) INT_MAX) : 0;
+    const size_t chunk_max = std::max<size_t>(16, kAttendResults / (size_t(n_head) * dim * sizeof(float)));
+    const size_t cells_f = ((score_floats > qres ? score_floats - qres : 0) / 2) & ~size_t(3);   // a multiple of 4: the floats are read 4 at a time
+    // level 2: the head's values in whole blocks of 32 for the scales, and a block of at least 64 keys at the largest chunk
+    const bool own = level == 2 && kq && vq && dim % 32 == 0 && width % 32 == 0 && score_floats >= 4 * qres &&
+                     cells_f / n_head >= 64 * chunk_max;
+    const bool f32 = own || (level >= 1 && kq && vq && work_rows_f >= 256 && score_floats >= 4 * qres);
+    const size_t cells = f32 ? cells_f : score_floats / 3 * 2;
+    float* weight32 = score + cells;
+    float* qg32 = score + 2 * cells;   // the grouped queries as floats, in the scratch past the scores and weights
+#else
+    const bool own = false;
+    const bool f32 = false;
+    const int work_rows_f = 0;
     const size_t cells = score_floats / 3 * 2;
+#endif
     half* weight = (half*) (score + cells);
     for (int first = 0, c = 0; first < rows; first += c) {
         // every token left, unless a grid's 65535 rows or the scratch for one row's scores is less, or the results
@@ -3801,6 +3877,12 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
         float* top = og + heads * dim;       // a token and head's largest score so far, the sum of its weights
         float* sum = top + heads;            // against it, and what a block of rows makes the sums before it worth
         float* shrink = sum + heads;
+#if defined(STRATA_USE_HIP)
+        if (f32)
+            attn_group_f32_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(
+                q + size_t(first) * n_head * dim, qg32, dim, n_head, kv_heads, c);
+        else
+#endif
         attn_group_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(q + size_t(first) * n_head * dim,
                                                                                    qg, dim, n_head, kv_heads, c);
         // The rows go a block at a time, as many as have their scores in the scratch, so that a product has the
@@ -3814,7 +3896,54 @@ void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint
             // the block's rows where the cache has them: a block ends where a ring starts over
             const long long row = ring > 0 ? (lo0 + k0) % ring : lo0 + k0;
             m = (int) std::min<long long>(std::min(block, n_keys - k0), ring > 0 ? ring - row : n_keys);
-            if ((kq || vq) && m > work_rows) m = work_rows;   // the workspace's rows cap the block
+            if (!own && (kq || vq) && m > (f32 ? work_rows_f : work_rows)) m = f32 ? work_rows_f : work_rows;   // the workspace's rows cap the block
+#if defined(STRATA_USE_HIP)
+            // a product whose leading dimension is a multiple of 1024 runs the values' FP32 product at half its speed
+            if (own) {
+                // our kernels: scores S[n][m] and weights W[n][m] a column apart by mp floats (a multiple of 4), read the q8 cache's rows
+                const int mp = (m + 3) & ~3;
+                hip_prefill_gemm::Args as{};
+                as.codes = kq8.codes; as.scales = kq8.scales; as.row0 = row; as.width = width; as.dim = dim;
+                as.B = qg32; as.b_stride = cols * dim; as.ldb = dim; as.C = score; as.c_stride = cols * mp; as.ldc = mp;
+                as.M = m; as.N = (int) cols; as.K = dim; as.alpha = scale; as.accumulate = 0;
+                hip_prefill_gemm::gemm_q8<true><<<dim3(((int) cols + 127) / 128, (m + 127) / 128, kv_heads), 256, 0,
+                                                  cs(stream)>>>(as);
+                attn_softmax_block_f32_kernel<<<c * n_head, 128, 0, cs(stream)>>>(
+                    score, weight32, m, mp, lo0 + k0, (long long) pos, first, window, c, per, last, top, sum, shrink,
+                    k0 == 0);
+                if (k0 > 0)
+                    attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, shrink, dim, false);
+                hip_prefill_gemm::Args av{};
+                av.codes = vq8.codes; av.scales = vq8.scales; av.row0 = row; av.width = width; av.dim = dim;
+                av.B = weight32; av.b_stride = cols * mp; av.ldb = mp; av.C = og; av.c_stride = cols * dim; av.ldc = dim;
+                av.M = dim; av.N = (int) cols; av.K = m; av.alpha = 1.0f; av.accumulate = k0 > 0 ? 1 : 0;
+                hip_prefill_gemm::gemm_q8<false><<<dim3(((int) cols + 127) / 128, (dim + 127) / 128, kv_heads), 256, 0,
+                                                   cs(stream)>>>(av);
+                continue;
+            }
+            // a product whose leading dimension is a multiple of 1024 runs the values' FP32 product at half its speed
+            if (f32 && m > 16 && m % 1024 == 0) m -= 16;
+            if (f32) {
+                dequant_q8_f32_kernel<<<dim3(grid(width, 256), m), 256, 0, cs(stream)>>>(kq8.codes, kq8.scales,
+                                                                                       (float*) kwork, width, row);
+                dequant_q8_f32_kernel<<<dim3(grid(width, 256), m), 256, 0, cs(stream)>>>(vq8.codes, vq8.scales,
+                                                                                       (float*) vwork, width, row);
+                blas_ck(cublasSgemmStridedBatched(h, CUBLAS_OP_T, CUBLAS_OP_N, m, (int) cols, dim, &scale,
+                                                  (const float*) kwork, width, dim, qg32, dim, cols * dim, &zero, score,
+                                                  m, cols * m, kv_heads),
+                        "attention scores");
+                attn_softmax_block_f32_kernel<<<c * n_head, 128, 0, cs(stream)>>>(
+                    score, weight32, m, m, lo0 + k0, (long long) pos, first, window, c, per, last, top, sum, shrink,
+                    k0 == 0);
+                if (k0 > 0)
+                    attn_scale_kernel<<<dim3(grid(dim, 256), c * n_head), 256, 0, cs(stream)>>>(og, shrink, dim, false);
+                blas_ck(cublasSgemmStridedBatched(h, CUBLAS_OP_N, CUBLAS_OP_N, dim, (int) cols, m, &one,
+                                                  (const float*) vwork, width, dim, weight32, m, cols * m,
+                                                  k0 > 0 ? &one : &zero, og, dim, cols * dim, kv_heads),
+                        "attention values");
+                continue;
+            }
+#endif
             // a q8 cache's rows are dequantized into the workspace the products read as an fp16 cache
             if (kq)
                 dequant_q8_kernel<<<dim3(grid(width, 256), m), 256, 0, cs(stream)>>>(kq8.codes, kq8.scales,
